@@ -2,7 +2,6 @@ import os
 import re
 
 # Define the directory where your zip files are located
-# NOTE: Replace '.' with the actual path if the files aren't in the current directory
 target_directory = './AlphaFold'
 
 # Define the regex pattern to match and capture the parts of the filename

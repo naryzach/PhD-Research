@@ -9,3 +9,5 @@ Code related to my PhD research
 * ESM3 Gen: Codes that use ESM3 to make predictions about new possible binders
 * FASTA Mode: Codes used to manipulate FASTA files
 * Local: Folder in .gitignore that holds code outputs
+
+`credentials.ini` is used to store passwords for some codes
