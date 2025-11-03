@@ -2,3 +2,6 @@ credentials.ini
 
 Local/
 Tools/
+
+# RFdiffusion output files
+outputs/
