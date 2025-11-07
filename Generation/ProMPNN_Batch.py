@@ -14,16 +14,16 @@ from itertools import combinations
 # ## Configuration
 
 pdb_files = [#"PDB_fold_timp3_v_adam10cd_wt_model_1.pdb", 
-             "PDB_fold_timp3_v_mmp10cd_wt_model_1.pdb", 
+             #"PDB_fold_timp3_v_mmp10cd_wt_model_1.pdb", 
              "PDB_fold_timp3_variant_adam17cd_wt_model_1.pdb",
              "PDB_fold_timp3_variant_mmp2cd_wt_model_1.pdb",
              "PDB_fold_timp3_variant_mmp9cd_wt_model_1.pdb"]
-loops_to_design = ["AB", "C", "EF", "GH", "Multi"]  # Options: "AB", "C", "EF", "GH", "Multi"
+loops_options = ["AB", "C", "EF", "GH", "Multi"]  # Options: "AB", "C", "EF", "GH", "Multi"
 
 for pdb_name in pdb_files:
     print(f"Processing PDB file: {pdb_name}")
-    for loop in loops_to_design:
-        print(f"  Designing loop: {loop}")
+    for loop_name in loops_options:
+        print(f"  Designing loop: {loop_name}")
         # %%
         # --- Path to ProteinMPNN directory ---
         proteinmpnn_repo = "../Tools/ProteinMPNN"
@@ -48,7 +48,7 @@ for pdb_name in pdb_files:
 
         # --- Chains and residues to redesign ---
         chains_to_design = ["A"]
-        loops_to_design = [loop]  # Options: "AB", "C", "EF", "GH", "Multi"
+        loops_to_design = [loop_name]  # Options: "AB", "C", "EF", "GH", "Multi"
         residues_to_redesign = []
         if "AB" in loops_to_design:
             residues_to_redesign += [i for i in range(31, 37)]

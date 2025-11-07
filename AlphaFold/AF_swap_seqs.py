@@ -20,9 +20,9 @@ def swap_sequences_in_json(file_path, make_backup=True):
             os.replace(file_path, backup_path)
         with open(file_path, "w") as f:
             json.dump(data, f, indent=2)
-        print(f"✅ Swapped sequences in {file_path.name}")
+        print(f"Swapped sequences in {file_path.name}")
     else:
-        print(f"⚠️ No swap performed in {file_path.name} (not exactly 2 sequences)")
+        print(f"No swap performed in {file_path.name} (not exactly 2 sequences)")
 
 def process_folder(folder_path):
     """Processes all JSON files in a folder."""
