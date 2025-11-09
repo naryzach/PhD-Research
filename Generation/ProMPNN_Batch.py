@@ -13,11 +13,18 @@ from itertools import combinations
 # %% [markdown]
 # ## Configuration
 
-pdb_files = [#"PDB_fold_timp3_v_adam10cd_wt_model_1.pdb", 
-             #"PDB_fold_timp3_v_mmp10cd_wt_model_1.pdb", 
+'''
+pdb_files = ["PDB_fold_timp3_v_adam10cd_wt_model_1.pdb", 
+             "PDB_fold_timp3_v_mmp10cd_wt_model_1.pdb", 
              "PDB_fold_timp3_variant_adam17cd_wt_model_1.pdb",
              "PDB_fold_timp3_variant_mmp2cd_wt_model_1.pdb",
-             "PDB_fold_timp3_variant_mmp9cd_wt_model_1.pdb"]
+             "PDB_fold_timp3_variant_mmp9cd_wt_model_1.pdb"]'''
+pdb_files = ["TIMP3_vs_ADAM10_HADDOCK_Xray.pdb",
+             "TIMP3_vs_ADAM17_HADDOCK_Xray.pdb",
+             "TIMP3_vs_MMP2_HADDOCK_Xray.pdb",
+             "TIMP3_vs_MMP7_HADDOCK_Xray.pdb",
+             "TIMP3_vs_MMP9_HADDOCK_Xray.pdb",
+             "TIMP3_vs_MMP10_HADDOCK_Xray.pdb"]
 loops_options = ["AB", "C", "EF", "GH", "Multi"]  # Options: "AB", "C", "EF", "GH", "Multi"
 
 for pdb_name in pdb_files:
@@ -79,8 +86,8 @@ for pdb_name in pdb_files:
         original_directory = os.getcwd() 
 
         name_parse = pdb_name.split("_")
-        target = name_parse[4]
-        ligand = name_parse[2]
+        target = name_parse[2]
+        ligand = name_parse[0]
 
         # %% [markdown]
         # ## Setup
@@ -234,13 +241,13 @@ for pdb_name in pdb_files:
         run_command = [
             "python",
             os.path.join(proteinmpnn_repo.replace("../", ""), "protein_mpnn_run.py"),
-            #"--pdb_path", pdb_path.replace("../", ""),
-            "--jsonl_path", out_parse.replace("../", ""),
+            "--pdb_path", pdb_path.replace("../", ""),
+            #"--jsonl_path", out_parse.replace("../", ""),
             "--out_folder", output_dir.replace("../", ""),
             "--chain_id_jsonl", chain_id_path.replace("../", ""),
             "--fixed_positions_jsonl", fixed_positions_path.replace("../", ""),
             "--num_seq_per_target", str(num_seq_per_target),
-            "--sampling_temp", str(sampling_temp)
+            "--sampling_temp", str(sampling_temp),
         ]
 
         print("\n=== RUNNING PROTEINMPNN ===")
