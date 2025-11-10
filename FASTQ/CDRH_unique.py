@@ -38,7 +38,7 @@ def find_unique_motifs(strings):
 
 
 # === Load Excel file ===
-excel_path = "Original_Naive_library_Backbone.xlsx" 
+excel_path = "../Data/Original_Naive_library_Backbone.xlsx" 
 df = pd.read_excel(excel_path, header=None)
 
 # Data starts from row 3 to index 2 (0-based)
