@@ -84,25 +84,29 @@ def summarize_fasta(filepath):
         loop_seq = extract_loop_sequence(seq, loop)
 
         data.append({
+            "File": filename,
             "Ligand": ligand,
             "Target": target,
             "Loop": loop,
-            "Sequence": seq,
+            "Loop_Sequence": loop_seq,
             "Occurrences": count,
             "Temperature": mean_temp,
             "Score": mean_score,
-            "Loop_Sequence": loop_seq
+            "Sequence": seq
         })
 
     df = pd.DataFrame(data)
     df = df.sort_values(by="Occurrences", ascending=False)
 
-    # Save per-file outputs
+    # Save per-file CSV
     csv_path = os.path.join(output_dir, filename.replace(".fa", "_summary.csv"))
-    latex_path = os.path.join(output_dir, filename.replace(".fa", "_summary.tex"))
     df.to_csv(csv_path, index=False)
+
+    # Save compact LaTeX table (without full sequence)
+    latex_path = os.path.join(output_dir, filename.replace(".fa", "_summary.tex"))
+    latex_cols = ["Ligand", "Target", "Loop", "Loop_Sequence", "Occurrences", "Score"]
     with open(latex_path, "w") as f:
-        f.write(df.to_latex(index=False, escape=False))
+        f.write(df[latex_cols].to_latex(index=False, escape=False))
 
     print(f"Processed {filename}: {len(df)} unique sequences.")
     return df
@@ -125,11 +129,13 @@ if all_dfs:
     combined_tex = os.path.join(output_dir, "Combined_ProteinMPNN_Summary.tex")
 
     combined_df.to_csv(combined_csv, index=False)
+    
+    latex_cols = ["Ligand", "Target", "Loop", "Loop_Sequence", "Occurrences", "Score"]
     with open(combined_tex, "w") as f:
-        f.write(combined_df.to_latex(index=False, escape=False))
+        f.write(combined_df[latex_cols].to_latex(index=False, escape=False))
 
     print(f"\nCombined summary saved:")
-    print(f"  → {combined_csv}")
-    print(f"  → {combined_tex}")
+    print(f"  --> {combined_csv}")
+    print(f"  --> {combined_tex}")
 else:
     print("No valid .fa files found.")
