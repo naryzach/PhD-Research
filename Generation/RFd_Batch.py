@@ -56,12 +56,13 @@ pdb_files = ["PDB_fold_timp3_v_adam10cd_wt_model_1.pdb",
              "PDB_fold_timp3_variant_adam17cd_wt_model_1.pdb",
              "PDB_fold_timp3_variant_mmp2cd_wt_model_1.pdb",
              "PDB_fold_timp3_variant_mmp9cd_wt_model_1.pdb"]'''
-pdb_file_list = ["TIMP3_vs_ADAM10_HADDOCK_Xray.pdb",
-             "TIMP3_vs_ADAM17_HADDOCK_Xray.pdb",
-             "TIMP3_vs_MMP2_HADDOCK_Xray.pdb",
-             "TIMP3_vs_MMP7_HADDOCK_Xray.pdb",
-             "TIMP3_vs_MMP9_HADDOCK_Xray.pdb",
-             "TIMP3_vs_MMP10_HADDOCK_Xray.pdb"]
+pdb_file_list = [#"TIMP3_vs_ADAM10_HADDOCK_Xray.pdb",
+             #"TIMP3_vs_ADAM17_HADDOCK_Xray.pdb",
+             #"TIMP3_vs_MMP2_HADDOCK_Xray.pdb",
+             #"TIMP3_vs_MMP7_HADDOCK_Xray.pdb",
+             #"TIMP3_vs_MMP9_HADDOCK_Xray.pdb",
+             "TIMP3_vs_MMP10_HADDOCK_Xray.pdb"
+             ]
 loops_options = ["AB", "C", "EF"]  # Options: "AB", "C", "EF", "GH", "Multi"
 
 for pdb_complex_file_name in pdb_file_list:
@@ -107,6 +108,17 @@ for pdb_complex_file_name in pdb_file_list:
     print(f"RFdiffusion finished in {(end-st)/60:.2f} minutes.")
 
 
+
+for pdb_complex_file_name in pdb_file_list:
+    pdb_path = os.path.join(data_path, pdb_complex_file_name)
+    output_dir = os.path.join("../Local/rfdiffusion_output", pdb_complex_file_name[:-4])
+
+    fix_chain_len = len(get_aa_sequence(pdb_path, fixed_chains[0]))
+    print(fix_chain_len)
+
+    if not pdb_path:
+        print("Cannot run RFdiffusion without a scaffold PDB file.")
+        raise Exception("No PDB File")
     # %%
     # --- Parse PDB Results to Extract Sequences ---
     print("parsing generated PDBs to extract sequences...")
@@ -213,7 +225,7 @@ for pdb_complex_file_name in pdb_file_list:
         print("--- STDERR ---")
         print(result.stderr)
 
-        print(f"RProteinMPNN finished in {(end-st)/60:.2f} minutes.")
+        print(f"ProteinMPNN finished in {(end-st)/60:.2f} minutes.")
 
         os.makedirs(os.path.join(pmpnn_out_dir_full, "FA_files"), exist_ok=True)
         shutil.move(os.path.join(pmpnn_out_dir_full, "seqs", f"{output_prefix}_{i}.fa"), 
