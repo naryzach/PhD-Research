@@ -33,13 +33,15 @@ DPLTNNGHPG	1	0.2	0.76
 """
 
 data_with_scores = []
+SEQ_COL = 0
+SCORE_COL = 3
 
 # Process the raw data string
 for line in raw_data.strip().split('\n'):
     parts = line.split()
     if parts:
-        sequence = parts[0]
-        score = float(parts[3])
+        sequence = parts[SEQ_COL]
+        score = float(parts[SCORE_COL])
         data_with_scores.append((sequence, score))
 
 # Sort the list by score (the second element of the tuple) in ascending order
