@@ -1,4 +1,7 @@
 import json
+from pathlib import Path
+
+# --- CONSTANTS ---
 
 
 # 1. canonical (wild-type) TIMP3 sequence
@@ -156,7 +159,9 @@ def main():
                 all_jobs.append(create_af_entry(job_name, combined_timp, target_seq))
 
     # --- Write to JSON file ---
-    output_filename = f"alphafold_jobs_toploops_{NAME_TAG}.json"
+    out_path = Path("Local/AlphaFold_Jobs")
+    out_path.mkdir(parents=True, exist_ok=True)
+    output_filename = out_path / f"alphafold_jobs_toploops_{NAME_TAG}.json"
     with open(output_filename, 'w') as f:
         json.dump(all_jobs, f, indent=2)
 
