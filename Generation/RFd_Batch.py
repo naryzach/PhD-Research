@@ -26,11 +26,27 @@ protein_mpnn_path = "../Tools/ProteinMPNN/"
 pmpnn_out_dir = "../Local/proteinmpnn_output"
 output_prefix = "design"
 
-loop_name = "AB"
+loop_name = "C"
 if loop_name == "AB":
     loop_length_normal = 6
     loop_length_max = 15 
     loop_position = 30
+elif loop_name == "C":
+    loop_length_normal = 6
+    loop_length_max = 15 
+    loop_position = 62
+elif loop_name == "EF":
+    loop_length_normal = 4
+    loop_length_max = 10 
+    loop_position = 92
+elif loop_name == "GH":
+    loop_length_normal = 10
+    loop_length_max = 20 
+    loop_position = 127
+elif loop_name == "Multi":
+    loop_length_normal = 10
+    loop_length_max = 20 
+    loop_position = 143
 else:
     raise Exception("Specified Loop is unknown")
 
@@ -56,14 +72,14 @@ pdb_files = ["PDB_fold_timp3_v_adam10cd_wt_model_1.pdb",
              "PDB_fold_timp3_variant_adam17cd_wt_model_1.pdb",
              "PDB_fold_timp3_variant_mmp2cd_wt_model_1.pdb",
              "PDB_fold_timp3_variant_mmp9cd_wt_model_1.pdb"]'''
-pdb_file_list = [#"TIMP3_vs_ADAM10_HADDOCK_Xray.pdb",
-             #"TIMP3_vs_ADAM17_HADDOCK_Xray.pdb",
-             #"TIMP3_vs_MMP2_HADDOCK_Xray.pdb",
-             #"TIMP3_vs_MMP7_HADDOCK_Xray.pdb",
-             #"TIMP3_vs_MMP9_HADDOCK_Xray.pdb",
+pdb_file_list = ["TIMP3_vs_ADAM10_HADDOCK_Xray.pdb",
+             "TIMP3_vs_ADAM17_HADDOCK_Xray.pdb",
+             "TIMP3_vs_MMP2_HADDOCK_Xray.pdb",
+             "TIMP3_vs_MMP7_HADDOCK_Xray.pdb",
+             "TIMP3_vs_MMP9_HADDOCK_Xray.pdb",
              "TIMP3_vs_MMP10_HADDOCK_Xray.pdb"
              ]
-loops_options = ["AB", "C", "EF"]  # Options: "AB", "C", "EF", "GH", "Multi"
+
 
 for pdb_complex_file_name in pdb_file_list:
     pdb_path = os.path.join(data_path, pdb_complex_file_name)
@@ -171,6 +187,18 @@ for pdb_complex_file_name in pdb_file_list:
         if loop_name == "AB":
             left = "LVK"
             right = "LVY"
+        elif loop_name == "C":
+            left = "HTE"
+            right = "GLK"
+        elif loop_name == "EF":
+            left = "MYT"
+            right = "FVE"
+        elif loop_name == "GH":
+            left = "KSC"
+            right = "NEC"
+        elif loop_name == "Multi":
+            left = "LWT"
+            right = "YQS"
         else:
             raise Exception("Specified Loop is unknown")
 
