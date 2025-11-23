@@ -20,4 +20,4 @@ cd ../Generation
 ls
 python RFd_Batch.py
 
-source deactivate
+conda deactivate
