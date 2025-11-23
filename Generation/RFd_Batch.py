@@ -31,22 +31,32 @@ if loop_name == "AB":
     loop_length_normal = 6
     loop_length_max = 15 
     loop_position = 30
+    flank_left = "LVK"
+    flank_right = "LVY"
 elif loop_name == "C":
     loop_length_normal = 6
     loop_length_max = 15 
     loop_position = 62
+    flank_left = "HTE"
+    flank_right = "GLK"
 elif loop_name == "EF":
     loop_length_normal = 4
     loop_length_max = 10 
     loop_position = 92
+    flank_left = "MYT"
+    flank_right = "FVE"
 elif loop_name == "GH":
     loop_length_normal = 10
     loop_length_max = 20 
     loop_position = 127
+    flank_left = "KSC"
+    flank_right = "NEC"
 elif loop_name == "Multi":
     loop_length_normal = 10
     loop_length_max = 20 
     loop_position = 143
+    flank_left = "LWT"
+    flank_right = "YQS"
 else:
     raise Exception("Specified Loop is unknown")
 
@@ -67,7 +77,7 @@ print(contig_string)
 
 
 '''
-pdb_files = ["PDB_fold_timp3_v_adam10cd_wt_model_0.pdb", 
+pdb_file_list = ["PDB_fold_timp3_v_adam10cd_wt_model_0.pdb", 
              "PDB_fold_timp3_v_mmp10cd_wt_model_0.pdb", 
              "PDB_fold_timp3_variant_adam17cd_wt_model_0.pdb",
              "PDB_fold_timp3_variant_mmp2cd_wt_model_0.pdb",
@@ -184,25 +194,7 @@ for pdb_complex_file_name in pdb_file_list:
             raise FileNotFoundError
         print(aa_sequence)
 
-        if loop_name == "AB":
-            left = "LVK"
-            right = "LVY"
-        elif loop_name == "C":
-            left = "HTE"
-            right = "GLK"
-        elif loop_name == "EF":
-            left = "MYT"
-            right = "FVE"
-        elif loop_name == "GH":
-            left = "KSC"
-            right = "NEC"
-        elif loop_name == "Multi":
-            left = "LWT"
-            right = "YQS"
-        else:
-            raise Exception("Specified Loop is unknown")
-
-        regex_pattern = re.compile(f"{left}([A-Z]+?){right}")
+        regex_pattern = re.compile(f"{flank_left}([A-Z]+?){flank_right}")
         match = regex_pattern.search(aa_sequence)
         inserted_seq = match.group(1)
         new_total_length = total_length - loop_length_normal + len(inserted_seq)
@@ -272,8 +264,6 @@ for pdb_complex_file_name in pdb_file_list:
 
     # ---- USER SETTINGS ----
     input_dir = Path(pmpnn_out_dir_full, "FA_files")  # directory containing your design files
-    flank_left = "LVK"
-    flank_right = "LVY"
     output_csv = "design_summary.csv"
     top_n = 5 # number of top unique loops to keep per loop length
 
