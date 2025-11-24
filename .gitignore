@@ -3,6 +3,8 @@ credentials.ini
 Local/
 Tools/
 SLURM/*.log
+SLURM/*.out
+SLURM/SLURM_credentials.sh
 
 # RFdiffusion output files
 outputs/
