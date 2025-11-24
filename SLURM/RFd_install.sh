@@ -28,4 +28,4 @@ pip install -e . # install the rfdiffusion module from the root of the repositor
 pip install pandas
 conda install pytorch==1.9 torchvision torchaudio cudatoolkit=11.1 -c pytorch -c nvidia
 
-python -c 'import torch; print(torch.cuda.is_available()); ; print(torch.__version__)'
+python -c 'import torch; print(torch.cuda.is_available()); print(torch.__version__)'
