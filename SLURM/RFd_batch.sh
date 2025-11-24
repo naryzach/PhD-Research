@@ -13,11 +13,12 @@ source SLURM_credentials.sh
 #SBATCH --error=error_%j.log
 
 # Open necessary virtual environment
-#source ~/miniconda3/etc/profile.d/conda.sh
+source ~/miniconda3/etc/profile.d/conda.sh
 conda activate SE3nv
 
 # Run Script
 cd ../Generation
+pwd
 python RFd_Batch.py
 
 conda deactivate

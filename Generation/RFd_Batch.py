@@ -75,13 +75,14 @@ print(contig_string)
 # %% [markdown]
 # ### Run RFdiffusion
 
-
 '''
 pdb_file_list = ["PDB_fold_timp3_v_adam10cd_wt_model_0.pdb", 
              "PDB_fold_timp3_v_mmp10cd_wt_model_0.pdb", 
              "PDB_fold_timp3_variant_adam17cd_wt_model_0.pdb",
              "PDB_fold_timp3_variant_mmp2cd_wt_model_0.pdb",
-             "PDB_fold_timp3_variant_mmp9cd_wt_model_0.pdb"]'''
+             "PDB_fold_timp3_variant_mmp9cd_wt_model_0.pdb"
+             ]
+'''
 pdb_file_list = ["TIMP3_vs_ADAM10_HADDOCK_Xray.pdb",
              "TIMP3_vs_ADAM17_HADDOCK_Xray.pdb",
              "TIMP3_vs_MMP2_HADDOCK_Xray.pdb",
