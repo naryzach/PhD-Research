@@ -31,7 +31,7 @@ import fcsparser
 # Paths relative to "DNA Analysis" folder
 DATA_DIR = r"../Local/TwistBio_FCS"
 OUTPUT_DIR = r"../Local/FCS_Analysis_Results"
-NEG_CONTROL_PATTERN = "Negative Control" # Starts with this (ignores "0 Negative Control")
+NEG_CONTROL_PATTERN = "Negative Control" # Starts with this
 
 # Channels
 CH_FSC_A = 'FSC-A'
