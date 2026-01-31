@@ -152,11 +152,47 @@ def render_scatter(df, key_prefix):
             gate_x = st.number_input(f"Gate X ({x_axis})", value=0.0, key=f"{key_prefix}_gx")
             gate_y = st.number_input(f"Gate Y ({y_axis})", value=0.0, key=f"{key_prefix}_gy")
 
-    with col2:
-        # Prepare Data
-        plot_df = df.sample(n=subsample_n, random_state=42).copy()
+        # Subsample First (to keep UI responsive, but meaningful density requires enough points)
+        # However, if we filter first, we might have few points left.
+        # Ideally: Filter -> Subsample -> Density
         
-        # Transformations
+        # Manual Limits
+        with st.expander("Manual Axis Limits (Recalculate Density)"):
+            use_manual_limits = st.checkbox("Enable Manual Limits", key=f"{key_prefix}_man_lim")
+            l_col1, l_col2 = st.columns(2)
+            
+            # Default to data range
+            x_min_d, x_max_d = float(df[x_axis].min()), float(df[x_axis].max())
+            y_min_d, y_max_d = float(df[y_axis].min()), float(df[y_axis].max())
+            
+            with l_col1:
+                x_min = st.number_input(f"X Min ({x_axis})", value=x_min_d, key=f"{key_prefix}_xmin")
+                x_max = st.number_input(f"X Max ({x_axis})", value=x_max_d, key=f"{key_prefix}_xmax")
+            with l_col2:
+                y_min = st.number_input(f"Y Min ({y_axis})", value=y_min_d, key=f"{key_prefix}_ymin")
+                y_max = st.number_input(f"Y Max ({y_axis})", value=y_max_d, key=f"{key_prefix}_ymax")
+                
+    with col2:
+        # 1. Filter Data (if manual limits)
+        if use_manual_limits:
+            stats_df = df[
+                (df[x_axis] >= x_min) & (df[x_axis] <= x_max) &
+                (df[y_axis] >= y_min) & (df[y_axis] <= y_max)
+            ]
+        else:
+            stats_df = df
+            
+        # 2. Subsample for plotting
+        if len(stats_df) > subsample_n:
+            plot_df = stats_df.sample(n=subsample_n, random_state=42).copy()
+        else:
+            plot_df = stats_df.copy()
+            
+        if len(plot_df) == 0:
+            st.warning("No events in current range.")
+            return
+
+        # 3. Transformations
         if log_x:
             # Avoid log(<=0)
             plot_df[x_axis] = plot_df[x_axis].apply(lambda v: np.log10(max(v, 1e-1)))
@@ -174,14 +210,19 @@ def render_scatter(df, key_prefix):
             plot_ylabel = y_axis
             gy_val = gate_y if show_gate else 0
 
-        # Colors
+        # 4. Colors (Density Recalculation on Filtered Data)
         if color_mode == "Density":
-            with st.spinner("Calculating density..."):
-                z = calculate_density(plot_df[x_axis], plot_df[y_axis])
-                plot_df["Density"] = z
-                fig = px.scatter(plot_df, x=x_axis, y=y_axis, color="Density",
-                                 color_continuous_scale="Jet", template="plotly_dark",
-                                 opacity=0.5, render_mode='webgl')
+            with st.spinner("Recalculating relative density..."):
+                # If we have very few points, KDE might fail or look weird
+                if len(plot_df) > 5:
+                    z = calculate_density(plot_df[x_axis], plot_df[y_axis])
+                    plot_df["Density"] = z
+                    fig = px.scatter(plot_df, x=x_axis, y=y_axis, color="Density",
+                                     color_continuous_scale="Jet", template="plotly_dark",
+                                     opacity=0.5, render_mode='webgl')
+                else:
+                     fig = px.scatter(plot_df, x=x_axis, y=y_axis,
+                                      template="plotly_dark", opacity=0.6, render_mode='webgl')
         elif color_mode == "Channel":
              fig = px.scatter(plot_df, x=x_axis, y=y_axis, color=color_ch,
                               color_continuous_scale="Viridis", template="plotly_dark",
@@ -193,13 +234,11 @@ def render_scatter(df, key_prefix):
 
         # Add Gates
         if show_gate:
-            # Stats (Quadrants)
-            # We assume the Gate Value is in the SAME scale as the input data (linear usually)
-            # But the plot might be Log.
-            # We need to filter the ORIGINAL DF (or plot_df if we transformed logic correctly)
-            # Let's use plot_df which is already transformed if Log was checked
+            # Stats (Quadrants) based on FILTERED view
+            # If we want stats relative to the VIEW, we leverage stats_df or plot_df?
+            # Usually users expect stats on what they see.
             
-            # Count events in quadrants (using plot_df for visible events approximation)
+            # Count events in quadrants
             q1 = len(plot_df[(plot_df[x_axis] < gx_val) & (plot_df[y_axis] >= gy_val)]) # Top Left
             q2 = len(plot_df[(plot_df[x_axis] >= gx_val) & (plot_df[y_axis] >= gy_val)]) # Top Right
             q3 = len(plot_df[(plot_df[x_axis] >= gx_val) & (plot_df[y_axis] < gy_val)]) # Bottom Right
@@ -214,6 +253,7 @@ def render_scatter(df, key_prefix):
             st.code(f"""
             Q1 (UL): {q1/total*100:.1f}% | Q2 (UR): {q2/total*100:.1f}%
             Q4 (LL): {q4/total*100:.1f}% | Q3 (LR): {q3/total*100:.1f}%
+            (Relative to visible/subsampled events)
             """)
             
         fig.update_layout(
@@ -275,7 +315,9 @@ if selected_file:
                     long_df = plot_data[target_chs].melt(var_name="Channel", value_name="Intensity")
                     
                     if log_hist:
-                        long_df = long_df[long_df["Intensity"] > 0]
+                        # Clip to a small positive value so they don't disappear on log scale
+                        # Standard flow cytometry often treats < 1 as 1 for log viz
+                        long_df["Intensity"] = long_df["Intensity"].clip(lower=1)
                     
                     fig_hist = px.histogram(long_df, x="Intensity", color="Channel", 
                                             barmode="overlay", nbins=bins, 
