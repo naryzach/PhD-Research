@@ -12,3 +12,6 @@ outputs/
 # Protein Analysis
 Protein Analysis/__pycache__/
 Protein Analysis/.streamlit/secrets.toml
+
+# MetalBinder
+MetalBinder/__pycache__/
