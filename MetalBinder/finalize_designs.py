@@ -35,6 +35,7 @@ def get_sequence(pdb_path, chain_id=None):
 def main():
     parser = argparse.ArgumentParser(description="Finalize Designs and Create AlphaFold CSV")
     parser.add_argument("--pred_dir", default="../Local/Metal_Predictions", help="Predictions Directory")
+    parser.add_argument("--out_csv", default="../Local/Metal_Predictions/alphafold_inputs.csv", help="Output CSV path")
     parser.add_argument("--run_mpnn", action="store_true", help="Run ProteinMPNN on designs")
     parser.add_argument("--lmpnn_path", default="../Tools/LigandMPNN", help="Path to LigandMPNN")
     args = parser.parse_args()

@@ -22,20 +22,6 @@ def get_chain_residues(structure, chain_id):
             break 
     return sorted(list(set(residues)))
 
-def residues_to_ranges(residue_list, chain_id):
-    """Convert list of residue numbers to RFdiffusion ranges."""
-    if not residue_list:
-        return []
-    ranges = []
-    start = residue_list[0]; prev = residue_list[0]
-    for r in residue_list[1:]:
-        if r != prev + 1:
-            ranges.append(f"{chain_id}{start}-{prev}")
-            start = r
-        prev = r
-    ranges.append(f"{chain_id}{start}-{prev}")
-    return ranges
-
 def run_swap(args):
     catalog = pd.read_csv(args.catalog_csv)
     target_metals = [m.strip().upper() for m in args.target_metals.split(',')]
@@ -45,17 +31,11 @@ def run_swap(args):
     print(f"Loaded {len(catalog)} sites from catalog.")
     
     for idx, row in catalog.iterrows():
-        source_pdb = row['source_pdb']
-        source_ion = row['ion']
-        motif_id = row['motif_id']
-        path_in_catalog = row['path']
+        source_pdb = row['source_pdb'] # E.g. "1ZEG"
+        source_ion = row['ion']        # E.g. "ZN"
+        motif_id = row['motif_id']     # E.g. "1ZEG_ZN_site0"
         
         # Locate Source PDB
-        # Assumes PDBs are in default location: Local/Metal_PDBs/{Ion}/{ID}.cif or .pdb
-        # The catalog doesn't store full source path, only source PDB ID + Ion.
-        # We need to construct it.
-        
-        # Try both extensions
         src_path_pdb = os.path.join(args.pdb_dir, source_ion, f"{source_pdb}.pdb")
         src_path_cif = os.path.join(args.pdb_dir, source_ion, f"{source_pdb}.cif")
         
@@ -76,173 +56,172 @@ def run_swap(args):
              print("Failed to parse structure")
              continue
 
-        # Parse residues from catalog string: "A52(GLN);A60(GLY)"
-        # We need to identify the protein chain involved to build the contig.
-        # Catalog only has 'residues' string.
-        # Extract Chain IDs.
+        # Parse residues to find Target Chain and Designable Spots
         res_str = row['residues']
         chains = set()
         residue_ids = []
         
         for r in res_str.split(';'):
-            # Parse A52(GLN) -> Chain A, Res 52
-            # Simple regex-like parsing
-            # A52(GLN)
+            # Parse A52(GLN) or 52(GLN) if no chain char?
+            # PDB ID often has Chain.
             p1 = r.split('(')[0] # A52
-            chain_char = p1[0]
-            res_num = int(p1[1:])
-            chains.add(chain_char)
-            residue_ids.append((chain_char, res_num))
+            
+            # Simple heuristic: First char is chain if alphabetic, else assume empty chain ' '?
+            # Actually catalogue_sites.py outputs A52, so Chain is A.
+            # If chain was ' ', it implies it might be just numbers?
+            # Let's assume catalog is consistent: {Chain}{ResNum}.
+            
+            # Robust parsing:
+            import re
+            match = re.match(r"([A-Za-z0-9]+)(\d+)", p1)
+            if match:
+                chain_char = match.group(1)
+                res_num = int(match.group(2))
+                chains.add(chain_char)
+                residue_ids.append((chain_char, res_num))
+            else:
+                # Fallback
+                 pass
             
         if len(chains) > 1:
-            print(f"  Skipping multi-chain site {motif_id} (complex to inpaint)")
+            print(f"  Skipping multi-chain site {motif_id}")
             continue
-            
+        if not chains:
+             print(f"  Could not parse chain from {res_str}")
+             continue
+             
         target_chain = list(chains)[0]
         
-        # Build Gap-Aware "Keep" regions
-        # We want to redesign LOOPs around the site.
-        # Actually RFdiffusion "Inpainting" usually works by masking the region to design.
-        # Here we want to keep the whole protein but redesign the neighborhood of the metal?
-        # Or just swap the metal?
-        # Metal swap usually implies geometry optimization (RFdiffusion) around the metal.
-        # So we "mask" the binding site residues to be redesigned?
-        # The prompt says: "Inpaint loops".
-        # Let's design 5 residues around the binding residues.
-        
-        # Identify residues to redesign (exclude from 'Fixed' contig)
-        # We define a "Binding Pocket" range.
-        
-        # Actually, let's keep it simple: Fixed Scaffold. Just redesign the immediate residues?
-        # RFdiffusion is better at redesigning loops.
-        # Let's simply fix the whole protein EXCEPT the binding residues +/- padding?
-        
-        # Logic: 
-        # 1. Identify all residues in chain.
-        # 2. Identify "Designable" residues (The binding residues + padding).
-        # 3. Everything else is "Fixed".
-        
+        # Define Designable Residues (Binding Site +/- padding)
         design_residues = set()
         padding = 1
         for r_c, r_n in residue_ids:
             for k in range(r_n - padding, r_n + padding + 1):
                 design_residues.add(k)
-                
+        
         chain_res_list = get_chain_residues(structure, target_chain)
         if not chain_res_list:
+            print(f"  No residues found in chain {target_chain}")
             continue
             
-        # Build Fixed Ranges
-        fixed_ranges = []
-        start = chain_res_list[0]
-        prev = chain_res_list[0]
-        current_segment = []
-        
-        # Iterate and build ranges that are NOT in design_residues
-        segments = []
-        
-        # Using boolean mask approach is easier?
-        # Iterate sorted chain_res_list
-        # If r is NOT in design_residues -> add to current fixed block
-        # If r IS in design_residues -> close current fixed block, start new one after.
-        
-        # But we also need to respect gaps in the PDB itself (missing density).
-        
-        # RFdiffusion input: [Fixed/10-10/Fixed...] or [Fixed/10/Fixed] (length)
-        # If we want to redesign existing residues, we just OMIT them from the fixed contig and specifying length.
-        # E.g. A1-49/3/A53-100 (Redesigns 50-52 as 3 residues).
-        
+        # Build Contig
         contig_parts = []
-        
         start_segment = None
         prev_r = None
         
+        design_block_len = 0 # To track length of contiguous design blocks
+        
         for r in chain_res_list:
             is_designable = r in design_residues
-            
-            # Check for gap in PDB
             is_gap = (prev_r is not None) and (r != prev_r + 1)
             
             if is_gap:
-                # Close any open segment
                 if start_segment is not None:
                      contig_parts.append(f"{target_chain}{start_segment}-{prev_r}")
                      start_segment = None
+                if design_block_len > 0:
+                    contig_parts.append(f"{design_block_len}-{design_block_len}")
+                    design_block_len = 0
             
             if is_designable:
-                # If we were tracking a fixed segment, close it
                 if start_segment is not None:
                     contig_parts.append(f"{target_chain}{start_segment}-{prev_r}")
                     start_segment = None
                 
-                # Add design step (1 residue)
-                # We add '1-1' to indicate 1 residue to be built? Or multiple?
-                # If we want to preserve length, we add '1-1'.
-                contig_parts.append("1-1") 
+                design_block_len += 1
             else:
-                # Fixed residue
+                if design_block_len > 0:
+                    contig_parts.append(f"{design_block_len}-{design_block_len}")
+                    design_block_len = 0
+                
                 if start_segment is None:
                     start_segment = r
                 prev_r = r
                 
-        # Close last segment
         if start_segment is not None:
              contig_parts.append(f"{target_chain}{start_segment}-{prev_r}")
-             
-        # Compact "1-1/1-1/1-1" to "3-3" logic? 
-        # RFdiffusion is fine with lists.
-        # But "1-1/1-1" is creating multiple segments.
-        # Ideally we group designable blocks.
-        
-        # Simplify: Join contig_parts with '/'
-        # Clean up repeated design blocks? 
-        # For now, it works.
-        
+        if design_block_len > 0:
+             contig_parts.append(f"{design_block_len}-{design_block_len}")
+
         contig_str = "/".join(contig_parts)
-        contig = f"['{contig_str} Z0-0']" # Append Metal Chain Z (we will create it)
         
-        # Run RFdiffusion for each target metal
+        # Metal Handling
+        # We need to find the metal atom and ensure it is preserved as a separate chain (Z).
+        # We will extract the metal atom, give it Chain Z, Res ID 1, and save it in input_swapped.pdb.
+        
+        atom_source_metal = None
+        # Find the metal associated with this site.
+        # Catalog has 'ion' (e.g. ZN).
+        # We search atoms in structure.
+        
+        # Heuristic: Find ZN atom closest to the binding residues?
+        # Or just pick the first ZN?
+        # Let's pick the first one matching the source_ion for now, to support mass processing.
+        # But we must ensure we only output ONE metal if we are swapping one site.
+        
+        # Actually, if we just want to swap metals, we can just replace the element in standard PDB?
+        # But RFdiffusion needs to "see" the metal to design around it.
+        # Best practice: Provide metal as a fixed input.
+        
+        # Extract protein chain + 1 Metal Atom -> input_swapped.pdb
+        
+        for model in structure:
+            for chain in model:
+                for residue in chain:
+                     for atom in residue:
+                          if atom.element.upper() == source_ion:
+                               atom_source_metal = atom
+                               break
+                if atom_source_metal: break
+            if atom_source_metal: break
+            
+        if not atom_source_metal:
+             print("  No metal found in structure to swap.")
+             continue
+             
+        # Create Custom Structure for RFdiffusion
+        # contain target_chain + Metal (remapped to Chain Z)
+        
+        # Metal Block
+        metal_res_seq = 1
+        metal_chain_id = 'Z'
+        
+        # Contig: ProteinParts/0 Z1-1
+        contig = f"['{contig_str}/0 {metal_chain_id}{metal_res_seq}-{metal_res_seq}']"
+        
         for metal in target_metals:
             out_dir = os.path.join(args.out_dir, metal, motif_id)
             os.makedirs(out_dir, exist_ok=True)
             rf_out = os.path.join(out_dir, "rfdiffusion")
             os.makedirs(rf_out, exist_ok=True)
             
-            # Prepare Input PDB with Changed Metal
-            # We need to create a temporary input PDB where the metal atom is swapped.
-            # Using Site Info to find the metal atom.
-            # Actually, extract the site metal? The source PDB has a metal.
-            # We assume the metal found in catalog is the one to swap.
-            # We need to find the specific metal atom corresponding to 'site'.
-            # Catalog doesn't store atom serial number.
-            # But we can find the metal near the residues.
-            
-            # For simplicity in mass processing:
-            # Just take the first metal of type 'source_ion' in the structure?
-            # Or use the catalog logic again to identify the metal?
-            # Re-finding is safer.
-            
-            # Skip actual swap file generation for dry run speed if needed, but logic is fast.
-            # Let's assume we output to `swapped_input.pdb`.
-            
             swapped_pdb_path = os.path.join(rf_out, "input_swapped.pdb")
             
-            io = PDBIO()
-            # Swap metal element in structure object (in memory)
-            # Find closest metal to residues
-            # ... (Simplification: We assume single metal or we just swap ALL metals of that type?)
-            
-            # Let's swap ALL metals of source_ion to target_metal for the input PDB.
-            # This is easiest.
-            
-            for atom in structure.get_atoms():
-                if atom.element.upper() == source_ion:
-                    atom.element = metal
-                    atom.name = metal
-            
-            io.set_structure(structure)
-            io.save(swapped_pdb_path)
-            
+            # Write PDB manually or via PDBIO
+            with open(swapped_pdb_path, 'w') as f:
+                # Write Protein Chain
+                io = PDBIO()
+                class ChainSelect(Select):
+                    def accept_chain(self, chain):
+                        return chain.id == target_chain
+                
+                io.set_structure(structure)
+                # We can't easily pipe IO to file handle with other writes in BioPython < 1.78 sometimes?
+                # Let's save protein to temp first.
+                io.save(os.path.join(rf_out, "temp_prot.pdb"), ChainSelect())
+                
+                with open(os.path.join(rf_out, "temp_prot.pdb"), 'r') as temp:
+                    f.write(temp.read())
+                
+                os.remove(os.path.join(rf_out, "temp_prot.pdb"))
+                
+                # Write Metal Atom as HETATM in Chain Z
+                # Formatting PDB line manually
+                # HETATM 1234 ZN   ZN Z   1      12.345  67.890  -5.432  1.00 20.00          ZN
+                x, y, z = atom_source_metal.get_coord()
+                pdb_line = f"HETATM{9999:5d} {metal:>4s} {metal:>3s} {metal_chain_id}{metal_res_seq:4d}    {x:8.3f}{y:8.3f}{z:8.3f}  1.00 20.00          {metal:>2s}\n"
+                f.write(pdb_line)
+                
             # Run RFdiffusion
             rf_script = os.path.join(args.rf_path, "scripts/run_inference.py")
             cmd = [
