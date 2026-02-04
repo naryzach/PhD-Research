@@ -26,8 +26,10 @@ def search_rcsb_by_ligand(ligand_id, max_results=100):
             }
         },
         "request_options": {
-            "return_all_hits": False, 
-            "results_max": max_results
+            "paginate": {
+                "start": 0,
+                "rows": max_results
+            }
         },
         "return_type": "entry"
     }
@@ -54,8 +56,10 @@ def search_rcsb_by_ligand(ligand_id, max_results=100):
                 }
             },
             "request_options": {
-                "return_all_hits": False,
-                "results_max": max_results
+                "paginate": {
+                    "start": 0,
+                    "rows": max_results
+                }
             },
             "return_type": "entry"
         }
