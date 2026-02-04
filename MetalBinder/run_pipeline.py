@@ -1,138 +1,129 @@
 import argparse
 import os
-import subprocess
-import json
-import glob
 import sys
+import subprocess
 
-def run_pipeline(args):
-    # Absolute paths
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    input_path = os.path.abspath(args.input)
-    out_dir = os.path.abspath(args.out)
-    
-    os.makedirs(out_dir, exist_ok=True)
-    
-    # Check if input is file or directory
-    if os.path.isdir(input_path):
-        pdb_files = glob.glob(os.path.join(input_path, "*.pdb"))
+def run_command(cmd, dry_run=False):
+    if dry_run:
+        print(f"[Dry Run] {' '.join(cmd)}")
     else:
-        pdb_files = [input_path]
-        
-    print(f"Starting MetalBinder Pipeline on {len(pdb_files)} files using {sys.executable}.")
-    
-    for pdb_file in pdb_files:
-        basename = os.path.basename(pdb_file).replace(".pdb", "")
-        file_out_dir = os.path.join(out_dir, basename)
-        os.makedirs(file_out_dir, exist_ok=True)
-        
-        print(f"\nProcessing {basename}...")
-        
-        # 1. Find Metal Sites
-        sites_json = os.path.join(file_out_dir, "sites.json")
-        pymol_scr = os.path.join(file_out_dir, "view.pml")
-        
-        cmd_find = [
-            sys.executable, os.path.join(base_dir, "find_metal_sites.py"),
-            pdb_file,
-            "--out_json", sites_json,
-            "--out_pymol", pymol_scr
-        ]
-        
+        print(f"[Exec] {' '.join(cmd)}")
         try:
-            subprocess.run(cmd_find, check=True)
-        except Exception as e:
-            print(f"Failed to find sites for {basename}: {e}")
-            continue
-            
-        # Check if sites found
-        if not os.path.exists(sites_json):
-            print("No sites JSON created.")
-            continue
-            
-        with open(sites_json, 'r') as f:
-            sites = json.load(f)
-            
-        if not sites:
-            print(f"No metal sites found in {basename}.")
-            continue
-            
-        # 2. Swap Metals (If requested)
-        if args.swap_metals:
-            print(f"Running Metal Swap for {args.swap_metals}...")
-            cmd_swap = [
-                sys.executable, os.path.join(base_dir, "metal_swap.py"),
-                "--pdb", pdb_file,
-                "--sites_json", sites_json,
-                "--metals", args.swap_metals,
-                "--out", os.path.join(file_out_dir, "swap"),
-                "--num_designs", str(args.num_designs)
-            ]
-            
-            if args.dry_run:
-                print("Dry Run Swap:", " ".join(cmd_swap))
-            else:
-                try:
-                    subprocess.run(cmd_swap, check=True)
-                except Exception as e:
-                    print(f"Swap failed: {e}")
-
-    # 3. Catalog (If input was directory)
-    motifs_dir = None
-    if os.path.isdir(input_path) and args.catalog:
-        print("\nBuilding Catalog...")
-        catalog_csv = os.path.join(out_dir, "catalog.csv")
-        motifs_dir = os.path.join(out_dir, "motifs")
-        
-        cmd_cat = [
-            sys.executable, os.path.join(base_dir, "build_catalog.py"),
-            input_path,
-            catalog_csv,
-            "--scaffold_dir", motifs_dir
-        ]
-        subprocess.run(cmd_cat)
-        
-        # 4. Scaffold Motifs (If requested)
-        if args.scaffold_motifs and motifs_dir and os.path.exists(motifs_dir):
-            print(f"\nScaffolding Motifs in {motifs_dir}...")
-            motif_files = glob.glob(os.path.join(motifs_dir, "*.pdb"))
-            
-            for motif_file in motif_files:
-                print(f"Scaffolding {os.path.basename(motif_file)}...")
-                scaffold_out = os.path.join(file_out_dir, "scaffolds", os.path.basename(motif_file).replace(".pdb", ""))
-                
-                cmd_scaffold = [
-                    sys.executable, os.path.join(base_dir, "motif_scaffold.py"),
-                    "--motif_pdb", motif_file,
-                    "--out", scaffold_out,
-                    "--num_designs", str(args.num_designs)
-                ]
-                
-                if args.dry_run:
-                     cmd_scaffold.append("--dry_run")
-                     print("Dry Run Scaffold:", " ".join(cmd_scaffold))
-                     # We execute it even in dry run so the script prints its own dry output
-                     subprocess.run(cmd_scaffold)
-                else:
-                    try:
-                        subprocess.run(cmd_scaffold, check=True)
-                    except Exception as e:
-                        print(f"Scaffolding failed for {motif_file}: {e}")
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Error executing command: {e}")
+            sys.exit(1)
 
 def main():
-    parser = argparse.ArgumentParser(description="MetalBinder Master Pipeline")
-    parser.add_argument("--input", required=True, help="Input PDB file or Directory")
-    parser.add_argument("--out", default="../Local/MetalBinder_Results", help="Output directory")
+    parser = argparse.ArgumentParser(description="MetalBinder v2.0 Orchestrator")
     
-    parser.add_argument("--swap_metals", help="Comma-separated list of metals to swap/design for (e.g. ZN,CU)")
-    parser.add_argument("--catalog", action="store_true", help="Build a catalog (if input is directory)")
-    parser.add_argument("--scaffold_motifs", action="store_true", help="Scaffold all motifs found in the cataloging step")
+    # Workflow Steps
+    parser.add_argument("--download", action="store_true", help="Run Dataset Downloader")
+    parser.add_argument("--catalog", action="store_true", help="Run Site Cataloging")
+    parser.add_argument("--scaffold", action="store_true", help="Run De Novo Scaffolding")
+    parser.add_argument("--swap", action="store_true", help="Run Metal Swapping")
+    parser.add_argument("--graft", action="store_true", help="Run Antibody Grafting")
+    parser.add_argument("--finalize", action="store_true", help="Run Finalization (MPNN + AF2 CSV)")
     
-    parser.add_argument("--num_designs", type=int, default=1)
+    parser.add_argument("--run_all", action="store_true", help="Run all steps (except Graft which needs specific args)")
+    
+    # Common Args
+    parser.add_argument("--metals", default="ZN,CU,NI,CO,MN,FE,MG,CA", help="Metals to process")
     parser.add_argument("--dry_run", action="store_true")
     
+    parser.add_argument("--num_designs", type=int, default=2, help="Number of RFdiffusion designs per motif")
+    
+    # Graft Specific
+    parser.add_argument("--template", help="Template PDB for grafting")
+    parser.add_argument("--insert_at", type=int, help="Insertion residue for grafting")
+    parser.add_argument("--graft_chain", default="H", help="Template chain")
+    
+    # Finalize Specific
+    parser.add_argument("--run_mpnn", action="store_true", help="Enable ProteinMPNN in finalization")
+    
     args = parser.parse_args()
-    run_pipeline(args)
+    
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # 1. Download
+    if args.download or args.run_all:
+        print("\n=== Stage 1: Download Datasets ===")
+        cmd = [sys.executable, os.path.join(base_dir, "download_datasets.py"), "--metals", args.metals]
+        run_command(cmd, args.dry_run)
+        
+    # 2. Catalog
+    if args.catalog or args.run_all:
+        print("\n=== Stage 2: Catalog Sites ===")
+        cmd = [sys.executable, os.path.join(base_dir, "catalog_sites.py"), 
+               "--pdb_dir", "../Local/Metal_PDBs", 
+               "--out_dir", "../Local/Metal_Catalog",
+               "--metals", args.metals]
+        run_command(cmd, args.dry_run)
+        
+    # 3. Scaffold (De Novo)
+    if args.scaffold or args.run_all:
+        print("\n=== Stage 3: De Novo Scaffolding ===")
+        cmd = [sys.executable, os.path.join(base_dir, "run_scaffold.py"),
+               "--metals", args.metals,
+               "--num_designs", str(args.num_designs)]
+        if args.dry_run: cmd.append("--dry_run")
+        run_command(cmd, args.dry_run)
+        
+    # 4. Swap
+    if args.swap or args.run_all:
+        print("\n=== Stage 4: Metal Swapping ===")
+        cmd = [sys.executable, os.path.join(base_dir, "run_swap.py"),
+               "--target_metals", args.metals,
+               "--num_designs", str(args.num_designs)]
+        if args.dry_run: cmd.append("--dry_run")
+        run_command(cmd, args.dry_run)
+        
+    # 5. Graft
+    if args.graft:
+        print("\n=== Stage 5: Antibody Grafting ===")
+        if not args.template or not args.insert_at:
+            print("Error: --template and --insert_at are required for grafting.")
+        else:
+            # We need to iterate over catalog motifs... run_graft processes ONE motif.
+            # We need a wrapper loop here? run_graft.py currently takes single --motif argument.
+            # I should update run_graft.py to handle mass processing or loop here.
+            # Looping here is easier for now given the design.
+            import glob
+            import pandas as pd
+            
+            # Read catalog to get motifs
+            try:
+                df = pd.read_csv("../Local/Metal_Catalog/master_catalog.csv")
+                motifs = df['path'].tolist()
+            except:
+                print("Catalog not found. Skipping graft loop.")
+                motifs = []
+            
+            # Filter motifs by metal?
+            # Creating output dir: ../Local/Metal_Predictions/Grafted/{Ion}/{Motif}
+            
+            for motif in motifs:
+                # Check metal
+                # TODO: Filter by args.metals
+                cmd = [sys.executable, os.path.join(base_dir, "run_graft.py"),
+                       "--motif", motif,
+                       "--template", args.template,
+                       "--insert_at", str(args.insert_at),
+                       "--chain", args.graft_chain,
+                       "--out_dir", f"../Local/Metal_Predictions/Grafted/{os.path.basename(os.path.dirname(motif))}/{os.path.basename(motif).replace('.pdb','')}",
+                       "--num_designs", str(args.num_designs)
+                       ]
+                if args.dry_run: cmd.append("--dry_run")
+                run_command(cmd, args.dry_run)
+
+    # 6. Finalize
+    if args.finalize or args.run_all:
+        print("\n=== Stage 6: Finalization ===")
+        cmd = [sys.executable, os.path.join(base_dir, "finalize_designs.py")]
+        if args.run_mpnn: cmd.append("--run_mpnn")
+        run_command(cmd, args.dry_run)
+
+    print("\nPipeline Complete.")
 
 if __name__ == "__main__":
     main()
