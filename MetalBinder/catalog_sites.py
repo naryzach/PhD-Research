@@ -2,7 +2,7 @@ import argparse
 import os
 import glob
 import pandas as pd
-from Bio.PDB import PDBParser, MMCIFParser, PDBIO, Select
+from Bio.PDB import PDBParser, MMCIFParser, PDBIO, Select, NeighborSearch
 from Bio.PDB.Polypeptide import is_aa
 
 def get_parser(file_path):
@@ -27,56 +27,132 @@ class SiteSelect(Select):
 
 def find_sites_in_structure(structure, metal_types, cutoff=6.0):
     """
-    Find metal sites.
-    cutoff: 6.0A to capture sufficient context (first and second shell).
+    Find metal sites using KD-tree for speed.
+    cutoff: 6.0A.
     """
     sites = []
     
     atoms = list(structure.get_atoms())
     metals = [a for a in atoms if a.element.upper() in metal_types]
     
+    if not metals:
+        return []
+        
+    # Build KD-tree for all atoms
+    ns = NeighborSearch(atoms)
+    
     for metal in metals:
-        # Find neighbors
-        nearby = []
         metal_res = metal.get_parent()
         
-        for atom in atoms:
-            if atom == metal: continue
-            if atom.get_parent() == metal_res: continue # Skip same residue
-            
-            # Distance check
-            dist = atom - metal
-            if dist < cutoff:
-                # Check if AA
-                res = atom.get_parent()
-                if is_aa(res, standard=True):
-                    nearby.append(res)
+        # Search for nearby residues (level='R' returns residues)
+        nearby_residues = ns.search(metal.coord, cutoff, level='R')
         
-        # Filter unique residues
-        nearby = list(set(nearby))
+        # Filter:
+        # 1. Remove the metal's own residue
+        # 2. Keep only Amino Acids (is_aa)
         
-        if len(nearby) >= 2: # At least 2 residues (bidentate+)
+        valid_neighbors = []
+        for res in nearby_residues:
+            if res == metal_res:
+                continue
+            if is_aa(res, standard=True):
+                valid_neighbors.append(res)
+        
+        if len(valid_neighbors) >= 2:
             site_data = {
                 'metal_id': f"{metal_res.get_parent().id}_{metal_res.id[1]}",
                 'metal_element': metal.element.upper(),
-                'residues': [(r.get_parent().id, r.id[1], r.resname) for r in nearby],
+                'residues': [(r.get_parent().id, r.id[1], r.resname) for r in valid_neighbors],
                 'metal_atom_obj': metal 
             }
             sites.append(site_data)
             
     return sites
 
+from Bio.PDB import Structure, Model, Chain, Residue, Atom
+
 def save_motif(structure, site, out_path):
-    # Select residues and metal
-    # Note: Bio.PDB structure is shared, so we need a selector class
+    # Create a new structure for the motif to handle remapping of chain IDs
+    # (since some source PDBs have chain IDs > 1 char which breaks PDB format)
+    
+    new_struct = Structure.Structure("motif")
+    model = Model.Model(0)
+    new_struct.add(model)
+    
+    # Track used chain IDs to assign new single-char IDs
+    # We will simply assign A, B, C... to the chains involved
+    chain_map = {} # old_chain_id -> new_chain_id
+    used_new_ids = set()
+    possible_ids = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    next_id_idx = 0
+    
+    # Collect all atoms to save: residues + metal
+    atoms_to_save = []
+    
+    # Add metal
+    atoms_to_save.append(site['metal_atom_obj'])
+    
+    # Add residues
+    # We need to find the specific residues in the structure again or just use the ones we found
+    # The 'site' dict stores residue info, but we need the actual objects 
+    # Luckily 'site' was constructed from 'structure', so we can look them up, 
+    # BUT we didn't store residue objects, only IDs in 'residues' list.
+    # Wait, 'find_sites_in_structure' logic:
+    # 'residues': [(r.get_parent().id, r.id[1], r.resname) for r in nearby]
+    # We need to re-fetch these residues from the structure.
+    
+    target_res_ids = set([(r[0], r[1]) for r in site['residues']]) # (chain_id, res_seq)
+    
+    # Helper to get residue object
+    def get_residue(chain_id, res_seq):
+        chain = structure[0][chain_id] # Assuming model 0
+        return chain[res_seq]
+
+    residue_objs = []
+    try:
+        for chain_id, res_seq, _ in site['residues']:
+            residue_objs.append(get_residue(chain_id, res_seq))
+            
+        # Also need the metal's residue (parent)
+        metal_res = site['metal_atom_obj'].get_parent()
+        if metal_res not in residue_objs:
+             residue_objs.append(metal_res)
+             
+    except KeyError:
+        # Fallback if lookup fails (shouldn't happen)
+        print("Warning: Could not lookup residues for motif.")
+        return
+
+    # Now reconstruct structure
+    # We group by chain to keep residue connectivity if possible, 
+    # but for a motif (disjoint residues usually), it matters less.
+    # However, to be nice, let's map source chains to new chains.
+    
+    for res in residue_objs:
+        old_chain_id = res.get_parent().id
+        
+        if old_chain_id not in chain_map:
+            if next_id_idx < len(possible_ids):
+                new_id = possible_ids[next_id_idx]
+                next_id_idx += 1
+            else:
+                new_id = "X" # Fallback if we somehow have >36 chains in a tiny motif
+            chain_map[old_chain_id] = new_id
+            
+            # Create new chain
+            new_chain = Chain.Chain(new_id)
+            model.add(new_chain)
+            
+        new_chain = model[chain_map[old_chain_id]]
+        
+        # Copy residue
+        new_res = res.copy() # This copies atoms too
+        new_chain.add(new_res)
+        
+    # Save
     io = PDBIO()
-    io.set_structure(structure)
-    
-    # Residue identifier list for Selector
-    target_res = [(r[0], r[1]) for r in site['residues']]
-    selector = SiteSelect(target_res, site['metal_atom_obj'])
-    
-    io.save(out_path, selector)
+    io.set_structure(new_struct)
+    io.save(out_path)
 
 def catalog_directory(input_dir, output_dir, metals):
     catalog_data = []
