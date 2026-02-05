@@ -168,7 +168,12 @@ def catalog_directory(input_dir, output_dir, metals):
         parser = get_parser(file_path)
         
         try:
+            print(f"  Parsing {basename}...")
             structure = parser.get_structure(basename, file_path)
+            if not structure:
+                print(f"  Failed to parse {basename} (Empty structure)")
+                continue
+            
         except Exception as e:
             print(f"Failed to parse {basename}: {e}")
             continue
