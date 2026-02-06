@@ -5,6 +5,7 @@ import glob
 import subprocess
 from Bio.PDB import PDBParser, PDBIO, Select
 from Bio.PDB.Polypeptide import is_aa
+import numpy as np
 
 class ChainSelect(Select):
     """
@@ -92,18 +93,25 @@ def get_contig_and_prepare_pdb(motif_path, ion, temp_pdb_path):
     lines = [l for l in lines if not l.strip().startswith("END") and not l.strip().startswith("TER")]
     
     # 3. Create Metal Line
+
     x, y, z = metal_atom.get_coord()
-    # HETATM 9999 ZN   ZN Z   1      12.345  67.890  -5.432  1.00 20.00          ZN
-    # NOTE: RFdiffusion parser likely ignores HETATM and non-standard residues. 
-    # We masquerade the metal as a Glycine C-alpha (CA) atom to ensure it's treated as a residue backbone point.
-    # This forces RFdiffusion to design around this coordinate.
-    metal_line = f"ATOM  {9999:5d}  CA  GLY Z   1    {x:8.3f}{y:8.3f}{z:8.3f}  1.00 20.00           C\n"
+    
+    # Native Metal Handling
+    # Use HETATM and correct residue name
+    metal_lines = []
+    metal_lines.append(f"HETATM{9999:5d}  {ion:<4}{ion:<3} Z   1    {x:8.3f}{y:8.3f}{z:8.3f}  1.00 20.00          {ion.rjust(2)}\n")
+
+    
+    print(f"    Writing Metal Lines (N, CA, C) for {ion}...")
     
     # 4. Write back
     with open(temp_pdb_path, 'w') as f:
         f.writelines(lines)
-        f.write(metal_line)
+        for line in metal_lines:
+            f.write(line)
         f.write("END\n")
+    
+
         
     # 3. Build Contig
     # Group residues
@@ -128,15 +136,16 @@ def get_contig_and_prepare_pdb(motif_path, ion, temp_pdb_path):
         
     # Construct RFstring
     # Strategy: [50-50/Seg1/10-20/Seg2/50-50 Z1-1]
-    contig_parts = ["50-50"] 
+    contig_parts = ["5-50"] 
     for seg in segments:
         contig_parts.append(seg)
-        contig_parts.append("10-20") 
-    contig_parts[-1] = "50-50" # End with flexible
+        contig_parts.append("1-20") 
+    contig_parts[-1] = "5-50" # End with flexible
     
     contig_str = "/".join(contig_parts)
     # Add Metal (Chain Z, Res 1)
-    contig = f"['{contig_str} Z1-1']"
+    # CRITICAL: Add '/0' chain break so metal is not peptide-bonded to protein
+    contig = f"['{contig_str}/0 Z1-1']"
     
     return contig
 
@@ -177,6 +186,7 @@ def run_scaffolding_for_ion(ion, catalog_dir, out_dir, args):
             continue
             
         # Run RFdiffusion
+        # Use main script (now patched with MKL fix)
         rf_script = os.path.join(args.rf_path, "scripts/run_inference.py")
         
         cmd = [
@@ -187,11 +197,15 @@ def run_scaffolding_for_ion(ion, catalog_dir, out_dir, args):
             f"contigmap.contigs={contig}"
         ]
         
+        # Inject RFDIFFUSION_ION env var for generalized metal support
+        env = os.environ.copy()
+        env["RFDIFFUSION_ION"] = ion # e.g. "ZN", "CU"
+
         if args.dry_run:
-            print(f"    Dry Run RFdiffusion: {' '.join(cmd)}")
+            print(f"    Dry Run RFdiffusion (Ion {ion}): {' '.join(cmd)}")
         else:
             try:
-                subprocess.run(cmd, check=True, cwd=project_root)
+                subprocess.run(cmd, check=True, cwd=project_root, env=env)
                 
                 # Check output?
                 # RFdiffusion usually preserves fixed input (including metal) in output.
