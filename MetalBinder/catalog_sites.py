@@ -181,13 +181,16 @@ def catalog_directory(input_dir, output_dir, metals):
         sites = find_sites_in_structure(structure, metals)
         
         if sites:
-            # Create motif dir for this Ion if processed individually? 
-            # Or assume input_dir is Ion specific.
-            # Let's save to output_dir directly.
-            
             for i, site in enumerate(sites):
-                motif_id = f"{basename}_{site['metal_element']}_site{i}"
-                motif_path = os.path.join(output_dir, f"{motif_id}.pdb")
+                element = site['metal_element']
+                motif_id = f"{basename}_{element}_site{i}"
+                
+                # Dynamic output folder based on the SITE'S metal, not the source directory
+                # This fixes the issue where a Cd site in a ZN folder gets saved to Catalog/ZN
+                motif_ion_dir = os.path.join(output_dir, element)
+                os.makedirs(motif_ion_dir, exist_ok=True)
+                
+                motif_path = os.path.join(motif_ion_dir, f"{motif_id}.pdb")
                 
                 # Save motif PDB
                 try:
@@ -201,7 +204,7 @@ def catalog_directory(input_dir, output_dir, metals):
                 catalog_data.append({
                     'motif_id': motif_id,
                     'source_pdb': basename,
-                    'ion': site['metal_element'],
+                    'ion': element,
                     'num_residues': len(site['residues']),
                     'residues': res_str,
                     'path': os.path.abspath(motif_path)
@@ -218,19 +221,10 @@ def main():
     args = parser.parse_args()
     metals_list = [m.strip().upper() for m in args.metals.split(',')]
     
-    # Check if pdb_dir has subdirectories (Ion folders)
-    # We want to maintain structure: Local/Metal_Catalog/{Ion}/...
-    
-    # If pdb_dir has 'ZN', 'CU' etc inside, we recurse.
-    # Simpler: Just walk.
-    
     full_catalog = []
     
     # If users point to 'Local/Metal_PDBs', we iterate subfolders matching metals
     subdirs = [d for d in os.listdir(args.pdb_dir) if os.path.isdir(os.path.join(args.pdb_dir, d))]
-    
-    # Filter subdirs if they match our metal list? Or just process all.
-    # Let's process all subdirs that look like valid folders.
     
     # If no subdirs, process root.
     dirs_to_process = []
@@ -243,21 +237,16 @@ def main():
     for inp, ion_name in dirs_to_process:
         print(f"Processing folder: {ion_name}")
         
-        # Output folder for motifs
-        motif_out = os.path.join(args.out_dir, ion_name)
-        os.makedirs(motif_out, exist_ok=True)
-        
-        # Run catalog
-        # Filter: Only look for the specific ion if the folder is named after it? 
-        # Or look for *all* metals in *all* folders?
-        # Safe bet: Look for all requested metals.
-        
-        data = catalog_directory(inp, motif_out, metals_list)
+        # We pass the ROOT output dir, and let catalog_directory handle subfolders by Element
+        data = catalog_directory(inp, args.out_dir, metals_list)
         full_catalog.extend(data)
         
     # Save CSV
     if full_catalog:
         df = pd.DataFrame(full_catalog)
+        # Remove duplicates (possible if same PDB processed from multiple source folders)
+        df = df.drop_duplicates(subset=['motif_id'])
+        
         csv_path = os.path.join(args.out_dir, "master_catalog.csv")
         df.to_csv(csv_path, index=False)
         print(f"Catalog saved to {csv_path} with {len(df)} entries.")

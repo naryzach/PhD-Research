@@ -28,11 +28,16 @@ def main():
     parser.add_argument("--run_all", action="store_true", help="Run all steps (except Graft which needs specific args)")
     
     # Common Args
-    parser.add_argument("--metals", default="ZN,CU,NI,CO,MN,FE,MG,CA", help="Metals to process")
+    # Changed default to None to detect user input
+    parser.add_argument("--metals", default=None, help="Metals to process (Comma-separated). If unset, uses step-specific defaults.")
     parser.add_argument("--rf_path", default="../Tools/RFdiffusion2", help="Path to RFdiffusion2")
     parser.add_argument("--dry_run", action="store_true")
     
     parser.add_argument("--num_designs", type=int, default=2, help="Number of RFdiffusion designs per motif")
+    
+    # Download Specific
+    parser.add_argument("--dataset", choices=["general", "curated", "mmp"], default="general", help="Dataset mode to download")
+
     
     # Graft Specific
     parser.add_argument("--template", default="../Local/Templates/human_VH3_IgG.pdb", help="Template PDB for grafting")
@@ -47,26 +52,53 @@ def main():
     
     base_dir = os.path.dirname(os.path.abspath(__file__))
     
+    # Logic for Metals:
+    # If user provides --metals, use that for EVERYTHING.
+    # If not, use defaults:
+    #   Download -> Common (ZN, CU...)
+    #   Catalog -> All (implicitly scans input)
+    #   Scaffold -> ALL (scans catalog)
+    #   Swap -> Default Target Set (ZN..CA)
+    #   Graft -> ALL (scans catalog)
+    
+    user_metals = args.metals
+    
     # 1. Download (Unchanged)
     if args.download or args.run_all:
         print("\n=== Stage 1: Download Datasets ===")
-        cmd = [sys.executable, os.path.join(base_dir, "download_datasets.py"), "--metals", args.metals, "--limit", str(args.num_designs)]
+        # Default for download is the Common Set if not specified
+        download_metals = user_metals if user_metals else "ZN,CU,NI,CO,MN,FE,MG,CA"
+        
+        cmd = [sys.executable, os.path.join(base_dir, "download_datasets.py"), 
+               "--metals", download_metals, 
+               "--limit", str(args.num_designs),
+               "--mode", args.dataset]
         run_command(cmd, args.dry_run)
         
     # 2. Catalog (Unchanged)
     if args.catalog or args.run_all:
         print("\n=== Stage 2: Catalog Sites ===")
+        # Catalog scans input dir, metals arg creates filter. 
+        # If user_metals is None, we want to catalog EVERYTHING found.
+        # But catalog_sites.py expects a metals list to *filter* for sites in the PDBs.
+        # So we need a default list for cataloging.
+        # Let's use expanded default or the user list.
+        catalog_metals = user_metals if user_metals else "ZN,CU,NI,CO,MN,FE,MG,CA,LA,CE,ND,EU,GD,TB,DY,YB,LU,Y,U,URI,PU,TH,HG,CD,PB,AS"
+        
         cmd = [sys.executable, os.path.join(base_dir, "catalog_sites.py"), 
                "--pdb_dir", "../Local/Metal_PDBs", 
                "--out_dir", "../Local/Metal_Catalog",
-               "--metals", args.metals]
+               "--metals", catalog_metals]
         run_command(cmd, args.dry_run)
         
     # 3. Scaffold (De Novo) - Updated for RFd2
     if args.scaffold or args.run_all:
         print("\n=== Stage 3: De Novo Scaffolding ===")
+        # If user_metals is None -> "ALL" (scan catalog)
+        scaffold_metals = user_metals if user_metals else "ALL"
+        
         cmd = [sys.executable, os.path.join(base_dir, "run_scaffold.py"),
-               "--metals", args.metals,
+               "--metals", scaffold_metals,
                "--num_designs", str(args.num_designs),
                "--rf_path", args.rf_path]
         if args.dry_run: cmd.append("--dry_run")
@@ -75,10 +107,14 @@ def main():
     # 4. Swap - Updated for RFd2
     if args.swap or args.run_all:
         print("\n=== Stage 4: Metal Swapping ===")
+        # Swap targets. If user_metals is None -> Use run_swap defaults.
         cmd = [sys.executable, os.path.join(base_dir, "run_swap.py"),
-               "--target_metals", args.metals,
                "--num_designs", str(args.num_designs),
                "--rf_path", args.rf_path]
+        
+        if user_metals:
+             cmd.extend(["--target_metals", user_metals])
+        
         if args.dry_run: cmd.append("--dry_run")
         run_command(cmd, args.dry_run)
         
@@ -103,9 +139,6 @@ def main():
             motifs = []
         
         for motif in motifs:
-            # Filter by metal? args.metals?
-            # Ideally yes, but catalog usually has all.
-            # Simplification: checks if motif path exists
             if not os.path.exists(motif): continue
             
             # Output dir structure
@@ -113,8 +146,8 @@ def main():
             # infer ion from path? motif is usually .../ZN/filename.pdb
             ion = os.path.basename(os.path.dirname(motif))
             
-            # Check if ion is in requested metals
-            if ion not in args.metals.split(','):
+            # Check if ion is in requested metals (if user specified)
+            if user_metals and ion not in user_metals.split(','):
                  continue
             
             out_dir = f"../Local/Metal_Predictions/Grafted/{ion}/{os.path.basename(motif).replace('.pdb','')}"

@@ -174,7 +174,18 @@ def main():
     
     args = parser.parse_args()
     
-    metals = [m.strip().upper() for m in args.metals.split(',')]
+    # Metal Selection Logic
+    if args.metals.upper() == "ALL":
+        # Scan catalog for all available ions
+        if os.path.exists(args.catalog_dir):
+            metals = [d for d in os.listdir(args.catalog_dir) 
+                      if os.path.isdir(os.path.join(args.catalog_dir, d))]
+            metals = [m.upper() for m in metals]
+        else:
+            print(f"Catalog directory not found at {args.catalog_dir}")
+            return
+    else:
+        metals = [m.strip().upper() for m in args.metals.split(',')]
     
     print(f"Starting Scaffolding Workflow for: {metals}")
     

@@ -257,7 +257,7 @@ def main():
     parser.add_argument("--pdb_dir", default="../Local/Metal_PDBs")
     parser.add_argument("--out_dir", default="../Local/Metal_Predictions/Swaps")
     parser.add_argument("--rf_path", default="../Tools/RFdiffusion2")
-    parser.add_argument("--target_metals", default="CU,NI,CO,FE")
+    parser.add_argument("--target_metals", default="ZN,CU,NI,CO,MN,FE,MG,CA", help="Metals to swap TO")
     parser.add_argument("--num_designs", type=int, default=2)
     parser.add_argument("--dry_run", action="store_true")
     
