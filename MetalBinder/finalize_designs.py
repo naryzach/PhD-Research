@@ -34,20 +34,39 @@ def get_sequence(pdb_path, chain_id=None):
             if seq:
                 sequences[chain.id] = "".join(seq)
     
-    # Check for HETATM metals if Z not found (or always check)
-    # If we restored the metal, it will be a HETATM
+    # Allowed ions for AlphaFold
+    ALLOWED_IONS = {"MG", "ZN", "CL", "CA", "NA", "MN", "K", "FE", "CU", "CO"}
+    
+    # Check for Ligand Chains (chains not in sequences or empty sequences)
     for model in structure:
         for chain in model:
-            if chain.id == 'Z' and 'Z' not in sequences:
-                # Check if it has atoms
-                has_atoms = any(True for _ in chain.get_atoms())
-                if has_atoms:
-                    # It's likely the metal. We use a placeholder for sequence
-                    sequences['Z'] = 'X' # X marks the spot
+            if chain.id not in sequences or len(sequences[chain.id]) == 0:
+                # Check for residues to identify ligand
+                residues = list(chain.get_residues())
+                if residues:
+                    # Use the first residue
+                    residue = residues[0]
+                    resname = residue.resname.strip().upper()
+                    
+                    # Check if resname is allowed
+                    if resname in ALLOWED_IONS:
+                        sequences[chain.id] = resname
+                    else:
+                        # Try to find an allowed ion in atoms
+                        found_ion = None
+                        for atom in residue:
+                            if atom.element.upper() in ALLOWED_IONS:
+                                found_ion = atom.element.upper()
+                                break
+                        
+                        if found_ion:
+                            sequences[chain.id] = found_ion
+                        else:
+                            # Fallback to resname if not HOH (Water)
+                            if resname != 'HOH':
+                                sequences[chain.id] = resname
         break
-
-    return sequences
-        
+    
     return sequences
 
 def main():
@@ -64,7 +83,7 @@ def main():
     pdb_files = glob.glob(os.path.join(args.pred_dir, "**", "*.pdb"), recursive=True)
     
     # Filter for RFdiffusion outputs
-    design_files = [f for f in pdb_files if "rfdiffusion" in f and ("scaffold" in os.path.basename(f) or "design" in os.path.basename(f)) and "traj" not in os.path.basename(f)]
+    design_files = [f for f in pdb_files if "rfdiffusion" in f and ("scaffold" in os.path.basename(f) or "design" in os.path.basename(f)) and "traj" not in os.path.basename(f) and "unidealized" not in f]
     
     if args.run_mpnn:
         print(f"Running ProteinMPNN on {len(design_files)} designs...")
@@ -82,43 +101,50 @@ def main():
             
             # Check if already run? (Skipping check for now to ensure run)
             
-            # Determine chains to design (exclude Z)
+            # Determine chains to design
             seqs_dict = get_sequence(pdb)
             if seqs_dict is None: seqs_dict = {}
             all_chains = sorted(seqs_dict.keys())
-            design_chains = [c for c in all_chains if c != 'Z']
+            
+            protein_chains = [c for c in all_chains if len(seqs_dict[c]) > 5]
+            ligand_chains = [c for c in all_chains if len(seqs_dict[c]) <= 5]
+            
+            design_chains = protein_chains
             design_chains_str = " ".join(design_chains)
             
-            # Check if we need to masquerade HETATM Z as GLY Z for MPNN?
-            # If Z is 'X' (from our get_sequence update), it means it's a HETATM.
+            # Check if we need to masquerade HETATM Ligands as GLY for MPNN?
             # ProteinMPNN will ignore HETATM. To make MPNN respect steric constraints, 
             # we must convert it to a GLY anchor temporarily.
             
             run_pdb = pdb
             temp_pdb = None
             
-            if 'Z' in seqs_dict and seqs_dict['Z'] == 'X':
-                # Create temporary PDB with GLY Z
+            if ligand_chains:
+                # Create temporary PDB with GLY masquerading for all ligand chains
                 temp_pdb = pdb.replace(".pdb", "_mpnn_input.pdb")
                 with open(pdb, 'r') as f:
                     lines = f.readlines()
                 
                 new_lines = []
                 for line in lines:
-                    if line.startswith("HETATM") and " Z " in line:
-                        # HETATM 9999 ZN   ZN Z   1 ... -> ATOM ... CA  GLY Z   1 ...
-                        # Parse coords
-                        try:
-                            # Fixed column format? PDB is fixed width.
-                            # x: 30-38, y: 38-46, z: 46-54
-                            x = float(line[30:38])
-                            y = float(line[38:46])
-                            z = float(line[46:54])
-                            
-                            gly_line = f"ATOM  {9999:5d}  CA  GLY Z   1    {x:8.3f}{y:8.3f}{z:8.3f}  1.00 20.00           C\n"
-                            new_lines.append(gly_line)
-                        except:
-                            new_lines.append(line) # Fallback
+                    if line.startswith("HETATM"):
+                        # Check if chain is in ligand_chains
+                        # HETATM 1234 FE   FE  A 100 ...
+                        # Chain ID is typically col 21 (0-indexed -> 21) -> line[21]
+                        chain_id = line[21]
+                        if chain_id in ligand_chains:
+                             # Masquerade
+                             try:
+                                 x = float(line[30:38])
+                                 y = float(line[38:46])
+                                 z = float(line[46:54])
+                                 # Use correct chain ID
+                                 gly_line = f"ATOM  {9999:5d}  CA  GLY {chain_id}   1    {x:8.3f}{y:8.3f}{z:8.3f}  1.00 20.00           C\n"
+                                 new_lines.append(gly_line)
+                             except:
+                                 new_lines.append(line)
+                        else:
+                             new_lines.append(line)
                     else:
                         new_lines.append(line)
                 
@@ -150,19 +176,30 @@ def main():
 
     # Now collect sequences
     # Prefer MPNN outputs
-    data = []
+    # Separate lists for categories
+    data_all = []
+    data_scaffold = []
+    data_swap = []
+    data_graft = []
     
-    # Re-scan for MPNN outputs if run_mpnn was used or just check existence
-    # Logic: Iterate RFdiffusion designs, look for corresponding MPNN designs.
-    
-    # Logic: Iterate RFdiffusion designs, look for corresponding MPNN designs.
-    
-    json_data = []
+    json_all = []
+    json_scaffold = []
+    json_swap = []
+    json_graft = []
 
     for pdb in design_files:
         dirname = os.path.dirname(pdb)
         parent_dir = os.path.dirname(dirname)
         mpnn_out = os.path.join(parent_dir, "proteinmpnn")
+        
+        # Determine Category
+        category = "Other"
+        if "DeNovo" in pdb:
+            category = "Scaffold"
+        elif "Swaps" in pdb:
+            category = "Swap"
+        elif "Grafted" in pdb:
+            category = "Graft"
         
         # Original Name: scaffold_0.pdb
         basename = os.path.basename(pdb).replace(".pdb", "")
@@ -173,6 +210,13 @@ def main():
         
         seqs_dir = os.path.join(mpnn_out, "seqs")
         fasta_file = os.path.join(seqs_dir, f"{basename}.fa")
+
+        if not os.path.exists(fasta_file):
+             # Try _mpnn_input suffix (used during ligand masquerading)
+             fasta_file = os.path.join(seqs_dir, f"{basename}_mpnn_input.fa")
+
+        entry_data = None
+        entry_json = None
 
         if os.path.exists(fasta_file):
             try:
@@ -229,8 +273,15 @@ def main():
                     seqs_dict = get_sequence(pdb)
                     if seqs_dict:
                         all_chains = sorted(seqs_dict.keys())
-                        # Must match the logic used for --pdb_path_chains
-                        design_chains = [c for c in all_chains if c != 'Z']
+                        # Heuristic: Protein chains have length > 5 (residues)
+                        # Ligand chains have length <= 5 (e.g. "ZN", "SF4")
+                        protein_chains = [c for c in all_chains if len(seqs_dict[c]) > 5]
+                        ligand_chains = [c for c in all_chains if len(seqs_dict[c]) <= 5]
+                        
+                        # We assume we design all protein chains?
+                        # Or match --pdb_path_chains logic.
+                        design_chains = protein_chains
+
                     else:
                         print(f"Error parse chains for {pdb}")
                         continue
@@ -258,11 +309,12 @@ def main():
                     json_sequences = []
                     
                     for chain_id in all_chains:
-                        if chain_id == 'Z':
+                        if chain_id in ligand_chains:
                              # Ligand Chain
+                             ligand_code = seqs_dict[chain_id]
                              json_sequences.append({
-                                "ligand": {
-                                    "ccdCodes": [metal_type],
+                                "ion": {
+                                    "ion": ligand_code,
                                     "count": 1
                                 }
                             })
@@ -283,10 +335,10 @@ def main():
                                 }
                             })
                     
-                    json_data.append({
+                    entry_json = {
                         "name": unique_id,
                         "sequences": json_sequences
-                    })
+                    }
 
                     # Construct full sequence string for CSV (Chain A / Chain Z)
                     # For Ligand, we use 'G' (as in PDB) or we could use the metal code? 
@@ -297,19 +349,18 @@ def main():
                     for item in json_sequences:
                         if "proteinChain" in item:
                             csv_seq_parts.append(item["proteinChain"]["sequence"])
-                        elif "ligand" in item:
+                        elif "ion" in item:
                             csv_seq_parts.append("G") # Ligand is G in PDB
                     
                     full_seq_str = "/".join(csv_seq_parts)
                     
-                    data.append({
+                    entry_data = {
                         "id": unique_id,
                         "sequence": full_seq_str,
                         "ligand": metal_type if metal_type else "",
                         "path": os.path.abspath(pdb), 
                         "source": "ProteinMPNN"
-                    })
-
+                    }
 
                     found_seqs = True
             except Exception as e:
@@ -323,40 +374,98 @@ def main():
                 rel_path = os.path.relpath(pdb, args.pred_dir)
                 unique_id = rel_path.replace("/", "_").replace(".pdb", "")
                 
-                data.append({
+                entry_data = {
                     "id": unique_id,
                     "sequence": full_seq, 
                     "path": os.path.abspath(pdb),
                     "source": "RFdiffusion_Backbone"
-                })
+                }
                 
                 # Also add backbone to JSON? Maybe not if it's Poly-Gly/Backbone only. 
                 # Converting backbone dict to list
+                # Also add backbone to JSON? Maybe not if it's Poly-Gly/Backbone only. 
+                # Converting backbone dict to list
                 json_sequences = []
-                for chain_id, chain_seq in seqs.items():
-                     json_sequences.append({
-                        "proteinChain": {
-                            "sequence": chain_seq,
-                            "count": 1
-                        }
-                    })
                 
-                json_data.append({
+                all_backbone_chains = sorted(seqs.keys())
+                # Same heuristic
+                prot_chains_bb = [c for c in all_backbone_chains if len(seqs[c]) > 5]
+                lig_chains_bb = [c for c in all_backbone_chains if len(seqs[c]) <= 5]
+                
+                for chain_id in all_backbone_chains:
+                    if chain_id in lig_chains_bb:
+                         json_sequences.append({
+                            "ion": {
+                                "ion": seqs[chain_id],
+                                "count": 1
+                            }
+                        })
+                    else:
+                         json_sequences.append({
+                            "proteinChain": {
+                                "sequence": seqs[chain_id],
+                                "count": 1
+                            }
+                        })
+                
+                entry_json = {
                     "name": unique_id,
                     "sequences": json_sequences
-                })
-
-    if data:
-        df = pd.DataFrame(data)
-        df.to_csv(args.out_csv, index=False)
-        print(f"Saved {len(df)} sequences to {args.out_csv}")
+                }
         
-    if json_data:
-        with open(args.out_json, 'w') as f:
-            json.dump(json_data, f, indent=2)
-        print(f"Saved {len(json_data)} JSON entries to {args.out_json}")
-    else:
-        print("No designs found.")
+        # Append to master lists and category lists
+        if entry_data:
+            data_all.append(entry_data)
+            if category == "Scaffold":
+                data_scaffold.append(entry_data)
+            elif category == "Swap":
+                data_swap.append(entry_data)
+            elif category == "Graft":
+                data_graft.append(entry_data)
+
+        if entry_json:
+             json_all.append(entry_json)
+             if category == "Scaffold":
+                json_scaffold.append(entry_json)
+             elif category == "Swap":
+                json_swap.append(entry_json)
+             elif category == "Graft":
+                json_graft.append(entry_json)
+
+    # Function to save CSV
+    def save_csv(data_list, filename):
+        if data_list:
+            df = pd.DataFrame(data_list)
+            df.to_csv(filename, index=False)
+            print(f"Saved {len(df)} sequences to {filename}")
+        else:
+            print(f"No designs found for {filename}")
+
+    # Function to save JSON
+    def save_json(data_list, filename):
+        if data_list:
+            with open(filename, 'w') as f:
+                json.dump(data_list, f, indent=2)
+            print(f"Saved {len(data_list)} JSON entries to {filename}")
+        else:
+            print(f"No designs found for {filename}")
+
+    # Save All
+    save_csv(data_all, args.out_csv)
+    save_json(json_all, args.out_json)
+
+    # Save Categories
+    base_csv = args.out_csv.replace(".csv", "")
+    base_json = args.out_json.replace(".json", "")
+
+    save_csv(data_scaffold, f"{base_csv}_scaffold.csv")
+    save_json(json_scaffold, f"{base_json}_scaffold.json")
+
+    save_csv(data_swap, f"{base_csv}_swap.csv")
+    save_json(json_swap, f"{base_json}_swap.json")
+
+    save_csv(data_graft, f"{base_csv}_graft.csv")
+    save_json(json_graft, f"{base_json}_graft.json")
 
 if __name__ == "__main__":
     main()
