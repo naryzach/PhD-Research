@@ -50,7 +50,7 @@ def main():
     # 1. Download (Unchanged)
     if args.download or args.run_all:
         print("\n=== Stage 1: Download Datasets ===")
-        cmd = [sys.executable, os.path.join(base_dir, "download_datasets.py"), "--metals", args.metals]
+        cmd = [sys.executable, os.path.join(base_dir, "download_datasets.py"), "--metals", args.metals, "--limit", str(args.num_designs)]
         run_command(cmd, args.dry_run)
         
     # 2. Catalog (Unchanged)
