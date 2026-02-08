@@ -75,6 +75,42 @@ def run_swap(args):
              print("Failed to parse structure")
              continue
 
+        # Remap Chains (Detect AAA -> A)
+        chain_map = {}
+        used_chains = set()
+        
+        # First pass: identify existing single-char chains
+        for model in structure:
+            for chain in model:
+                if len(chain.id) == 1:
+                    used_chains.add(chain.id)
+                    
+        # Second pass: remap long chains
+        import string
+        available_chars = [c for c in string.ascii_uppercase if c not in used_chains and c != 'Z']
+        
+        for model in structure:
+            for chain in model:
+                original_id = chain.id
+                if len(original_id) > 1:
+                    if original_id in chain_map:
+                        new_id = chain_map[original_id]
+                    else:
+                        if not available_chars:
+                            print(f"Error: Run out of single-character chain IDs for {source_pdb}")
+                            break # Critical failure
+                        new_id = available_chars.pop(0)
+                        chain_map[original_id] = new_id
+                        used_chains.add(new_id)
+                    
+                    print(f"  Remapping chain {original_id} -> {new_id}")
+                    chain.id = new_id
+        
+        # Update internal maps if remapping occurred
+        if chain_map:
+             # structure is updated in place
+             pass
+
         # Parse residues to find Target Chain
         res_str = row['residues']
         chains = set()
@@ -87,8 +123,14 @@ def run_swap(args):
             # Use non-greedy match for chain to allow digits in residue to be captured by group 2
             match = re.match(r"([A-Za-z0-9]+?)(\d+)", r.split('(')[0])
             if match:
-                chains.add(match.group(1))
-                residue_ids.append((match.group(1), int(match.group(2))))
+                raw_chain = match.group(1)
+                res_num = int(match.group(2))
+                
+                # Apply remapping
+                final_chain = chain_map.get(raw_chain, raw_chain)
+                
+                chains.add(final_chain)
+                residue_ids.append((final_chain, res_num))
             
         if not chains:
              print(f"  Could not parse chain from {res_str}")
@@ -174,6 +216,10 @@ def run_swap(args):
             os.makedirs(out_dir, exist_ok=True)
             rf_out = os.path.join(out_dir, "rfdiffusion")
             os.makedirs(rf_out, exist_ok=True)
+
+            if not args.overwrite and glob.glob(os.path.join(rf_out, "design*.pdb")):
+                print(f"    Skipping {motif_id} -> {metal} (already exists)")
+                continue
             
             swapped_pdb_path = os.path.join(rf_out, "input_swapped.pdb")
             
@@ -260,6 +306,7 @@ def main():
     parser.add_argument("--target_metals", default="ZN,CU,NI,CO,MN,FE,MG,CA", help="Metals to swap TO")
     parser.add_argument("--num_designs", type=int, default=2)
     parser.add_argument("--dry_run", action="store_true")
+    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing output.")
     
     args = parser.parse_args()
     run_swap(args)

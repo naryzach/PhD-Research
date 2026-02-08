@@ -114,7 +114,7 @@ def run_scaffolding_for_ion(ion, catalog_dir, out_dir, args):
         rf_out = os.path.join(scaffold_out_dir, "rfdiffusion")
         
         if os.path.exists(rf_out) and not args.overwrite:
-            if glob.glob(os.path.join(rf_out, "*.pdb")):
+            if glob.glob(os.path.join(rf_out, "scaffold*.pdb")):
                 print(f"    Skipping {motif_name} (already exists)")
                 continue
             
