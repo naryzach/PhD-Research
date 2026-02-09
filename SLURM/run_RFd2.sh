@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# Setup SLURM
+source SLURM_credentials.sh
+#SBATCH --job-name=RFDiffusion
+#SBATCH --time=5-00:00:00         # Set a time limit (5 days)
+#SBATCH --gres=gpu:1
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G # Amount of memory to reserve
+#SBATCH --output=output_%j.log
+#SBATCH --error=error_%j.log
+
+# Open necessary virtual environment
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate rfd2_env
+
+# Run Script
+cd ../MetalBinder
+pwd
+python run_pipeline.py --run_all --num_designs 2 --run_mpnn
+
+conda deactivate
