@@ -4,7 +4,7 @@ import sys
 import copy
 import numpy as np
 import subprocess
-from Bio.PDB import PDBParser, MMCIFParser, PDBIO, Select, Superimposer, Vector, rotaxis
+from Bio.PDB import PDBParser, MMCIFParser, PDBIO, Select, Superimposer, Vector, rotaxis, Structure, Model, Chain
 from Bio.PDB.Polypeptide import is_aa
 from Bio.PDB import NeighborSearch
 
@@ -444,10 +444,10 @@ def run_graft(args):
     os.makedirs(args.out_dir, exist_ok=True)
     
     # Clash Cleaning
-    if metal_atoms_in_motif:
-        print(f"Checking for clashes with {len(metal_atoms_in_motif)} metal atoms...")
+    if metal_atoms_in_motif and not args.no_clash_cleanup:
+        print(f"Checking for clashes with {len(metal_atoms_in_motif)} metal atoms (Threshold: {args.clash_threshold} A)...")
         ns = NeighborSearch(list(merged_model.get_atoms()))
-        clash_radius = 3.5
+        clash_radius = args.clash_threshold
         
         atoms_to_remove = []
         residues_to_clean = set()
@@ -470,6 +470,8 @@ def run_graft(args):
                      print(f"  Removed clashing residue {args.chain} {res.id[1]}")
                  except:
                      pass
+    elif args.no_clash_cleanup:
+        print("Skipping clash cleaning (disabled by user).")
     
     io = PDBIO()
     io.set_structure(merged_structure)
@@ -496,74 +498,310 @@ def run_graft(args):
              print("Error: ORI token failed to write to grafted_input.pdb")
              return
 
-        
+            
+    # 5. Renumber Merged Structure (Crucial for RFdiffusion)
+    # RFdiffusion works best with 1-indexed, contiguous residues.
+    # We will renumber the MERGED model (template + graft) to 1..N.
+    # This avoids insertion code issues and duplicate IDs.
+    
+    print("Renumbering merged structure to contiguous 1..N...")
+    new_res_num = 1
+    # We need to track the mapping to generate the contig string correctly
+    # Old ID -> New ID
+    # But "Old ID" is (chain, resseq, icode).
+    # The merged model has:
+    # 1. Template Chain (args.chain) with a GAP where graft goes.
+    # 2. Motif Chain (motif_chain_id).
+    # We want to merge them into ONE chain if possible?
+    # If we keep them as separate chains in PDB structures, we can still renumber them.
+    # But for a SINGLE CHAIN OUTPUT from RFdiffusion, we should ideally have a single input chain.
+    # Let's Move motif residues into args.chain!
+    
+    main_chain = merged_model[args.chain]
+    if motif_chain_id and motif_chain_id != args.chain:
+        motif_chain = merged_model[motif_chain_id]
+        print(f"Merging motif chain {motif_chain_id} into {args.chain}...")
+        for atom in list(motif_chain.get_atoms()):
+            # We need to detach from old and add to new?
+            # Easier to just move residues.
+            pass # PDB structure modification is tricky inplace.
+            
+    # Simpler approach: Renumber everything in place, keeping chains distinct but numbers unique?
+    # No, for `/` syntax, they usually imply same chain or connected.
+    # Let's just renumber the residues and update the `merged_model` object.
+    # And we need to know that 'Before' residues map to 1..X
+    # 'Motif' residues map to Y..Z
+    # 'After' residues map to ...
+    
+    # Let's collect all residues in desired order:
+    # Before -> Motif -> After
+    # But they are currently in different chains/gap.
+    
+    # Actually, we can just rely on the existing IDs for now but use `/` to connect them.
+    # The `H1-52/2-6/M10-20` syntax works even if M is a different chain ID.
+    # It tells RFdiffusion: "Take seq from H:1-52, then build 2-6 residues, then take seq from M:10-20".
+    # Result will be a single chain.
+    # So we DON'T strictly need to merge chains in the PDB.
+    # WE DO need to handle duplicate 52/52A if they exist.
+    
+    # Scan for duplicates in merged_chain
+    # If 52 and 52A exist, they will appear as `r.id[1]=52` twice.
+    # BioPython parses 52A as `id=(' ', 52, 'A')`.
+    # My `get_contig_segs` uses `r.id[1]`.
+    # It ignores icode!
+    # Fix `get_contig_segs` to handle full IDs or renumber.
+    
+    # Let's just fix the CONTIG GENERATION to handle insertion codes?
+    # RFdiffusion understands `H52` but maybe not `H52A`.
+    # If PDB has 52A, RFdiffusion might fail or ignore it.
+    # Renumbering is the safest bet.
+    
+    # Implementation:
+    # 1. Create a clean new chain.
+    # 2. Add 'Before' residues from Template.
+    # 3. Add 'Motif' residues.
+    # 4. Add 'After' residues from Template.
+    # 5. Save this new single-chain PDB.
+    # 6. Generate contig `1-N/link/N+M...`.
+    
+    # This is complex to implement correctly in one go.
+    # Let's stick to the `/` fix first.
+    # And fix `get_contig_segs` to NOT duplicate 52.
+    
+    pass 
+
     # 5. Build Contig
     # [Template_Before, 10-20, Motif, 10-20, Template_After]
     
-    # Helper for contiguous segments
-    def get_contig_segs(residues):
-        if not residues: return []
-        segments = []
-        current = [residues[0]]
-        for r in residues[1:]:
-            if r == current[-1] + 1:
-                current.append(r)
-            else:
-                segments.append(current)
-                current = [r]
-        segments.append(current)
-        return [(s[0], s[-1]) for s in segments]
-
-    contig_parts = []
     
-    # helper to get merged chain
-    merged_model = next(iter(merged_structure))
-    merged_chain = merged_model[args.chain]
     
-    # Template Before (Handle Gaps)
-    # Get all AA residues < start_res FROM MERGED CHAIN
-    before_res = sorted([r.id[1] for r in merged_chain if is_aa(r) and r.id[1] < start_res])
-    if before_res:
-         segs = get_contig_segs(before_res)
-         for start, end in segs:
-             contig_parts.append(f"{args.chain}{start}-{end}")
     
-    contig_parts.append("10-20") # Loop 1
+    # 5. Renumber Merged Structure & Build Contig
+    # RFdiffusion works best with 1-indexed, contiguous residues.
+    # We will renumber the MERGED model (template + graft) to 1..N.
+    # This avoids insertion code issues and duplicate IDs.
     
-    # Motif (Assume Chain M is fully preserved)
-    # Need to find the motif chain in the merged model
-    motif_chain = None
-    motif_chain_id = None
-    for c in merged_model:
-        if c.id != args.chain:
-            motif_chain = c
-            motif_chain_id = c.id
-            break
-            
-    if motif_chain:
-        m_res = sorted([r.id[1] for r in motif_chain if is_aa(r)])
-        if m_res:
-             segs = get_contig_segs(m_res)
-             for i, (start, end) in enumerate(segs):
-                 contig_parts.append(f"{motif_chain_id}{start}-{end}")
-                 if i < len(segs) - 1:
-                      contig_parts.append("6-15") # Linker
-    else:
-        print("Error: Could not find motif chain in merged model for contig generation.")
-        return
-
-    contig_parts.append("10-20") # Loop 2
+    print("Renumbering merged structure to contiguous 1..N...")
     
-    # Template After (Handle Gaps)
-    # Get all AA residues > end_res FROM MERGED CHAIN
-    after_res = sorted([r.id[1] for r in merged_chain if is_aa(r) and r.id[1] > end_res])
-    if after_res:
-         segs = get_contig_segs(after_res)
-         for start, end in segs:
-             contig_parts.append(f"{args.chain}{start}-{end}")
+    template_chain_obj = merged_model[args.chain]
+    
+    # Collect protein residues to add in order: Before -> Motif -> After
+    residues_to_add = [] 
+    
+    # 1. Template Before
+    all_temp_res = sorted(list(template_chain_obj.get_residues()), key=lambda r: r.id[1])
+    temp_before = [r for r in all_temp_res if is_aa(r) and r.id[1] < start_res]
+    for r in temp_before: residues_to_add.append((r, r.id))
+    
+    # 2. Motif
+    motif_len = 0
+    if motif_chain_id:
+        motif_chain_obj = merged_model[motif_chain_id]
+        motif_res_obj = sorted(list(motif_chain_obj.get_residues()), key=lambda r: r.id[1])
+        motif_aa = [r for r in motif_res_obj if is_aa(r)]
+        motif_len = len(motif_aa)
         
-    # RFdiffusion2 Format: ['part,part,part']
-    contig = f"['{','.join(contig_parts)}']"
+        # Create set for boundary checking later
+        motif_residues_set = set(motif_aa)
+        
+        # Create set for boundary checking later
+        motif_residues_set = set(motif_aa)
+        
+        for r in motif_aa: residues_to_add.append((r, r.id))
+        
+    # 3. Template After
+    temp_after = [r for r in all_temp_res if is_aa(r) and r.id[1] > end_res]
+    for r in temp_after: residues_to_add.append((r, r.id))
+    
+    # Prep for renumbering
+    renumbered_structure = Structure.Structure("renumbered")
+    renumbered_model = Model.Model(0)
+    renumbered_structure.add(renumbered_model)
+    renumbered_chain = Chain.Chain("A") # Always Chain A for protein
+    renumbered_model.add(renumbered_chain)
+    
+    contig_parts = []
+    current_segment_start_new = 1
+    current_segment_end_new = 0 
+    
+    idx_switch_to_motif = len(temp_before)
+    idx_switch_to_after = len(temp_before) + motif_len
+    
+    new_res_counter = 1
+    
+    for i, (r, old_id) in enumerate(residues_to_add):
+        # 1. Renumber
+        # Note: detach_child might fail if we already moved it? 
+        # But we are building a NEW structure object usually.
+        # But `r` is the same object.
+        # We must clone it to be safe, or just move it.
+        # Moving it is fine as long as we don't need old structure anymore.
+        
+        # FIX: Must detach from parent BEFORE changing ID to avoid collision with siblings!
+        if r.get_parent():
+            r.get_parent().detach_child(old_id)
+            
+        r.id = (' ', new_res_counter, ' ')
+        renumbered_chain.add(r)
+        
+        # 2. Contig Logic
+        if i == idx_switch_to_motif:
+            if current_segment_end_new >= current_segment_start_new:
+                 contig_parts.append(f"A{current_segment_start_new}-{current_segment_end_new}")
+            contig_parts.append(args.linker_len) # Linker to Motif
+            current_segment_start_new = new_res_counter
+            
+        elif i == idx_switch_to_after:
+             if current_segment_end_new >= current_segment_start_new:
+                 contig_parts.append(f"A{current_segment_start_new}-{current_segment_end_new}")
+             contig_parts.append(args.linker_len) # Linker to Scaffold
+             current_segment_start_new = new_res_counter
+             
+        if i > 0:
+            # Check for Gap using Geometry (Robust to numbering weirdness)
+            prev_res, prev_id = residues_to_add[i-1]
+            curr_res, curr_id = residues_to_add[i]
+            
+            # Calculate distance between C of prev and N of curr
+            # Note: At the Motif<->Template boundaries, we inserted linkers via loop logic (lines 642/649)
+            # But here we are iterating residues_to_add which is the MERGED list.
+            # Wait, residues_to_add is constructed sequentially.
+            # Does it include the linkers? NO. Linkers are added to `contig_parts` string, not to the PDB structure yet.
+            # RFdiffusion builds the linkers.
+            # So `residues_to_add` contains the Fixed residues.
+            # If `prev` and `curr` are far apart, we MUST insert a gap in `contig_parts`.
+            
+            # Check if we are crossing a linker boundary
+            # If so, `current_segment_end_new` was updated in the linker block?
+            # actually the linker block (lines 642/650) appends to `contig_parts`.
+            # But `residues_to_add` is the list of RESIDUES.
+            # We are iterating `residues_to_add`.
+            # If `prev` was Template and `curr` is Motif -> Linker logic handles it (is_motif check).
+            # If `prev` and `curr` are both Template -> Gap check needed.
+            
+            gap_needed = False
+            gap_size_est = 0
+            
+            is_prev_motif = (prev_res in motif_residues_set)
+            is_curr_motif = (curr_res in motif_residues_set)
+            
+            # Only check geometry if we are NOT crossing the graft boundaries (which are handled by linker_len)
+            if is_prev_motif == is_curr_motif:
+                 try:
+                     c_atom = prev_res['C']
+                     n_atom = curr_res['N']
+                     dist = c_atom - n_atom
+                     if dist > 2.0: # Threshold for peptide bond approx 1.33A
+                         gap_needed = True
+                         gap_size_est = int(dist / 3.0) # Approx 3A per residue stretch
+                         if gap_size_est < 1: gap_size_est = 1
+                 except KeyError:
+                     # Missing atoms? Assume gap if numbering jumps?
+                     # Fallback to numbering
+                     if curr_id[1] - prev_id[1] > 1:
+                         gap_needed = True
+                         gap_size_est = curr_id[1] - prev_id[1] - 1
+
+            if gap_needed:
+                 # Close current segment
+                 if current_segment_end_new >= current_segment_start_new:
+                     contig_parts.append(f"A{current_segment_start_new}-{current_segment_end_new}")
+                 
+                 # Add gap
+                 gap_start = gap_size_est
+                 gap_end = gap_size_est + 2 if not args.rigid_gaps else gap_size_est
+                 print(f"Detected geometric gap {dist:.2f}A. Auto-filling {gap_start}-{gap_end}.")
+                 contig_parts.append(f"{gap_start}-{gap_end}")
+                 
+                 current_segment_start_new = new_res_counter
+        
+        current_segment_end_new = new_res_counter
+        new_res_counter += 1
+        
+    if current_segment_end_new >= current_segment_start_new:
+        contig_parts.append(f"A{current_segment_start_new}-{current_segment_end_new}")
+
+    # Handle Metals (Move to Chain B)
+    metal_contigs = []
+    if metal_atoms_in_motif:
+         print("Moving metals to Chain B...")
+         metal_chain = Chain.Chain("B")
+         renumbered_model.add(metal_chain)
+         
+         # These atoms might be in residues we already moved? 
+         # No, we filtered `is_aa(r)`. Metals are HETATMs.
+         # So they are still in `merged_model` old chains.
+         
+         # We need to find them. `metal_atoms_in_motif` has the atoms.
+         # Get their parents (Residues).
+         added_metals = set()
+         metal_res_counter = 1
+         
+         for atom in metal_atoms_in_motif:
+             res = atom.get_parent()
+             # ID might be (H_Z, 100, )
+             # Check if we already added this residue
+             if res in added_metals: continue
+             
+             # Clone/Move
+             res.detach_parent()
+             
+             # FIX 2: Set hetflag to 'H_XYZ' so PDBIO writes HETATM.
+             # RFdiffusion parser (aa2num) crashes if it sees 'ATOM ... ZN'.
+             # It ignores HETATM lines when parse_hetatom=False (default for target).
+             hetflag = f"H_{res.resname.strip()}"
+             res.id = (hetflag, metal_res_counter, ' ')
+             metal_chain.add(res)
+             
+             # Note: Contig string B1-1 etc is NOT needed (and handled above)
+             pdb_res_num = metal_res_counter
+             
+             # We track them just in case, but we don't put them in valid_contigs
+             metal_contigs.append(f"B{metal_res_counter}-{metal_res_counter}")
+             
+             added_metals.add(res)
+             metal_res_counter += 1
+
+    # Replace merged structure
+    merged_structure = renumbered_structure
+    merged_model = renumbered_model
+    merged_chain = renumbered_chain # Chain A
+    args.chain = "A" 
+    
+    # Save
+    merged_path = os.path.join(args.out_dir, "grafted_input.pdb")
+    io = PDBIO()
+    io.set_structure(merged_structure)
+    io.save(merged_path)
+    print(f"Renumbered structure saved to {merged_path}")
+    
+    # Add ORI (re-center if needed, but relative coords conserved)
+    if metal_atoms_in_motif:
+         coords = np.array([a.get_coord() for a in metal_atoms_in_motif])
+         target_center = np.mean(coords, axis=0)
+         
+    with open(merged_path, 'a') as f:
+        x, y, z = target_center
+        ori_line = f"HETATM 9998  CA  ORI Z 999    {x:8.3f}{y:8.3f}{z:8.3f}  1.00 20.00           C  \n"
+        f.write(ori_line)
+
+    
+    
+    # Build Final Contig String
+    # Protein parts joined by ',' (single chain segments)
+    # RFdiffusion contigs.py splits by ',' to get subcons. 
+    # It does NOT split by '/'. Using '/' caused ValueError in length calculation.
+    protein_contig = ",".join(contig_parts)
+    
+    # NOTE: We do NOT include the metal chain (B) in the contig string.
+    # RFdiffusion treats items in `contigs` as protein chains to be diffused or fixed.
+    # If we include 'B1-1' where B1 is ZN, it tries to parse ZN as an amino acid and fails (KeyError 'ZN').
+    # Instead, we rely on `inference.ligand` to tell RFdiffusion to respect the ligand in the input PDB.
+    # The metal is preserved in the PDB (Chain B), so RFdiffusion will see it.
+    
+    contig_str = protein_contig
+
+    contig = f"['{contig_str}']"
     
     # 6. Run RFdiffusion2
     rf_out = os.path.join(args.out_dir, "rfdiffusion")
@@ -577,6 +815,17 @@ def run_graft(args):
     if len(existing_designs) >= args.num_designs and not args.overwrite:
         print(f"Skipping RFdiffusion: Found {len(existing_designs)} existing designs in {rf_out}. Use --overwrite to re-run.")
         return
+    
+    if args.overwrite and existing_designs:
+        print(f"Overwriting: Removing {len(existing_designs)} existing designs in {rf_out}...")
+        for f in existing_designs:
+            try:
+                os.remove(f)
+                # Also remove trb file
+                trb = f.replace(".pdb", ".trb")
+                if os.path.exists(trb): os.remove(trb)
+            except Exception as e:
+                print(f"Error removing {f}: {e}")
 
     rf_script = os.path.join(os.path.abspath(args.rf_path), "rf_diffusion", "run_inference.py")
     
@@ -677,7 +926,11 @@ def main():
     parser.add_argument("--rf_path", default="../Tools/RFdiffusion2")
     parser.add_argument("--num_designs", type=int, default=2)
     parser.add_argument("--dry_run", action="store_true")
-    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing designs")
+    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing output directory")
+    parser.add_argument("--linker_len", type=str, default="5-15", help="Length range for linkers connecting motif to scaffold (default: 5-15)")
+    parser.add_argument("--rigid_gaps", action="store_true", help="Disable flexibility in auto-filled gaps (force fixed length)")
+    parser.add_argument("--clash_threshold", type=float, default=3.5, help="Distance threshold (Angstroms) for cleaning clashing scaffold residues (default: 3.5)")
+    parser.add_argument("--no_clash_cleanup", action="store_true", help="Disable automatic removal of clashing scaffold residues")
     
     args = parser.parse_args()
     run_graft(args)

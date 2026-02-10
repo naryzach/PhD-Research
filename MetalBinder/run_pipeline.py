@@ -41,12 +41,19 @@ def main():
     
     # Graft Specific
     parser.add_argument("--template", default="../Local/Templates/human_VH3_IgG.pdb", help="Template PDB for grafting")
-    parser.add_argument("--insert_at", default="97-108", help="Insertion residue/range (e.g. 97-108)")
+    parser.add_argument("--insert_at", default="93-102", help="Insertion residue/range (recommended: 93-102 for CDRH3)")
     parser.add_argument("--graft_chain", default="H", help="Template chain")
     
     # Finalize Specific
     parser.add_argument("--finalize_only", action="store_true", help="Deprecated: Use --finalize")
     parser.add_argument("--run_mpnn", action="store_true", help="Enable ProteinMPNN in finalization")
+    
+    # Common/New Args
+    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing outputs")
+    parser.add_argument("--linker_len", type=str, default="5-15", help="Graft linker range (default: 5-15)")
+    parser.add_argument("--rigid_gaps", action="store_true", help="Disable flexibility in auto-filled gaps")
+    parser.add_argument("--clash_threshold", type=float, default=3.5, help="Clash cleaning threshold in Angstroms (default 3.5)")
+    parser.add_argument("--no_clash_cleanup", action="store_true", help="Disable automatic removal of clashing scaffold residues")
     
     args = parser.parse_args()
     
@@ -159,8 +166,13 @@ def main():
                    "--chain", args.graft_chain,
                    "--out_dir", out_dir,
                    "--num_designs", str(args.num_designs),
-                   "--rf_path", args.rf_path
+                   "--rf_path", args.rf_path,
+                   "--linker_len", args.linker_len,
+                   "--clash_threshold", str(args.clash_threshold)
                    ]
+            if args.overwrite: cmd.append("--overwrite")
+            if args.rigid_gaps: cmd.append("--rigid_gaps")
+            if args.no_clash_cleanup: cmd.append("--no_clash_cleanup")
             if args.dry_run: cmd.append("--dry_run")
             run_command(cmd, args.dry_run)
 
