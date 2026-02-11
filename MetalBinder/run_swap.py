@@ -260,10 +260,11 @@ def run_swap(args):
             # Add ORI (Manually done above)
             # add_ori_token(swapped_pdb_path, [metal])
             
-            # Contig: append reference to Metal Chain Z
-            # RFd2 Contig string: List of strings
+            # Contig: append reference to Metal Chain Z?
+            # NO. RFdiffusion crashes if we include non-protein chain in contigs.
+            # We use inference.ligand instead.
             current_contigs = list(rf_contig_list)
-            current_contigs.append("Z1-1")
+            # current_contigs.append("Z1-1")
             
             # Format as string representation of list
             # "['...', '...', 'Z1-1']"
