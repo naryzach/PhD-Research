@@ -29,17 +29,18 @@ import fcsparser
 
 # ---- CONFIGURATION ----
 # Paths relative to "DNA Analysis" folder
-DATA_DIR = r"../Local/TwistBio_FCS"
-OUTPUT_DIR = r"../Local/FCS_Analysis_Results"
+DATA_DIR = r"../Local/BD6_Flow_Renamed"
+OUTPUT_DIR = r"../Local/FCS_Analysis_Results_2"
 NEG_CONTROL_PATTERN = "Negative Control" # Starts with this
+POS_CONTROL_PATTERNS = ["Positive Control", "TIMP"] # Starts with any of these
 
 # Channels
 CH_FSC_A = 'FSC-A'
 CH_SSC_A = 'SSC-A'
 CH_FSC_H = 'FSC-H'
 CH_SSC_H = 'SSC-H'
-CH_FITC = 'FITC-A' # Binding
-CH_APC = 'APC-A'   # Expression
+CH_FITC = 'FITC-A' # Expression
+CH_APC = 'APC-A'   # Binding
 
 # Plot settings
 SNS_STYLE = "whitegrid"
@@ -50,6 +51,7 @@ sns.set_style(SNS_STYLE)
 def load_fcs(file_path):
     """Loads an FCS file and returns the dataframe."""
     try:
+        # Suppress warnings from fcsparser if needed
         meta, data = fcsparser.parse(file_path, reformat_meta=True)
         return meta, data
     except Exception as e:
@@ -113,6 +115,10 @@ def main():
     iso_dir = os.path.join(OUTPUT_DIR, "Publication_Plots")
     if not os.path.exists(iso_dir):
         os.makedirs(iso_dir)
+
+    comp_dir = os.path.join(OUTPUT_DIR, "Comparisons_vs_PosCtrl")
+    if not os.path.exists(comp_dir):
+        os.makedirs(comp_dir)
         
     # Find files
     search_path = os.path.join(os.getcwd(), DATA_DIR)
@@ -124,14 +130,16 @@ def main():
         print("No FCS files found!")
         return
 
-    # 2. Process Negative Controls
-    # Strict matching to start with "Negative Control" (case sensitive usually, but Windows matches anyway)
-    # This avoids "0 Negative Control" if we check startswith
+    # Semantic Channel Mapping
+    CH_EXPR = CH_FITC # Expression (Y-axis)
+    CH_BIND = CH_APC  # Binding (X-axis)
+
+    # 2. Process Controls
+    # Negative Controls
     neg_files = [f for f in all_files if os.path.basename(f).startswith(NEG_CONTROL_PATTERN)]
-    print(f"Found {len(neg_files)} negative control files (Pattern: '{NEG_CONTROL_PATTERN}').")
+    print(f"Found {len(neg_files)} negative control files.")
     
     neg_dfs = []
-    
     for f in neg_files:
         _, d = load_fcs(f)
         if d is not None:
@@ -141,170 +149,189 @@ def main():
             
     if neg_dfs:
         neg_concat = pd.concat(neg_dfs)
-        thresh_fitc = np.percentile(neg_concat[CH_FITC], 99)
-        thresh_apc = np.percentile(neg_concat[CH_APC], 99)
-        print(f"Thresholds (99% Neg): FITC={thresh_fitc:.2f}, APC={thresh_apc:.2f}")
+        thresh_expr = np.percentile(neg_concat[CH_EXPR], 99)
+        thresh_bind = np.percentile(neg_concat[CH_BIND], 99)
+        
+        neg_mfi_expr = neg_concat[CH_EXPR].median()
+        neg_mfi_bind = neg_concat[CH_BIND].median()
+        neg_rsd_bind = stats.median_abs_deviation(neg_concat[CH_BIND], scale='normal')
     else:
         print("Warning: No negative controls found matching pattern. Using default.")
-        thresh_fitc = 1000
-        thresh_apc = 1000
+        thresh_expr = 1000
+        thresh_bind = 1000
+        neg_mfi_expr = 1
+        neg_mfi_bind = 1
+        neg_rsd_bind = 1
+        neg_concat = None
 
-    # Calculate Negative Control Stats for Fold Change / Stain Index
-    if neg_dfs:
-        # Use simple median for MFI
-        neg_mfi_fitc = neg_concat[CH_FITC].median()
-        neg_mfi_apc = neg_concat[CH_APC].median()
-        
-        # Robust SD for Stain Index (MAD * 1.4826)
-        # Handle zeros/negatives by shifting if necessary, but usually distinct population is fine
-        neg_rsd_fitc = stats.median_abs_deviation(neg_concat[CH_FITC], scale='normal')
-        neg_rsd_apc = stats.median_abs_deviation(neg_concat[CH_APC], scale='normal')
-        
-        print(f"Neg Ctrl Stats: FITC Median={neg_mfi_fitc:.2f}, rSD={neg_rsd_fitc:.2f}")
-    else:
-        neg_mfi_fitc = 1
-        neg_mfi_apc = 1
-        neg_rsd_fitc = 1
-        neg_rsd_apc = 1
-        print("Warning: Using default Neg Stats (1.0)")
+    # Positive Controls
+    pos_files = [f for f in all_files if any(os.path.basename(f).startswith(p) for p in POS_CONTROL_PATTERNS)]
+    print(f"Found {len(pos_files)} positive control files (Patterns: {POS_CONTROL_PATTERNS}).")
+    
+    pos_dfs = []
+    for f in pos_files:
+        _, d = load_fcs(f)
+        if d is not None:
+            d_scat, _ = gate_scatter(d)
+            d_sing, _ = gate_singlets(d_scat)
+            pos_dfs.append(d_sing)
+            
+    pos_mfi_bind = 1.0
+    pos_concat = None
+    if pos_dfs:
+        pos_concat = pd.concat(pos_dfs)
+        pos_mfi_expr = pos_concat[CH_EXPR].median()
+        pos_mfi_bind = pos_concat[CH_BIND].median()
+        print(f"Pos Ctrl Stats: Binding (APC) Median={pos_mfi_bind:.2f}")
 
     # 3. Analyze All Samples
     summary_stats = []
-    
-    # Store subsampled data for Ridgeline plot
-    # DataFrame with columns: [Value, SampleName]
     ridge_data = [] 
     
+    # Pre-calculate log data for controls for plotting (Binding = APC)
+    neg_log_bind = np.log10(np.clip(neg_concat[CH_BIND].sample(n=min(len(neg_concat), 5000)), 1, None)) if neg_concat is not None else None
+    pos_log_bind = np.log10(np.clip(pos_concat[CH_BIND].sample(n=min(len(pos_concat), 5000)), 1, None)) if pos_concat is not None else None
+
     for f in all_files:
         fname = os.path.basename(f)
-        # Clean name for display/saving (remove .fcs extension)
         clean_name = os.path.splitext(fname)[0]
+        
         print(f"Processing {clean_name}...")
         
         meta, df = load_fcs(f)
         if df is None: continue
         
         # Gates
-        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        df_scat, _ = gate_scatter(df)
+        df_sing, _ = gate_singlets(df_scat)
         
-        # 1. Scatter Gate
-        df_scat, _ = gate_scatter(df, plot_ax=axes[0,0])
-        
-        # 2. Singlet Gate
-        df_sing, _ = gate_singlets(df_scat, plot_ax=axes[0,1])
-        
-        # Subsample for Ridgeline (Binding - FITC)
-        # Log transform for layout
-        if len(df_sing) > 0:
-            sub = df_sing.sample(n=min(len(df_sing), 2000))
-            t_vals = np.log10(np.clip(sub[CH_FITC], 1, None))
-            for v in t_vals:
-                ridge_data.append({"Sample": clean_name, "LogFITC": v})
-
         # Stats
         count_total = len(df)
         count_gated = len(df_sing)
         
+        if count_gated == 0:
+            print(f"Warning: No events gated for {clean_name}")
+            continue
+
         # Positivity
-        fitc_pos = df_sing[CH_FITC] > thresh_fitc
-        apc_pos = df_sing[CH_APC] > thresh_apc
-        double_pos = fitc_pos & apc_pos
+        expr_pos = df_sing[CH_EXPR] > thresh_expr
+        bind_pos = df_sing[CH_BIND] > thresh_bind
+        double_pos = expr_pos & bind_pos
         
-        pct_fitc = fitc_pos.mean() * 100
-        pct_apc = apc_pos.mean() * 100
+        pct_expr = expr_pos.mean() * 100
+        pct_bind = bind_pos.mean() * 100
         pct_double = double_pos.mean() * 100
         
-        mfi_fitc = df_sing[CH_FITC].median()
-        mfi_apc = df_sing[CH_APC].median()
+        mfi_expr = df_sing[CH_EXPR].median()
+        mfi_bind = df_sing[CH_BIND].median()
         
+        # Formatting Ridge Data (Binding = APC)
+        sub = df_sing.sample(n=min(len(df_sing), 2000))
+        t_vals = np.log10(np.clip(sub[CH_BIND], 1, None))
+        for v in t_vals:
+            ridge_data.append({"Sample": clean_name, "LogBinding": v})
+
         # Advanced Stats
-        # Fold Change (FC) = MFI_Sample / MFI_Neg
-        fc_fitc = mfi_fitc / max(neg_mfi_fitc, 1) # Avoid div by zero
-        fc_apc = mfi_apc / max(neg_mfi_apc, 1)
+        fc_expr = mfi_expr / max(neg_mfi_expr, 1)
+        fc_bind = mfi_bind / max(neg_mfi_bind, 1)
         
-        # Stain Index (SI) = (MFI_Pos - MFI_Neg) / (2 * rSD_Neg) 
-        # Here we treat the whole sample median as MFI_Pos for the metric, 
-        # or we could use the MFI of the positive population. 
-        # Standard "Stain Index" usually compares positive peak vs negative peak.
-        # We'll use Sample Median vs Neg Median to show overall shift.
-        si_fitc = (mfi_fitc - neg_mfi_fitc) / (2 * neg_rsd_fitc) if neg_rsd_fitc > 0 else 0
+        # % of Pos Ctrl (Binding)
+        pct_of_pos_mfi = (mfi_bind / pos_mfi_bind) * 100 if pos_mfi_bind > 0 else 0
+        
+        # Binding Efficiency (Binding normalized to Expression = Binding / Expression)
+        # Avoid div by zero
+        binding_eff = mfi_bind / mfi_expr if mfi_expr > 1 else 0
+        
+        si_bind = (mfi_bind - neg_mfi_bind) / (2 * neg_rsd_bind) if neg_rsd_bind > 0 else 0
         
         summary_stats.append({
             "Filename": clean_name,
             "Total Events": count_total,
             "Gated Events": count_gated,
-            "% Gated": (count_gated/count_total)*100 if count_total > 0 else 0,
-            "FITC+ %": pct_fitc,
-            "APC+ %": pct_apc,
+            "% Gated": (count_gated/count_total)*100,
+            "Expr+ %": pct_expr,
+            "Bind+ %": pct_bind,
             "Double+ %": pct_double,
-            "FITC MFI": mfi_fitc,
-            "APC MFI": mfi_apc,
-            "FITC Fold Change": fc_fitc,
-            "FITC Stain Index": si_fitc
+            "Expr MFI": mfi_expr,
+            "Bind MFI": mfi_bind,
+            "Expr Fold Change": fc_expr,
+            "Bind Fold Change": fc_bind,
+            "Bind Stain Index": si_bind,
+            "% of Pos Ctrl": pct_of_pos_mfi,
+            "Binding Efficiency": binding_eff
         })
         
-        # 3. Fluorescence Plot (Density)
-        # Log transform
-        t_fitc = np.log10(np.clip(df_sing[CH_FITC], 1, None))
-        t_apc = np.log10(np.clip(df_sing[CH_APC], 1, None))
-        t_thresh_fitc = np.log10(max(1, thresh_fitc))
-        t_thresh_apc = np.log10(max(1, thresh_apc))
+        # --- PLOTTING ---
         
-        # Use Hexbin for density
-        # SWAPPED: X = Expression (APC), Y = Binding (FITC)
-        hb = axes[1,0].hexbin(t_apc, t_fitc, gridsize=100, cmap='jet', mincnt=1, bins='log')
-        # Add quadrants (Lines swapped too: Vline=APC thresh, Hline=FITC thresh)
-        axes[1,0].axvline(t_thresh_apc, color='black', linestyle='--')
-        axes[1,0].axhline(t_thresh_fitc, color='black', linestyle='--')
+        # 1. Main 4-panel Plot
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
         
-        axes[1,0].set_xlabel("Log10 APC-A (Expression)")
-        axes[1,0].set_ylabel("Log10 FITC-A (Binding)")
-        axes[1,0].set_title(f"Binding vs Expression (Density)\nDouble+: {pct_double:.1f}%")
-        # Can add colorbar if needed, but might clutter 4-panel
+        # Scatter
+        gate_scatter(df, plot_ax=axes[0,0])
+        gate_singlets(df_scat, plot_ax=axes[0,1])
         
-        # 4. Histogram Overlay (Binding focus) - FITC is now Y in main plot, but usually histogram is 1D. Keep Binding (FITC).
-        sns.kdeplot(t_fitc, fill=True, ax=axes[1,1], color='g', label='Sample')
-        if neg_dfs:
-            neg_sing_sample = neg_concat.sample(n=min(len(neg_concat), 5000))
-            t_neg_fitc = np.log10(np.clip(neg_sing_sample[CH_FITC], 1, None))
-            sns.kdeplot(t_neg_fitc, fill=True, ax=axes[1,1], color='gray', alpha=0.3, label='Neg Ctrl')
-            
-        axes[1,1].axvline(t_thresh_fitc, color='r', linestyle='--')
-        axes[1,1].set_xlabel("Log10 FITC-A")
-        axes[1,1].set_title(f"Binding Dist (FC: {fc_fitc:.1f}x)")
+        # Density (Expression Y vs Binding X) - User requested FITC on Y (Expr), APC on X (Bind)
+        t_expr = np.log10(np.clip(df_sing[CH_EXPR], 1, None))
+        t_bind = np.log10(np.clip(df_sing[CH_BIND], 1, None))
+        
+        # Plotting: x=t_bind (APC), y=t_expr (FITC)
+        axes[1,0].hexbin(t_bind, t_expr, gridsize=100, cmap='jet', mincnt=1, bins='log')
+        axes[1,0].axvline(np.log10(max(1, thresh_bind)), color='k', linestyle='--')
+        axes[1,0].axhline(np.log10(max(1, thresh_expr)), color='k', linestyle='--')
+        axes[1,0].set_xlabel("Log10 APC (Binding)")
+        axes[1,0].set_ylabel("Log10 FITC (Expression)")
+        axes[1,0].set_title(f"Double+: {pct_double:.1f}%")
+        
+        # Histogram Overlay (vs Neg) - Binding (APC)
+        sns.kdeplot(t_bind, fill=True, ax=axes[1,1], color='g', label='Sample')
+        if neg_log_bind is not None:
+            sns.kdeplot(neg_log_bind, fill=True, ax=axes[1,1], color='gray', alpha=0.3, label='Neg Ctrl')
+        axes[1,1].axvline(np.log10(max(1, thresh_bind)), color='r', linestyle='--')
+        axes[1,1].set_title(f"Binding Dist (FC: {fc_bind:.1f}x)")
         axes[1,1].legend()
         
         plt.tight_layout()
         plt.savefig(os.path.join(OUTPUT_DIR, f"{clean_name}_analysis.png"))
         plt.close()
-
-        # 5. Isolated Publication Plot (Binding vs Expression)
-        # Clean, single figure, larger fonts
-        plt.figure(figsize=(8, 7))
-        # Hexbin with good contrast
-        hb = plt.hexbin(t_apc, t_fitc, gridsize=100, cmap='jet', mincnt=1, bins='log')
         
-        # Add Gates (Thick black dashed lines)
-        plt.axvline(t_thresh_apc, color='black', linestyle='--', linewidth=1.5)
-        plt.axhline(t_thresh_fitc, color='black', linestyle='--', linewidth=1.5)
-        
-        # Labels and Title
-        plt.xlabel("Log10 APC-A (Expression)", fontsize=12, fontweight='bold')
-        plt.ylabel("Log10 FITC-A (Binding)", fontsize=12, fontweight='bold')
-        plt.title(f"{clean_name} Analysis", fontsize=14, fontweight='bold')
+        # 2. Publication Plot (Expr Y vs Bind X)
+        plt.figure(figsize=(6, 6))
+        plt.hexbin(t_bind, t_expr, gridsize=100, cmap='jet', mincnt=1, bins='log')
+        plt.axvline(np.log10(max(1, thresh_bind)), color='k', linestyle='--')
+        plt.axhline(np.log10(max(1, thresh_expr)), color='k', linestyle='--')
+        plt.xlabel("Log10 APC-A (Binding)")
+        plt.ylabel("Log10 FITC-A (Expression)")
+        plt.title(f"{clean_name}")
         
         # Add a text box for statistics (cleaner than title)
         textstr = '\n'.join((
             f'Double+: {pct_double:.1f}%',
-            f'FITC+: {pct_fitc:.1f}%',
-            f'APC+: {pct_apc:.1f}%'
+            f'Bind+: {pct_bind:.1f}%',
+            f'Expr+: {pct_expr:.1f}%'
         ))
         props = dict(boxstyle='round', facecolor='white', alpha=0.8)
         plt.gca().text(0.05, 0.95, textstr, transform=plt.gca().transAxes, fontsize=10,
                 verticalalignment='top', bbox=props)
-        
+                
         plt.tight_layout()
-        plt.savefig(os.path.join(iso_dir, f"{clean_name}_iso_binding_vs_expression.png"), dpi=300)
+        plt.savefig(os.path.join(iso_dir, f"{clean_name}_iso.png"), dpi=200)
+        plt.close()
+        
+        # 3. Comparison vs Positive Control (Histogram - Binding)
+        plt.figure(figsize=(8, 5))
+        if neg_log_bind is not None:
+            sns.kdeplot(neg_log_bind, fill=True, color='lightgray', label='Neg Ctrl', alpha=0.5)
+        if pos_log_bind is not None:
+            # Line only for positive control
+            sns.kdeplot(pos_log_bind, color='blue', label='Pos Ctrl', linestyle='--', linewidth=2)
+            
+        sns.kdeplot(t_bind, fill=True, color='green', label=clean_name, alpha=0.4)
+        
+        plt.xlabel("Log10 APC-A (Binding)")
+        plt.title(f"Binding Comparison: {clean_name}\n(% of Pos: {pct_of_pos_mfi:.1f}%)")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(comp_dir, f"Comp_vs_Pos_{clean_name}.png"))
         plt.close()
 
     # Save Stats
@@ -313,187 +340,158 @@ def main():
     print(f"\nAnalysis complete. Saved to {os.path.join(OUTPUT_DIR, 'summary_stats.csv')}")
     
     # ---- AGGREGATE PLOTS ----
+    generate_aggregate_plots(df_stats, ridge_data, thresh_bind, OUTPUT_DIR)
     
-    # 1. Ridgeline Plot (Binding) - Grouped by Prefix
-    if ridge_data:
-        df_ridge = pd.DataFrame(ridge_data)
+    # Report
+    generate_report(df_stats)
+
+def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, output_dir):
+    # Re-implementing the aggregation plots to ensure they exist
+    print("Generating aggregate plots...")
+    
+    if not ridge_data:
+        return
+
+    df_ridge = pd.DataFrame(ridge_data)
+
+    # 0. Ridgeline Plot (Binding) - Grouped by Prefix
+    # Identify Groups (First word of filename)
+    df_ridge['Group'] = df_ridge['Sample'].apply(lambda x: x.split()[0] if ' ' in x else 'Misc')
+    groups = df_ridge['Group'].unique()
+    
+    for group in groups:
+        print(f"Generating Ridgeline for Group: {group}...")
+        df_group = df_ridge[df_ridge['Group'] == group]
         
-        # Identify Groups (First word of filename)
-        # Exclude Control if present in ridge_data (though usually we skip it in the loop or it has unique name)
-        df_ridge['Group'] = df_ridge['Sample'].apply(lambda x: x.split()[0] if ' ' in x else 'Misc')
-        groups = df_ridge['Group'].unique()
+        # Filter Middle 95% PER SAMPLE
+        df_filtered = pd.DataFrame()
+        for sample in df_group['Sample'].unique():
+            d_sample = df_group[df_group['Sample'] == sample]
+            low = d_sample['LogBinding'].quantile(0.025)
+            high = d_sample['LogBinding'].quantile(0.975)
+            d_filt = d_sample[(d_sample['LogBinding'] >= low) & (d_sample['LogBinding'] <= high)]
+            df_filtered = pd.concat([df_filtered, d_filt])
         
-        for group in groups:
-            print(f"Generating Ridgeline for Group: {group}...")
-            df_group = df_ridge[df_ridge['Group'] == group]
-            
-            # Filter Middle 95% PER SAMPLE to cut tails
-            # This makes the distribution tighter and removes outliers
-            df_filtered = pd.DataFrame()
-            for sample in df_group['Sample'].unique():
-                d_sample = df_group[df_group['Sample'] == sample]
-                low = d_sample['LogFITC'].quantile(0.025)
-                high = d_sample['LogFITC'].quantile(0.975)
-                d_filt = d_sample[(d_sample['LogFITC'] >= low) & (d_sample['LogFITC'] <= high)]
-                df_filtered = pd.concat([df_filtered, d_filt])
-            
-            if df_filtered.empty: continue
+        if df_filtered.empty: continue
 
-            # Sort within group
-            # Get subset of summary stats for this group to sort
-            group_stats = df_stats[df_stats['Filename'].isin(df_filtered['Sample'].unique())]
-            order_mfi = group_stats.sort_values("FITC MFI", ascending=False)["Filename"].tolist()
-            
-            # Dynamic X-limits based on filtered data
-            x_min = df_filtered["LogFITC"].min()
-            x_max = df_filtered["LogFITC"].max()
-            x_pad = (x_max - x_min) * 0.1
-            x_lims = (x_min - x_pad, x_max + x_pad*2) # Extra right padding for labels
-
-            # Setup Palette
-            pal = sns.cubehelix_palette(len(order_mfi), rot=-.25, light=.7)
-            
-            # Setup Grid
-            # Height and Aspect tuned for visibility
-            g = sns.FacetGrid(df_filtered, row="Sample", hue="Sample", aspect=10, height=0.8, palette=pal, row_order=order_mfi)
-            
-            # Densities
-            # fill=True (replacement for shade), alpha=1 makes the density opaque to hide potential grid lines behind it
-            # But we must make the AXES background transparent so the rectangle doesn't hide the plot above
-            g.map(sns.kdeplot, "LogFITC", clip_on=False, fill=True, alpha=1, lw=1.5, bw_adjust=.5)
-            g.map(sns.kdeplot, "LogFITC", clip_on=False, color="w", lw=2, bw_adjust=.5)
-            g.map(plt.axhline, y=0, lw=2, clip_on=False)
-            
-            # Labels
-            def label(x, color, label):
-                ax = plt.gca()
-                ax.text(0, .2, label, fontweight="bold", color=color,
-                        ha="left", va="center", transform=ax.transAxes, fontsize=10)
-                # CRITICAL FIX: Make the background transparent so it doesn't cover the plot above it
-                ax.set_facecolor('none')
-            
-            g.map(label, "LogFITC")
-            
-            # Adjust Layout
-            g.set(xlim=x_lims)
-            g.fig.subplots_adjust(hspace=-.5) # Overlap amount
-            g.set_titles("")
-            g.set(yticks=[])
-            g.despine(bottom=True, left=True)
-            g.set_xlabels(f"Log10 FITC-A (Binding) - Group {group}")
-            
-            # Ref Line
-            t_thresh = np.log10(max(1, thresh_fitc))
-            for ax in g.axes.flatten():
-                ax.axvline(t_thresh, color='r', alpha=0.5, linestyle='--')
-                # Ensure visibility of the density on top of the grid
-                # But since we remove axes background, the grid might disappear or be weird.
-                # Actually, despine(left=True) removes Y axis. 
-                # We want the density (alpha=1) to cover the one behind it, which works by draw order.
-                
-            out_name = f"Aggregate_Ridgeline_Binding_{group}.png"
-            g.savefig(os.path.join(OUTPUT_DIR, out_name))
-            plt.close()
-
-        # 1b. Ridgeline Plot - ALL SAMPLES
-        print("Generating Ridgeline for ALL samples...")
-        # Filter Middle 95% PER SAMPLE (for all samples)
-        df_filtered_all = pd.DataFrame()
-        for sample in df_ridge['Sample'].unique():
-            d_sample = df_ridge[df_ridge['Sample'] == sample]
-            low = d_sample['LogFITC'].quantile(0.025)
-            high = d_sample['LogFITC'].quantile(0.975)
-            d_filt = d_sample[(d_sample['LogFITC'] >= low) & (d_sample['LogFITC'] <= high)]
-            df_filtered_all = pd.concat([df_filtered_all, d_filt])
+        # Sort within group
+        group_stats = df_stats[df_stats['Filename'].isin(df_filtered['Sample'].unique())]
+        order_mfi = group_stats.sort_values("Bind MFI", ascending=False)["Filename"].tolist()
         
-        if not df_filtered_all.empty:
-            # Sort all
-            order_mfi_all = df_stats.sort_values("FITC MFI", ascending=False)["Filename"].tolist()
-            
-            # Dynamic X-limits
-            x_min = df_filtered_all["LogFITC"].min()
-            x_max = df_filtered_all["LogFITC"].max()
-            x_pad = (x_max - x_min) * 0.1
-            x_lims = (x_min - x_pad, x_max + x_pad*2)
+        # Dynamic X-limits
+        x_min = df_filtered["LogBinding"].min()
+        x_max = df_filtered["LogBinding"].max()
+        x_pad = (x_max - x_min) * 0.1
+        x_lims = (x_min - x_pad, x_max + x_pad*2)
 
-            pal = sns.cubehelix_palette(len(order_mfi_all), rot=-.25, light=.7)
+        pal = sns.cubehelix_palette(len(order_mfi), rot=-.25, light=.7)
+        
+        g = sns.FacetGrid(df_filtered, row="Sample", hue="Sample", aspect=10, height=0.8, palette=pal, row_order=order_mfi)
+        g.map(sns.kdeplot, "LogBinding", clip_on=False, fill=True, alpha=1, lw=1.5, bw_adjust=.2)
+        g.map(sns.kdeplot, "LogBinding", clip_on=False, color="w", lw=2, bw_adjust=.2)
+        g.map(plt.axhline, y=0, lw=2, clip_on=False)
+        
+        def label(x, color, label):
+            ax = plt.gca()
+            ax.text(0, .2, label, fontweight="bold", color=color,
+                    ha="left", va="center", transform=ax.transAxes, fontsize=10)
+            ax.set_facecolor('none')
+        
+        g.map(label, "LogBinding")
+        
+        g.set(xlim=x_lims)
+        g.fig.subplots_adjust(hspace=-.5)
+        g.set_titles("")
+        g.set(yticks=[])
+        g.despine(bottom=True, left=True)
+        g.set_xlabels(f"Log10 APC-A (Binding) - Group {group}")
+        
+        t_thresh = np.log10(max(1, thresh_bind))
+        for ax in g.axes.flatten():
+            ax.axvline(t_thresh, color='r', alpha=0.5, linestyle='--')
             
-            # Taller aspect for many samples
-            g = sns.FacetGrid(df_filtered_all, row="Sample", hue="Sample", aspect=15, height=0.6, palette=pal, row_order=order_mfi_all)
-            
-            g.map(sns.kdeplot, "LogFITC", clip_on=False, fill=True, alpha=1, lw=1.5, bw_adjust=.5)
-            g.map(sns.kdeplot, "LogFITC", clip_on=False, color="w", lw=2, bw_adjust=.5)
-            g.map(plt.axhline, y=0, lw=2, clip_on=False)
-            
-            def label(x, color, label):
-                ax = plt.gca()
-                ax.text(0, .2, label, fontweight="bold", color=color,
-                        ha="left", va="center", transform=ax.transAxes, fontsize=9)
-                ax.set_facecolor('none') # Transparency fix
-            
-            g.map(label, "LogFITC")
-            
-            g.set(xlim=x_lims)
-            g.fig.subplots_adjust(hspace=-.6) # Tighter overlap for many samples
-            g.set_titles("")
-            g.set(yticks=[])
-            g.despine(bottom=True, left=True)
-            g.set_xlabels("Log10 FITC-A (Binding) - All Samples")
-            
-            t_thresh = np.log10(max(1, thresh_fitc))
-            for ax in g.axes.flatten():
-                ax.axvline(t_thresh, color='r', alpha=0.5, linestyle='--')
-                
-            g.savefig(os.path.join(OUTPUT_DIR, "Aggregate_Ridgeline_Binding_All.png"))
-            plt.close()
+        out_name = f"Aggregate_Ridgeline_Binding_{group}.png"
+        g.savefig(os.path.join(output_dir, out_name))
+        plt.close()
+
+    # 1. Ridgeline (All Samples)
+    out_name = os.path.join(output_dir, "Aggregate_Ridgeline_All.png")
+    
+    # Sort by MFI
+    order = df_stats.sort_values("Bind MFI", ascending=False)["Filename"].tolist()
+    pal = sns.cubehelix_palette(len(order), rot=-.25, light=.7)
+    
+    g = sns.FacetGrid(df_ridge, row="Sample", hue="Sample", aspect=15, height=0.6, palette=pal, row_order=order)
+    g.map(sns.kdeplot, "LogBinding", clip_on=False, fill=True, alpha=1, lw=1.5, bw_adjust=.2)
+    g.map(sns.kdeplot, "LogBinding", clip_on=False, color="w", lw=2, bw_adjust=.2)
+    g.map(plt.axhline, y=0, lw=2, clip_on=False)
+    
+    def label(x, color, label):
+        ax = plt.gca()
+        ax.text(0, .2, label, fontweight="bold", color=color,
+                ha="left", va="center", transform=ax.transAxes, fontsize=9)
+        ax.set_facecolor('none')
+        
+    g.map(label, "LogBinding")
+    
+    g.set_titles("")
+    g.set(yticks=[])
+    g.despine(bottom=True, left=True)
+    g.fig.subplots_adjust(hspace=-.5)
+    g.set_xlabels("Log10 APC-A (Binding)")
+    
+    # Ref Line
+    t_thresh = np.log10(max(1, thresh_bind))
+    for ax in g.axes.flatten():
+        ax.axvline(t_thresh, color='r', alpha=0.5, linestyle='--')
+        
+    g.savefig(out_name)
+    plt.close()
 
     # 2. Fold Change Bar Plot
     plt.figure(figsize=(12, 6))
     # Sort for bar plot
-    df_sorted = df_stats.sort_values("FITC Fold Change", ascending=False)
-    sns.barplot(data=df_sorted, x="Filename", y="FITC Fold Change", palette="viridis")
+    df_sorted_fc = df_stats.sort_values("Bind Fold Change", ascending=False)
+    sns.barplot(data=df_sorted_fc, x="Filename", y="Bind Fold Change", palette="viridis")
     plt.xticks(rotation=90)
     plt.axhline(1, color='k', linestyle='--', label='No Change')
     plt.title("Binding Fold Change (vs Neg Control)")
     plt.ylabel("Fold Change (Sample MFI / Neg MFI)")
     plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR, "Aggregate_FoldChange_Bar.png"))
+    plt.savefig(os.path.join(output_dir, "Aggregate_FoldChange_Bar.png"))
     plt.close()
 
     # 3. Stain Index Bar Plot
     plt.figure(figsize=(12, 6))
-    df_sorted = df_stats.sort_values("FITC Stain Index", ascending=False)
-    sns.barplot(data=df_sorted, x="Filename", y="FITC Stain Index", palette="magma")
+    df_sorted_si = df_stats.sort_values("Bind Stain Index", ascending=False)
+    sns.barplot(data=df_sorted_si, x="Filename", y="Bind Stain Index", palette="magma")
     plt.xticks(rotation=90)
     plt.title("Binding Stain Index (Separation Quality)")
     plt.ylabel("Stain Index (Delta Median / 2*rSD)")
     plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR, "Aggregate_StainIndex_Bar.png"))
+    plt.savefig(os.path.join(output_dir, "Aggregate_StainIndex_Bar.png"))
     plt.close()
     
-    # 1. Bar plot of Double Positives
+    # 4. Bar plot of Double Positives
     plt.figure(figsize=(12, 6))
-    sns.barplot(data=df_stats, x="Filename", y="Double+ %")
+    sns.barplot(data=df_stats, x="Filename", y="Double+ %", palette="Blues_d")
     plt.xticks(rotation=90)
     plt.title("Double Positive Population % by Sample")
     plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR, "Aggregate_DoublePos_Bar.png"))
+    plt.savefig(os.path.join(output_dir, "Aggregate_DoublePos_Bar.png"))
     plt.close()
     
-    # 2. Scatter MFI
+    # 5. Scatter MFI
+    # User requested: APC on X (Binding), FITC on Y (Expr)
     plt.figure(figsize=(10, 6))
-    # Keep X=FITC, Y=APC for MFI scatter? Or swap? User said "Binding on Y" for the main plot.
-    # Usually scatter plots follow the same logic. Let's make MFI plot consistent: X=Expression(APC), Y=Binding(FITC).
-    sns.scatterplot(data=df_stats, x="APC MFI", y="FITC MFI", hue="Filename", s=100)
+    sns.scatterplot(data=df_stats, x="Bind MFI", y="Expr MFI", hue="Filename", s=100)
     plt.title("Mean Fluorescence Intensity: Binding vs Expression")
-    plt.ylabel("Binding MFI (FITC)")
-    plt.xlabel("Expression MFI (APC)")
+    plt.xlabel("Binding MFI (APC)")
+    plt.ylabel("Expression MFI (FITC)")
+    plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
     plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR, "Aggregate_MFI_Scatter.png"))
+    plt.savefig(os.path.join(output_dir, "Aggregate_MFI_Scatter.png"))
     plt.close()
-    
-    # 3. Generate Text Report
-    generate_report(df_stats)
 
 def generate_report(df):
     """Generates a text report summarizing the findings."""
@@ -501,8 +499,8 @@ def generate_report(df):
     report_path = os.path.join(OUTPUT_DIR, "Analysis_Report.md")
     
     # Identify top performers
-    top_binding = df.sort_values("FITC MFI", ascending=False).iloc[0]
-    top_expr = df.sort_values("APC MFI", ascending=False).iloc[0]
+    top_binding = df.sort_values("Bind MFI", ascending=False).iloc[0]
+    top_expr = df.sort_values("Expr MFI", ascending=False).iloc[0]
     
     # Group analysis
     df['Group'] = df['Filename'].apply(lambda x: x.split()[0] if ' ' in x else 'Misc')
@@ -510,47 +508,70 @@ def generate_report(df):
     
     with open(report_path, "w") as f:
         f.write("# FCS Analysis Report\n\n")
-        f.write(f"**Total Samples Processed**: {len(df)}\n")
+        f.write(f"**Total Samples**: {len(df)}\n")
+        f.write(f"**Date**: {pd.Timestamp.now().strftime('%Y-%m-%d')}\n")
         f.write(f"**Average Gating Efficiency**: {df['% Gated'].mean():.1f}%\n\n")
         
         f.write("## 1. Executive Summary\n")
-        f.write(f"- **Highest Binding (FITC)**: {top_binding['Filename']} (MFI: {top_binding['FITC MFI']:.0f}, %+: {top_binding['FITC+ %']:.1f}%)\n")
-        f.write(f"- **Highest Expression (APC)**: {top_expr['Filename']} (MFI: {top_expr['APC MFI']:.0f}, %+: {top_expr['APC+ %']:.1f}%)\n")
+        f.write(f"- **Highest Binding (APC)**: {top_binding['Filename']} (MFI: {top_binding['Bind MFI']:.0f}, %+: {top_binding['Bind+ %']:.1f}%)\n")
+        f.write(f"- **Highest Expression (FITC)**: {top_expr['Filename']} (MFI: {top_expr['Expr MFI']:.0f}, %+: {top_expr['Expr+ %']:.1f}%)\n")
         f.write("\n")
         
         f.write("## 2. Group Performance\n")
         for g in groups:
             sub = df[df['Group'] == g]
             if len(sub) == 0: continue
-            avg_fc = sub['FITC Fold Change'].mean()
-            avg_si = sub['FITC Stain Index'].mean()
+            avg_fc_bind = sub['Bind Fold Change'].mean()
+            avg_fc_expr = sub['Expr Fold Change'].mean()
+            avg_eff = sub['Binding Efficiency'].mean()
+            avg_pct_pos = sub['% of Pos Ctrl'].mean()
+            avg_si = sub['Bind Stain Index'].mean()
+            
             f.write(f"### Group {g}\n")
             f.write(f"- **Samples**: {len(sub)}\n")
-            f.write(f"- **Avg Binding Fold Change**: {avg_fc:.2f}x\n")
+            f.write(f"- **Avg Binding Fold Change**: {avg_fc_bind:.2f}x\n")
+            f.write(f"- **Avg Expression Fold Change**: {avg_fc_expr:.2f}x\n")
             f.write(f"- **Avg Stain Index**: {avg_si:.2f}\n")
-            f.write(f"- **Key Observation**: {stats_observation(avg_fc)}\n\n")
-            
-        f.write("## 3. Plot Guide & Interpretation\n")
-        f.write("### A. Ridgeline Plots (Aggregate_Ridgeline_*.png)\n")
-        f.write("- **What it shows**: The distribution of binding signal (FITC) for every sample.\n")
-        f.write("- **How to read**: Peaks further to the right indicate stronger binding. 'Wider' peaks suggest heterogeneous binding.\n")
-        f.write("- **Findings**: Look for samples where the main hill is shifted clearly to the right of the red dashed line (Negative Control).\n\n")
-        
-        f.write("### B. Fold Change Bar Plot (Aggregate_FoldChange_Bar.png)\n")
-        f.write("- **What it shows**: Ratio of Sample MFI to Negative Control MFI.\n")
-        f.write("- **Threshold**: Values > 1.0 indicate signal above background. Values > 2.0 vary strong binding.\n\n")
-        
-        f.write("### C. Isolated Plots (Publication_Plots/)\n")
-        f.write("- **What it shows**: Individual Binding vs Expression density for each sample.\n")
-        f.write("- **Usage**: Use these for manuscripts. They include clean gates and percentage statistics.\n")
-        
-    print(f"Report generated: {report_path}")
+            f.write(f"- **Avg Binding Efficiency (Binding / Expression ratio)**: {avg_eff:.2f}\n")
+            f.write(f"- **Avg % of Pos Ctrl**: {avg_pct_pos:.1f}%\n")
+            f.write(f"- **Observation**: {stats_observation(avg_fc_bind, avg_fc_expr, avg_eff)}\n\n")
 
-def stats_observation(fc):
-    if fc < 1.0: return "Signal suppressed or below background."
-    if fc < 1.2: return "Minimal binding signal observed."
-    if fc < 1.5: return "Moderate binding interaction."
-    return "Strong binding signal detected."
+def stats_observation(fc_bind, fc_expr, efficiency):
+    obs = []
+    
+    # Binding Analysis
+    if fc_bind < 1.1:
+        obs.append("No significant binding detected.")
+    elif fc_bind < 1.5:
+        obs.append("Weak/Minimal binding signal.")
+    elif fc_bind < 5.0:
+        obs.append("Moderate binding observed.")
+    else:
+        obs.append("Strong binding signal detected.")
+        
+    # Expression Analysis
+    if fc_expr < 1.1:
+        obs.append("Expression is at background levels (Low display level).")
+    elif fc_expr < 1.5:
+        obs.append("Low expression detected.")
+    elif fc_expr < 3.0:
+        obs.append("Moderate expression levels.")
+    else:
+        obs.append("High surface expression.")
+
+    # Efficiency/Context
+    if fc_bind > 1.5 and fc_expr > 1.5:
+        # Both present
+        if efficiency > 1.0: # Arbitrary high efficiency threshold, depends on gain settings
+            obs.append("High binding relative to expression (Potentially high affinity).")
+        elif efficiency < 0.2:
+            obs.append("Binding is low relative to expression (Potentially low affinity).")
+    elif fc_bind > 1.5 and fc_expr < 1.2:
+        obs.append("Binding detected despite low expression (Type II error or non-specific?).")
+    elif fc_bind < 1.2 and fc_expr > 2.0:
+        obs.append("High expression but no binding (Non-binder).")
+        
+    return " ".join(obs)
 
 if __name__ == "__main__":
     main()
