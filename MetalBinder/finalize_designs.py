@@ -349,15 +349,27 @@ def main():
                     for item in json_sequences:
                         if "proteinChain" in item:
                             csv_seq_parts.append(item["proteinChain"]["sequence"])
-                        elif "ion" in item:
-                            csv_seq_parts.append("G") # Ligand is G in PDB
+                        # elif "ion" in item:
+                        #     csv_seq_parts.append("G") # Ligand is G in PDB - Removed per user request
                     
                     full_seq_str = "/".join(csv_seq_parts)
                     
+                    # Extract ligand from PDB content instead of directory
+                    detected_ligands = set()
+                    for item in json_sequences:
+                        if "ion" in item:
+                            detected_ligands.add(item["ion"]["ion"])
+                    
+                    if detected_ligands:
+                        final_ligand = "+".join(sorted(detected_ligands))
+                    else:
+                        # Fallback to directory inference if no ligand chain found (e.g. scaffold only?)
+                        final_ligand = metal_type if metal_type else ""
+                        
                     entry_data = {
                         "id": unique_id,
                         "sequence": full_seq_str,
-                        "ligand": metal_type if metal_type else "",
+                        "ligand": final_ligand,
                         "path": os.path.abspath(pdb), 
                         "source": "ProteinMPNN"
                     }
@@ -367,31 +379,33 @@ def main():
                 print(f"Error parsing {fasta_file}: {e}")
                     
         if not found_seqs:
-            # Fallback to RFdiffusion backbone (Poly-Gly?)
+            # Fallback to RFdiffusion backbone
             seqs = get_sequence(pdb)
             if seqs:
-                full_seq = ":".join(seqs.values())
+                all_backbone_chains = sorted(seqs.keys())
+                prot_chains_bb = [c for c in all_backbone_chains if len(seqs[c]) > 5]
+                lig_chains_bb = [c for c in all_backbone_chains if len(seqs[c]) <= 5]
+                
+                # Sequence: Only protein chains
+                prot_seqs = [seqs[c] for c in prot_chains_bb]
+                full_seq = "/".join(prot_seqs) # Use / separator for consistency
+                
+                # Ligand: From detected ions
+                ligands = [seqs[c] for c in lig_chains_bb]
+                final_ligand = "+".join(sorted(set(ligands)))
+                
                 rel_path = os.path.relpath(pdb, args.pred_dir)
                 unique_id = rel_path.replace("/", "_").replace(".pdb", "")
                 
                 entry_data = {
                     "id": unique_id,
                     "sequence": full_seq, 
+                    "ligand": final_ligand,
                     "path": os.path.abspath(pdb),
                     "source": "RFdiffusion_Backbone"
                 }
                 
-                # Also add backbone to JSON? Maybe not if it's Poly-Gly/Backbone only. 
-                # Converting backbone dict to list
-                # Also add backbone to JSON? Maybe not if it's Poly-Gly/Backbone only. 
-                # Converting backbone dict to list
                 json_sequences = []
-                
-                all_backbone_chains = sorted(seqs.keys())
-                # Same heuristic
-                prot_chains_bb = [c for c in all_backbone_chains if len(seqs[c]) > 5]
-                lig_chains_bb = [c for c in all_backbone_chains if len(seqs[c]) <= 5]
-                
                 for chain_id in all_backbone_chains:
                     if chain_id in lig_chains_bb:
                          json_sequences.append({
