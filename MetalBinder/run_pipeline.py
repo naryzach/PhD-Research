@@ -46,7 +46,9 @@ def main():
     
     # Finalize Specific
     parser.add_argument("--finalize_only", action="store_true", help="Deprecated: Use --finalize")
-    parser.add_argument("--run_mpnn", action="store_true", help="Enable ProteinMPNN in finalization")
+    parser.add_argument("--run_mpnn", action="store_true", help="Run ProteinMPNN on designs")
+    # parser.add_argument("--select_best", action="store_true", help="Deprecated: Merged into run_allmetal3d")
+    parser.add_argument("--run_allmetal3d", action="store_true", help="Run AllMetal3D (requires allmetal3d env)")
     
     # Common/New Args
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing outputs")
@@ -176,11 +178,35 @@ def main():
             if args.dry_run: cmd.append("--dry_run")
             run_command(cmd, args.dry_run)
 
-    # 6. Finalize (Unchanged)
+    # 6. ProteinMPNN (New Step)
+    if args.run_mpnn or args.run_all:
+        print("\n=== Stage 6: ProteinMPNN ===")
+        cmd = [sys.executable, os.path.join(base_dir, "run_mpnn.py"),
+               "--pred_dir", "../Local/Metal_Predictions",
+               "--pmpnn_path", "../Tools/ProteinMPNN"]
+        if args.overwrite: cmd.append("--overwrite")
+        run_command(cmd, args.dry_run)
+
+    # 7. (Merged into Run AllMetal3D)
+    
+    # 8. AllMetal3D (New Step)
+    if args.run_allmetal3d:
+        print("\n=== Stage 8: AllMetal3D ===")
+        # Must run in allmetal3d environment
+        # Using conda run
+        cmd = ["conda", "run", "-n", "allmetal3d", 
+               "python", os.path.join(base_dir, "run_allmetal3d.py"),
+               "--pred_dir", "../Local/Metal_Predictions"]
+        if args.overwrite: cmd.append("--overwrite")
+        run_command(cmd, args.dry_run)
+
+    # 9. Finalize
     if args.finalize or args.run_all:
-        print("\n=== Stage 6: Finalization ===")
-        cmd = [sys.executable, os.path.join(base_dir, "finalize_designs.py")]
-        if args.run_mpnn: cmd.append("--run_mpnn")
+        print("\n=== Stage 9: Finalization ===")
+        cmd = [sys.executable, os.path.join(base_dir, "finalize_designs.py"),
+               "--pred_dir", "../Local/Metal_Predictions",
+               "--out_csv", "../Local/Metal_Predictions/design_summary.csv",
+               "--out_json", "../Local/Metal_Predictions/alphafold_inputs.json"]
         run_command(cmd, args.dry_run)
 
     print("\nPipeline Complete.")
