@@ -54,7 +54,7 @@ python MetalBinder/run_pipeline.py --run_allmetal3d_ligand
 
 ### Validation
 *   `run_allmetal3d.py`: Runs AllMetal3D on ProteinMPNN designs. It threads the designed sequence onto the backbone before prediction.
-*   `run_allmetal3d_ligand.py`: Runs AllMetal3D on LigandMPNN designs. It uses the packed full-atom structures directly.
+*   `run_allmetal3d_ligand.py`: Runs AllMetal3D on LigandMPNN designs (using packed structures). Outputs to `.../allmetal3d_ligand/`.
 
 ### Utilities
 *   `finalize_designs.py`: Collects all results into a summary CSV (`design_summary.csv`) and generates JSON files for AlphaFold (`alphafold_inputs.json`).

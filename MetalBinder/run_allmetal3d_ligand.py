@@ -47,8 +47,9 @@ def main():
         
         basename = os.path.basename(pdb_path).replace(".pdb", "")
         
-        # Output directory: .../ligandmpnn/allmetal3d
-        allmetal_out_dir = os.path.join(ligandmpnn_dir, "allmetal3d")
+        # Output directory: .../Motif/allmetal3d_ligand
+        # Move up from ligandmpnn/packed to Motif level
+        allmetal_out_dir = os.path.join(motif_dir, "allmetal3d_ligand")
         os.makedirs(allmetal_out_dir, exist_ok=True)
         
         # Check if already processed
