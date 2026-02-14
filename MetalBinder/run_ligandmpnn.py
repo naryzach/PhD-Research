@@ -124,11 +124,12 @@ def get_fixed_residues(pdb_path):
     return fixed_residues
 
 def main():
-    parser = argparse.ArgumentParser(description="Run ProteinMPNN on Design Folder")
+    parser = argparse.ArgumentParser(description="Run LigandMPNN on Design Folder")
     parser.add_argument("--pred_dir", default="../Local/Metal_Predictions", help="Predictions Directory")
-    parser.add_argument("--pmpnn_path", default="../Tools/ProteinMPNN", help="Path to ProteinMPNN")
+    parser.add_argument("--lmpnn_path", default="../Tools/LigandMPNN", help="Path to LigandMPNN")
     parser.add_argument("--num_seqs", type=int, default=5, help="Number of sequences to generate per design")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing outputs")
+    parser.add_argument("--dry_run", action="store_true", help="Print command without executing")
     args = parser.parse_args()
     
     print(f"Scanning {args.pred_dir}...")
@@ -137,7 +138,7 @@ def main():
     # Filter for RFdiffusion outputs
     design_files = [f for f in pdb_files if "rfdiffusion" in f and ("scaffold" in os.path.basename(f) or "design" in os.path.basename(f)) and "traj" not in os.path.basename(f) and "unidealized" not in f]
     
-    print(f"Found {len(design_files)} designs for ProteinMPNN.")
+    print(f"Found {len(design_files)} designs for LigandMPNN.")
 
     for i, pdb in enumerate(design_files):
         # Output folder: sibling of rfdiffusion
@@ -145,7 +146,8 @@ def main():
         parent_dir = os.path.dirname(dirname) 
         motif_name = os.path.basename(parent_dir)
         
-        mpnn_out = os.path.join(parent_dir, "proteinmpnn")
+        # Use 'ligandmpnn' folder instead of 'proteinmpnn'
+        mpnn_out = os.path.join(parent_dir, "ligandmpnn")
         os.makedirs(mpnn_out, exist_ok=True)
         
         # Determine chains to design (needed for checking expected output name if ligand present)
@@ -156,135 +158,91 @@ def main():
         protein_chains = [c for c in all_chains if len(seqs_dict[c]) > 5]
         ligand_chains = [c for c in all_chains if len(seqs_dict[c]) <= 5]
         
-        design_chains = protein_chains
-        design_chains_str = " ".join(design_chains)
-        
         basename = os.path.basename(pdb).replace(".pdb", "")
         
-        # If ligand chains exist, we masquerade, so output filename changes
-        if ligand_chains:
-             expected_basename = f"{basename}_mpnn_input"
-        else:
-             expected_basename = basename
-             
-        expected_output = os.path.join(mpnn_out, "seqs", f"{expected_basename}.fa")
+        # Output naming
+        # ...
         
-        if os.path.exists(expected_output) and not args.overwrite:
-            # Path parsing for logging
-            ion_dir = os.path.dirname(parent_dir)
-            ion = os.path.basename(ion_dir)
-            category_dir = os.path.dirname(ion_dir)
-            category = os.path.basename(category_dir)
-            
-            print(f"[{i+1}/{len(design_files)}] [{category}] [{ion}] [{motif_name}] Skipping {basename} (Already exists)")
-            continue
-        
-        run_pdb = pdb
-        temp_pdb = None
-        
-        if ligand_chains:
-            # Create temporary PDB with GLY masquerading for all ligand chains
-            temp_pdb = pdb.replace(".pdb", "_mpnn_input.pdb")
-            try:
-                with open(pdb, 'r') as f:
-                    lines = f.readlines()
-                
-                new_lines = []
-                for line in lines:
-                    if line.startswith("HETATM"):
-                        chain_id = line[21]
-                        if chain_id in ligand_chains:
-                             try:
-                                 x = float(line[30:38])
-                                 y = float(line[38:46])
-                                 z = float(line[46:54])
-                                 gly_line = f"ATOM  {9999:5d}  CA  GLY {chain_id}   1    {x:8.3f}{y:8.3f}{z:8.3f}  1.00 20.00           C\n"
-                                 new_lines.append(gly_line)
-                             except:
-                                 new_lines.append(line)
-                        else:
-                             new_lines.append(line)
-                    else:
-                        new_lines.append(line)
-                
-                with open(temp_pdb, 'w') as f:
-                    f.writelines(new_lines)
-                
-                run_pdb = temp_pdb
-            except Exception as e:
-                print(f"Error preparing ligand masquerade for {pdb}: {e}")
-                continue
-        
-        # Calculate fixed positions (from ORIGINAL pdb, not masqueraded one, though coords should match)
-        # Using run_pdb is safer if we masqueraded ligands, but we want to know what residue numbers to fix.
-        # The masquerade only changes ligands to GLY, protein residues are untouched.
-        # However, get_fixed_residues relies on finding METALs.
-        # If run_pdb is temp_pdb, ligands might be GLY now?
-        # Wait, if we converted metals to GLY, get_fixed_residues won't find them in temp_pdb!
-        # FAST FIX: Compute fixed residues from ORIGINAL pdb.
-        
-        fixed_res_dict = get_fixed_residues(pdb)
-        fixed_jsonl = None
-        
-        # Only create JSONL if we have fixed residues
-        import json
-        if any(v for v in fixed_res_dict.values()):
-            # Format: {"pdb_name": "structure_name", "fixed_chain_id": [res1, res2]}?
-            # No, standard MPNN format is: {"structure_name": {"chain_id": [res_ids]}} ?
-            # Let's check help output or docs.
-            # Help said: "dictionary with tied positions".
-            # Actually --fixed_positions_jsonl "Path to dictionary with fixed positions"
-            # Format usually: {"pdb_name": {"chain_A": [1, 2, 3], "chain_B": []}}
-            
-            # Since we pass --pdb_path, MPNN keys by the basename (name of the parsed structure)
-            # When running single PDB, often the key is the pdb filename without extension?
-            # Or we can use global fixed positions?
-            
-            # To be safe, let's look at protein_mpnn_run.py source or standard usage.
-            # Standard usage usually expects the key to match the name of the structure.
-            # If we run on single pdb, name is usually derived from filename.
-            # run_pdb basename if temp: 'design_0..._mpnn_input.pdb' -> 'design_0..._mpnn_input'
-            
-            struct_name = os.path.basename(run_pdb).replace(".pdb", "")
-            
-            # Construct the dict
-            # fixed_res_dict is { chain: [res_ids] }
-            json_content = {struct_name: fixed_res_dict}
-            
-            fixed_jsonl = os.path.join(mpnn_out, f"{basename}_fixed.jsonl")
-            with open(fixed_jsonl, 'w') as f:
-                f.write(json.dumps(json_content))
-        
-        cmd = [
-            sys.executable, os.path.join(args.pmpnn_path, 'protein_mpnn_run.py'),
-            "--pdb_path", run_pdb,
-            "--out_folder", mpnn_out,
-            "--num_seq_per_target", str(args.num_seqs),
-            "--batch_size", "1",
-            "--suppress_print", "1",
-            "--pdb_path_chains", design_chains_str
-        ]
-        
-        if fixed_jsonl:
-            cmd.extend(["--fixed_positions_jsonl", fixed_jsonl])
-        
-        # Path parsing for logging
+        # Path parsing for logging: .../Category/Ion/Motif/rfdiffusion/file.pdb
+        # parent_dir = .../Motif
         ion_dir = os.path.dirname(parent_dir)
         ion = os.path.basename(ion_dir)
         category_dir = os.path.dirname(ion_dir)
         category = os.path.basename(category_dir)
+
+        design_chains_str = ",".join(protein_chains) # LigandMPNN comma sep
         
+        # Expected output usually: {out_folder}/seqs/{basename}.fa
+        expected_output = os.path.join(mpnn_out, "seqs", f"{basename}.fa")
+        if os.path.exists(expected_output) and not args.overwrite:
+            print(f"[{i+1}/{len(design_files)}] [{category}] [{ion}] [{motif_name}] Skipping {basename} (Already exists)")
+            continue
+        
+        # Fixed Residues
+        fixed_res_dict = get_fixed_residues(pdb)
+        fixed_str = ""
+        fixed_list = []
+        if any(v for v in fixed_res_dict.values()):
+            # Convert to "C1 C2 ..."
+            for chain, res_ids in fixed_res_dict.items():
+                for rid in res_ids:
+                    # RID is int.
+                    fixed_list.append(f"{chain}{rid}")
+            fixed_str = " ".join(fixed_list)
+
         print(f"[{i+1}/{len(design_files)}] [{category}] [{ion}] [{motif_name}] Processing {os.path.basename(pdb)}")
+        
+        # Command
+        # conda run -n ligandmpnn python ...
+        # But we are calling from python subprocess, better to use 'conda run' or direct python path
+        # User said "The pipeline will not be able to spin up ligandmpnn instead of protein mpnn"
+        # Implies we should assume environment availability or use explicit conda run.
+        # User created 'ligandmpnn' env.
+        
+        # Using sys.executable for the WRAPPER script, but the SUBPROCESS needs 'ligandmpnn' python.
+        # We can try finding it or just use 'conda run -n ligandmpnn python'.
+        
+        # Convert to absolute paths because we will change CWD to LigandMPNN dir
+        pdb_abs = os.path.abspath(pdb)
+        out_abs = os.path.abspath(mpnn_out)
+        
+        # Command construction
+        # Optimization: Check if we are already in the ligandmpnn environment
+        current_env = os.environ.get('CONDA_DEFAULT_ENV')
+        
+        if current_env == 'ligandmpnn':
+             # Use current python executable directly
+             base_cmd = [sys.executable, "run.py"]
+        else:
+             # Use conda run
+             base_cmd = ["conda", "run", "-n", "ligandmpnn", "python", "run.py"]
+
+        cmd = base_cmd + [
+            "--pdb_path", pdb_abs,
+            "--out_folder", out_abs,
+            "--model_type", "ligand_mpnn",
+            "--chains_to_design", design_chains_str,
+            "--number_of_batches", str(args.num_seqs),
+            "--batch_size", "1",
+            "--seed", "37",
+            "--pack_side_chains", "1",
+            "--number_of_packs_per_design", "1"
+        ]
+        
+        if fixed_str:
+            cmd.extend(["--fixed_residues", fixed_str])
+            
+        if args.dry_run:
+            print(f"[Dry Run] (CWD={args.lmpnn_path}) {' '.join(cmd)}")
+            continue
+
         try:
-            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+            # Run with cwd set to LigandMPNN path so it can find model_params/
+            subprocess.run(cmd, check=True, cwd=args.lmpnn_path, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+            pass
         except subprocess.CalledProcessError as e:
-            print(f"  MPNN failed for {pdb}")
+            print(f"  LigandMPNN failed for {pdb}")
             print(f"  Error: {e.stderr}")
-        finally:
-            if temp_pdb and os.path.exists(temp_pdb):
-                os.remove(temp_pdb)
-            if fixed_jsonl and os.path.exists(fixed_jsonl):
-                os.remove(fixed_jsonl)
 
 if __name__ == "__main__":
     main()

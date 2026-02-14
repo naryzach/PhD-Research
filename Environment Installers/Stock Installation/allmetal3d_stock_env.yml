@@ -1,0 +1,13 @@
+# Name: AllMetal3D
+# GitHub: https://github.com/lcbc-epfl/allmetal3d
+name: allmetal3d_stock_env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+    - allmetal3d
+    # Stock installation usually implies pip installing the package which handles deps.
+    # If using local repo, one would pip install -e .

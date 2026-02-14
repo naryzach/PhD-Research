@@ -1,0 +1,18 @@
+# Name: AllMetal3D (Newer CUDA)
+# GitHub: https://github.com/lcbc-epfl/allmetal3d
+name: allmetal3d_newer_env
+channels:
+  - nvidia/label/cuda-12.8.0
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - cuda-toolkit
+  - pip
+  - pip:
+    - --index-url https://download.pytorch.org/whl/cu128
+    - torch
+    - torchvision
+    - torchaudio
+    - allmetal3d
+    # Installing torch first from index-url ensures we get the CUDA version before allmetal3d pulls in cpu version.

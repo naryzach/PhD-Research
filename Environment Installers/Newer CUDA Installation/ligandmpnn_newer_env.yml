@@ -1,0 +1,24 @@
+# Name: LigandMPNN (Newer CUDA)
+# GitHub: https://github.com/dauparas/LigandMPNN
+name: ligandmpnn_newer_env
+channels:
+  - nvidia/label/cuda-12.8.0
+  - pytorch/label/nightly  # Needed for some newer torch builds if not in pip
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - numpy
+  - scipy
+  - networkx
+  - biopython
+  - cuda-toolkit
+  - pip:
+    - --extra-index-url https://download.pytorch.org/whl/cu128
+    - torch
+    - torchvision
+    - torchaudio
+    - dm-tree
+    - ml-collections
+    - ProDy

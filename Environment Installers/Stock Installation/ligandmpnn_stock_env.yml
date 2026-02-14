@@ -1,0 +1,30 @@
+# Name: LigandMPNN
+# GitHub: https://github.com/dauparas/LigandMPNN
+name: ligandmpnn_stock_env
+channels:
+  - conda-forge
+  - defaults
+  - pytorch
+  - nvidia
+dependencies:
+  - python=3.10
+  - pip
+  - numpy=1.23.5
+  - scipy=1.12.0
+  - networkx=3.2.1
+  - mpmath=1.3.0
+  - sympy=1.12
+  - typing_extensions=4.10.0
+  - filelock=3.13.1
+  - fsspec=2024.3.1
+  - Jinja2=3.1.3
+  - MarkupSafe=2.1.5
+  - pyparsing=3.1.1
+  - biopython=1.79
+  - pip:
+    - --extra-index-url https://download.pytorch.org/whl/cu121
+    - torch==2.2.1
+    - triton==2.2.0
+    - dm-tree==0.1.8
+    - ml-collections==0.1.1
+    - ProDy==2.4.1

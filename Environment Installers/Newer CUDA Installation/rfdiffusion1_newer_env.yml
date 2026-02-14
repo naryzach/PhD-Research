@@ -1,0 +1,22 @@
+# Name: RFdiffusion 1 (Newer CUDA)
+# GitHub: https://github.com/RosettaCommons/RFdiffusion
+name: rfdiffusion1_newer_env
+channels:
+  - nvidia/label/cuda-12.8.0
+  - dglteam/label/th24_cu124
+  - defaults
+dependencies:
+  - python=3.11
+  - cuda-toolkit
+  - dgl
+  - pip
+  - pip:
+      - numpy<2
+      - pandas
+      - omegaconf
+      - hydra-core
+      - pyrsistent
+      - --index-url https://download.pytorch.org/whl/cu128
+      - torch
+      - torchvision
+      - torchaudio

@@ -47,8 +47,10 @@ def main():
     # Finalize Specific
     parser.add_argument("--finalize_only", action="store_true", help="Deprecated: Use --finalize")
     parser.add_argument("--run_mpnn", action="store_true", help="Run ProteinMPNN on designs")
+    parser.add_argument("--run_ligandmpnn", action="store_true", help="Run LigandMPNN on designs")
     # parser.add_argument("--select_best", action="store_true", help="Deprecated: Merged into run_allmetal3d")
     parser.add_argument("--run_allmetal3d", action="store_true", help="Run AllMetal3D (requires allmetal3d env)")
+    parser.add_argument("--run_allmetal3d_ligand", action="store_true", help="Run AllMetal3D on LigandMPNN outputs (skips threading)")
     parser.add_argument("--water", action="store_true", help="Run Water3D prediction in AllMetal3D (default: False)")
     
     # Common/New Args
@@ -179,12 +181,20 @@ def main():
             if args.dry_run: cmd.append("--dry_run")
             run_command(cmd, args.dry_run)
 
-    # 6. ProteinMPNN (New Step)
     if args.run_mpnn or args.run_all:
         print("\n=== Stage 6: ProteinMPNN ===")
         cmd = [sys.executable, os.path.join(base_dir, "run_mpnn.py"),
                "--pred_dir", "../Local/Metal_Predictions",
                "--pmpnn_path", "../Tools/ProteinMPNN"]
+        if args.overwrite: cmd.append("--overwrite")
+        run_command(cmd, args.dry_run)
+
+    # 7. LigandMPNN (New Step)
+    if args.run_ligandmpnn:
+        print("\n=== Stage 7: LigandMPNN ===")
+        cmd = [sys.executable, os.path.join(base_dir, "run_ligandmpnn.py"),
+               "--pred_dir", "../Local/Metal_Predictions",
+               "--lmpnn_path", "../Tools/LigandMPNN"]
         if args.overwrite: cmd.append("--overwrite")
         run_command(cmd, args.dry_run)
 
@@ -204,6 +214,24 @@ def main():
             sys.exit(1)
             
         cmd = [sys.executable, os.path.join(base_dir, "run_allmetal3d.py"),
+               "--pred_dir", "../Local/Metal_Predictions"]
+        if args.overwrite: cmd.append("--overwrite")
+        if args.water: cmd.append("--water")
+        run_command(cmd, args.dry_run)
+
+    # 9. AllMetal3D (LigandMPNN Source)
+    if args.run_allmetal3d_ligand:
+        print("\n=== Stage 8b: AllMetal3D (LigandMPNN Source) ===")
+        # Check if we can import allmetal3d in the current environment
+        import importlib.util
+        if importlib.util.find_spec("allmetal3d") is None:
+            print("Error: 'allmetal3d' package not found in current environment.")
+            print("Please activate the environment before running this step:")
+            print("  conda activate allmetal3d")
+            print("  python MetalBinder/run_pipeline.py --run_allmetal3d_ligand")
+            sys.exit(1)
+            
+        cmd = [sys.executable, os.path.join(base_dir, "run_allmetal3d_ligand.py"),
                "--pred_dir", "../Local/Metal_Predictions"]
         if args.overwrite: cmd.append("--overwrite")
         if args.water: cmd.append("--water")

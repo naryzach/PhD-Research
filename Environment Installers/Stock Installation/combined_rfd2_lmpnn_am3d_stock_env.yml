@@ -1,0 +1,54 @@
+# Name: Combined RFdiffusion 2 + LigandMPNN + AllMetal3D (Stock)
+# Purpose: Single environment for running all three tools with standard/stable dependencies.
+name: combined_rfd2_lmpnn_am3d_stock_env
+channels:
+  - nvidia/label/cuda-12.4.0
+  - https://conda.rosettacommons.org
+  - pytorch
+  - dglteam/label/th24_cu124
+  - conda-forge
+  - defaults
+dependencies:
+  # Base Python (3.10 for broad compatibility with AM3D and LMPNN default scripts)
+  - python=3.10
+  - pip
+  
+  # Core Scientific Stack
+  - numpy<2
+  - scipy
+  - matplotlib
+  - pandas
+  - networkx
+  - biopython
+  
+  # Tool Specific - RFdiffusion 2
+  - jupyterlab
+  - conda-forge::openbabel=3.1.1
+  - dgl
+  - pyrosetta
+  
+  # Core ML - PyTorch 2.4 (Stock RFd2 requirement)
+  - pytorch=2.4.0
+  - pytorch-cuda=12.4
+  
+  # Pip packages
+  - pip:
+      # LigandMPNN
+      - ml-collections
+      - dm-tree
+      - ProDy
+      - pyparsing
+      
+      # RFdiffusion 2 (subset of requirements that are pip-only)
+      - hydra-core
+      - omegaconf
+      - e3nn
+      - icecream
+      - lie_learn  # if needed
+      
+      # AllMetal3D
+      - allmetal3d
+      
+      # Helper libs
+      - tqdm
+      - ipykernel
