@@ -49,6 +49,7 @@ def main():
     parser.add_argument("--run_mpnn", action="store_true", help="Run ProteinMPNN on designs")
     # parser.add_argument("--select_best", action="store_true", help="Deprecated: Merged into run_allmetal3d")
     parser.add_argument("--run_allmetal3d", action="store_true", help="Run AllMetal3D (requires allmetal3d env)")
+    parser.add_argument("--water", action="store_true", help="Run Water3D prediction in AllMetal3D (default: False)")
     
     # Common/New Args
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing outputs")
@@ -192,12 +193,20 @@ def main():
     # 8. AllMetal3D (New Step)
     if args.run_allmetal3d:
         print("\n=== Stage 8: AllMetal3D ===")
-        # Must run in allmetal3d environment
-        # Using conda run
-        cmd = ["conda", "run", "-n", "allmetal3d", 
-               "python", os.path.join(base_dir, "run_allmetal3d.py"),
+        
+        # Check if we can import allmetal3d in the current environment
+        import importlib.util
+        if importlib.util.find_spec("allmetal3d") is None:
+            print("Error: 'allmetal3d' package not found in current environment.")
+            print("Please activate the environment before running this step:")
+            print("  conda activate allmetal3d")
+            print("  python MetalBinder/run_pipeline.py --run_allmetal3d")
+            sys.exit(1)
+            
+        cmd = [sys.executable, os.path.join(base_dir, "run_allmetal3d.py"),
                "--pred_dir", "../Local/Metal_Predictions"]
         if args.overwrite: cmd.append("--overwrite")
+        if args.water: cmd.append("--water")
         run_command(cmd, args.dry_run)
 
     # 9. Finalize
