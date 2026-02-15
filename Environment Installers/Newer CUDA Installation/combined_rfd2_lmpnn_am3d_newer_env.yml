@@ -55,8 +55,13 @@ dependencies:
       - torch_spline_conv
       
       # AllMetal3D
-      - allmetal3d
+      - allmetal3d --no-deps
+      - requests
+      - "huggingface_hub<1.0"
       
       # Helper libs
       - tqdm
       - ipykernel
+
+      # Setuptools
+      - setuptools==81.0.0

@@ -48,7 +48,12 @@ dependencies:
       
       # AllMetal3D
       - allmetal3d
+      - requests
+      - "huggingface_hub<1.0"
       
       # Helper libs
       - tqdm
       - ipykernel
+
+      # Setuptools
+      - setuptools==81.0.0

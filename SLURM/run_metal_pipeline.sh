@@ -17,7 +17,12 @@ cd ../MetalBinder
 pwd
 source ~/miniconda3/etc/profile.d/conda.sh
 
+# Fresh start
+mv ../Local/Metal_Catalog ../Local/Metal_Catalog_$(date +%Y%m%d_%H%M%S)
+mv ../Local/Metal_PDBs ../Local/Metal_PDBs_$(date +%Y%m%d_%H%M%S)
+mv ../Local/Metal_Predictions ../Local/Metal_Predictions_$(date +%Y%m%d_%H%M%S)
+
 # Run Pipeline
 conda activate MetalCombine
-python run_pipeline.py --run_all --num_designs 5 --catalog --scaffold --swap --graft --ligandmpnn --allmetal3d_ligand --finalize
+python run_pipeline.py --run_all --num_designs 5 --catalog --scaffold --swap --graft --run_ligandmpnn --run_allmetal3d_ligand --finalize
 conda deactivate

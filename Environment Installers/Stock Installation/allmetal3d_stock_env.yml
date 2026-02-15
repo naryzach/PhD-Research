@@ -8,6 +8,8 @@ dependencies:
   - python=3.10
   - pip
   - pip:
+    - --extra-index-url https://download.pytorch.org/whl/cu116
+    - torch==1.12.1+cu116
     - allmetal3d
-    # Stock installation usually implies pip installing the package which handles deps.
-    # If using local repo, one would pip install -e .
+    - requests
+    - "huggingface_hub<1.0"
