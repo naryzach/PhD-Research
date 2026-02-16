@@ -14,7 +14,7 @@ source SLURM_credentials.sh
 
 # Open necessary virtual environment
 nvidia-smi
-conda env create -f "../Environment Installers/Stock Installation/combined.yml" 
+conda env create -f "../Environment Installers/combined_metal.yml" 
 source activate MetalCombine
 
 python -c 'import torch; print(torch.cuda.is_available()); print(torch.__version__)'
