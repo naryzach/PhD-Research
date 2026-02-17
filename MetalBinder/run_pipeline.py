@@ -181,7 +181,7 @@ def main():
             if args.dry_run: cmd.append("--dry_run")
             run_command(cmd, args.dry_run)
 
-    if args.run_mpnn or args.run_all:
+    if args.run_mpnn: #or args.run_all:
         print("\n=== Stage 6: ProteinMPNN ===")
         cmd = [sys.executable, os.path.join(base_dir, "run_mpnn.py"),
                "--pred_dir", "../Local/Metal_Predictions",
@@ -197,8 +197,6 @@ def main():
                "--lmpnn_path", "../Tools/LigandMPNN"]
         if args.overwrite: cmd.append("--overwrite")
         run_command(cmd, args.dry_run)
-
-    # 7. (Merged into Run AllMetal3D)
     
     # 8. AllMetal3D (New Step)
     if args.run_allmetal3d:
@@ -220,7 +218,7 @@ def main():
         run_command(cmd, args.dry_run)
 
     # 9. AllMetal3D (LigandMPNN Source)
-    if args.run_allmetal3d_ligand:
+    if args.run_allmetal3d_ligand: #or args.run_all:
         print("\n=== Stage 8b: AllMetal3D (LigandMPNN Source) ===")
         # Check if we can import allmetal3d in the current environment
         import importlib.util
