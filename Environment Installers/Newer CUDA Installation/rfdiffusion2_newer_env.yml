@@ -2,34 +2,24 @@
 # GitHub: https://github.com/RosettaCommons/RFdiffusion2
 name: rfdiffusion2_newer_env
 channels:
-  - nvidia/label/cuda-12.4.0
+  - nvidia/label/cuda-12.8.0
   - https://conda.rosettacommons.org
   - pytorch
   - dglteam/label/th24_cu124
-  - conda-forge
-  - defaults
 dependencies:
-  - python=3.11
+  - python=3.10
   - pip
   - numpy<2
   - matplotlib
   - jupyterlab
-  - openbabel=3.1.1
+  - conda-forge::openbabel=3.1.1
   - dgl
-  # - pytorch=2.4.0  # Removing fixed pytorch from conda to use pip install for newer CUDA
-  # - pytorch-cuda=12.4
-  - pyrosetta
+  - pytorch=2.9.0
+  - pytorch-cuda=12.8
+  - pyrosetta 
   - pip:
-      # PyTorch for newer cards (CUDA 12.8)
-      - --index-url https://download.pytorch.org/whl/cu128
-      - torch
-      - torchvision
-      - torchaudio
-      
-      # Dependencies from requirements_cuda124.txt
-      # Note: pre-compiled wheels for torch-2.4.0 might fail with newer torch.
-      # Commenting out find-links to avoid Conflicts. Use standard pip installs if possible or find updated wheels.
-      # - --find-links https://data.pyg.org/whl/torch-2.4.0+cu124.html
+      # PyG / PyTorch Geometric dependencies
+      - --find-links https://data.pyg.org/whl/torch-2.7.0+cu128.html
       - pyg-lib
       - torch-scatter
       - torch-sparse
