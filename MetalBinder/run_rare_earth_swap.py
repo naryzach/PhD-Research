@@ -186,67 +186,40 @@ def run_rare_earth_swap(args):
         print(f"  Binding Residues: {binding_residues}")
         
         # 2. Define Contigs
-        # Logic: Fixed residues are fixed. Gaps between them are loops to be redesigned.
-        # But we need to include the whole protein structure as input?
-        # If we provide input_pdb, we define contigs as the WHOLE chain, and use `fixed_residues` or `contig` logic?
-        # RFdiffusion Partial Diffusion: 
-        #   Provide input_pdb.
-        #   contigs="[10-100]" (keep all? No, that just defines length).
-        #   If we want to KEEP coordinates of binding sites and diffuse others, we use `contigmap.contigs` + `inference.input_pdb`.
-        #   Actually, to FIX residues, we need to specify them in the contig string as fixed segments 
-        #   OR rely on the fact that if we provide the PDB, we can specify which parts to keep.
-        #   
-        #   Correct approach for "Partial Diffusion" / "Inpainting":
-        #   contigmap.contigs=["A1-19", "10-10", "A30-40"] 
-        #      -> Keeps A1-19, Generates 10 residues, Keeps A30-40.
-        #   
-        #   The user wants to "fill in the loop domains".
-        #   I will assume this means: KEEP the binding residues. REGENERATE everything else (or at least the loops between them).
-        #   
-        #   To keep it simple and robust:
-        #   I'll map the chain. 
-        #   Identify chunks of "Fixed" (Binding) and "Variable" (Non-binding).
-        #   Construct contig string: "A1-19/A20-20/A21-29..."
-        #   But purely fixed residues might detach if loops are generated from scratch.
-        #   
-        #   Better Strategy:
-        #   Keep the binding residues fixed.
-        #   Keep the REST of the protein fixed?
-        #   If I simply "fill in loop domains around the new ions", maybe I should only regenerate the immediate loops connecting the binding sites?
-        #   
-        #   Let's check the residue numbers. If they are close (e.g. 20, 22, 24), the loops are tiny (1 residue).
-        #   If they are far, the loop is long.
-        #   
-        #   I will treat binding residues as FIXED (source coordinates).
-        #   I will treat everything else as FLEXIBLE (redesign).
-        #   However, completely redesigning the Whole scaffold might be too much.
-        #   
-        #   Alternative: Keep everything fixed EXCEPT +/- N residues around binding sites?
-        #   No, usually you keep the motif and redesign the scaffold.
-        #   
-        #   Let's go with: Keep Binding Residues FIXED. Keep the rest of the chain as Template (Noise? or Fixed?).
-        #   "Fill in the loop domains" -> Redesign loops.
-        #   
-        #   I will parse the sequence from N to C.
-        #   If residue is Binding: Output "A<res>-<res>".
-        #   If residue is Non-Binding:
-        #       Check if user wants it fixed or generated.
-        #       "Fill in" implies generation.
-        #       I will generate a length match for the gap.
-        #       So "N-N" (length) instead of "A<start>-<end>" (sequence/structure).
-        #       
-        #   So:
-        #   binding_res: {20, 22, 24}
-        #   Chain A (1-100).
-        #   Contig: "19-19" (Gen 1-19) + "A20-20" (Fix 20) + "1-1" (Gen 21) + "A22-22" (Fix 22) ...
-        #   
-        #   This effectively destroys the original scaffold and rebuilds it around the binding sites.
-        #   This seems essentially like "Motif Scaffolding".
-        #   
-        #   Is that what the user wants? "fill in the loop domains around the new ions".
-        #   Yes, implies the loops adapt to the new ion.
         
-        # Get Chain IDs
+        # Mode Logic
+        # Scaffold Mode (Default): Fixed = Binding Residues. Gen = Everything else.
+        # Redesign Mode: Fixed = Everything OUTSIDE radius. Gen = Everything INSIDE radius.
+        
+        fixed_residues = set()
+        
+        if args.mode == "scaffold":
+            fixed_residues = set(binding_residues)
+        elif args.mode == "redesign":
+            # Identify residues to FIX (Outside radius)
+            # Find residues inside radius to redesign
+            nearby_residues = get_neighbors(nd_atom, all_atoms, radius=args.redesign_radius)
+            # Everything NOT in nearby_residues is FIXED
+            
+            # We need the set of ALL residues in the relevant chains
+            # Chains involved
+            chains = sorted(list(set([r[0] for r in binding_residues]))) # Based on close contact, but we want checking all?
+            # Actually we should look at all chains? Or just the ones touching the metal?
+            # Safe to stick to the chains that are close.
+            
+            # Re-scan structure to get all residues in these chains
+            for model in structure:
+                for chain in model:
+                    if chain.id in chains:
+                        for r in chain:
+                            if is_aa(r, standard=True):
+                                full_id = (chain.id, r.id[1])
+                                if full_id not in nearby_residues:
+                                    fixed_residues.add(full_id)
+            
+            print(f"  Redesign Mode: Redesigning {len(nearby_residues)} residues within {args.redesign_radius}A.")
+
+        # Get Chain IDs (using binding residues to identify relevant chains)
         chains = sorted(list(set([r[0] for r in binding_residues])))
         
         contig_specs = []
@@ -282,8 +255,12 @@ def run_rare_earth_swap(args):
             current_end = None
             current_len = 0
             
-            for r_num, is_bind in seq:
-                type_ = 'fixed' if is_bind else 'gen'
+            for r_num, is_bind_UNUSED in seq:
+                # IMPORTANT: Use logic based on fixed_residues set, not is_bind from previous loop
+                full_id = (chain_id, r_num)
+                is_fixed = full_id in fixed_residues
+                
+                type_ = 'fixed' if is_fixed else 'gen'
                 
                 if type_ != current_type:
                     # Flush previous
@@ -339,7 +316,7 @@ def run_rare_earth_swap(args):
         for metal in target_metals:
             print(f"  > Swapping to {metal}")
             
-            out_subdir = os.path.join(args.out_dir, "RareEarthSwaps", f"{metal}_{site_id}")
+            out_subdir = os.path.join(args.out_dir, "RareEarthSwaps", args.mode, f"{metal}_{site_id}")
             rf_out_dir = os.path.join(out_subdir, "rfdiffusion")
             os.makedirs(rf_out_dir, exist_ok=True)
             
@@ -431,7 +408,7 @@ def run_rare_earth_swap(args):
                 print(f"    LigandMPNN Failed.")
     
     # Generate Summary after all processing
-    generate_summary(os.path.join(args.out_dir, "RareEarthSwaps"))
+    generate_summary(os.path.join(args.out_dir, "RareEarthSwaps", args.mode))
 
 
 def main():
@@ -441,6 +418,8 @@ def main():
     parser.add_argument("--rf_path", default="../Tools/RFdiffusion2")
     parser.add_argument("--mpnn_path", default="../Tools/LigandMPNN") # Adjust if needed
     parser.add_argument("--metals", default="LA,ND,SM,GD,TB,Y")
+    parser.add_argument("--mode", choices=["scaffold", "redesign"], default="scaffold", help="scaffold: Fix binding, gen loops. redesign: Fix scaffold, gen binding.")
+    parser.add_argument("--redesign_radius", type=float, default=10.0, help="Radius for partial redesign mode")
     parser.add_argument("--binding_metal", default="ND", help="Metal element in input PDB to define binding sites")
     parser.add_argument("--radius", type=float, default=6.0, help="Radius to define binding site")
     parser.add_argument("--num_designs", type=int, default=1)
