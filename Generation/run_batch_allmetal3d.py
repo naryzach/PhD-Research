@@ -73,7 +73,7 @@ def main():
                     
                     # Determine Likely/Unlikely
                     # Likely: Location_Prob >= 50.0 AND Top_Identity != 'NoMetal'
-                    is_likely = (best_site['Location_Prob'] >= 50.0) and (best_site['Top_Identity'] != 'NoMetal')
+                    is_likely = (best_site['Location_Prob'] >= 25.0) # and (best_site['Top_Identity'] != 'NoMetal')
                     target_dir = holo_dir_likely if is_likely else holo_dir_unlikely
 
                     # We need coordinates. Read them from metals_pdb
