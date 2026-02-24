@@ -413,7 +413,7 @@ def run_rare_earth_swap(args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input_cif", default="../Local/Metal_PDBs/LA/8FNS.cif")
+    parser.add_argument("--input_cif", default="../Data/8FNS.cif")
     parser.add_argument("--out_dir", default="../Local/Metal_Predictions")
     parser.add_argument("--rf_path", default="../Tools/RFdiffusion2")
     parser.add_argument("--mpnn_path", default="../Tools/LigandMPNN") # Adjust if needed
