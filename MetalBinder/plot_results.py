@@ -14,26 +14,30 @@ def main():
     df = pd.read_csv(catalog_path)
     
     # Drop rows where RF3 failed to fold or calculate metrics (NaNs)
-    plot_df = df.dropna(subset=['loop_rmsd', 'binding_radius_A'])
+    plot_df = df.dropna(subset=['loop_rmsd', 'binding_radius_A']).copy()
     
     if plot_df.empty:
         print("No valid data points to plot.")
         return
 
+    # Convert the numeric loop_index to a categorical string so Seaborn assigns distinct shapes
+    plot_df['loop_identifier'] = 'EF ' + plot_df['loop_index'].astype(str)
+
     # Set up the plot style
     sns.set_theme(style="whitegrid")
-    plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(12, 8))
     
     # Create the scatter plot
     scatter = sns.scatterplot(
         data=plot_df, 
         x='loop_rmsd', 
         y='binding_radius_A', 
-        hue='metal_ion',     # Color by target ion
-        size='plddt',        # Size by RF3 confidence
-        sizes=(20, 200),
+        hue='metal_ion',         # Color by target ion
+        style='loop_identifier', # Shape by specific EF hand loop
+        size='plddt',            # Size by RF3 confidence
+        sizes=(40, 250),
         alpha=0.8,
-        palette='tab10',
+        palette='Set1',
         edgecolor='k'
     )
     
@@ -45,12 +49,12 @@ def main():
     plt.axvline(1.5, color='red', linestyle='--', alpha=0.6, label='RMSD Threshold (1.5 Å)')
     
     # Customize axes and title
-    plt.title('Candidate Evaluation: Structural Accuracy vs. Binding Geometry', fontsize=14, fontweight='bold')
-    plt.xlabel('Loop RMSD vs RFd3 Hallucination (Å)', fontsize=12)
-    plt.ylabel('Average Metal-Oxygen Binding Radius (Å)', fontsize=12)
+    plt.title('Candidate Evaluation: Loop-Specific Accuracy vs. Binding Geometry', fontsize=16, fontweight='bold')
+    plt.xlabel('Individual Loop RMSD (Å)', fontsize=14)
+    plt.ylabel('Average Metal-Oxygen Binding Radius (Å)', fontsize=14)
     
     # Adjust legend to sit outside the plot area
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0., title="Legend")
     plt.tight_layout()
     
     # Save and display
