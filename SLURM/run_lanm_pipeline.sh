@@ -20,5 +20,5 @@ source ~/miniconda3/etc/profile.d/conda.sh
 # Run Pipeline
 conda activate foundry
 export DISABLE_CUEQUIVARIANCE=1
-python run_pipelineB.py --ion ZN CA LA ND DY EU --num-designs 5
+python run_pipeline.py --ion ZN CA SC Y LA CE PR ND PM SM EU GD TB DY HO ER TM YB LU --num-configs 20 --batch-size 20
 conda deactivate

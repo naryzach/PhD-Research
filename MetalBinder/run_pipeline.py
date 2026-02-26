@@ -35,13 +35,14 @@ logging.getLogger("atomworks.ml").setLevel(logging.ERROR)
 logging.getLogger("foundry").setLevel(logging.ERROR)
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Batch RFd3 -> LMPNN -> RF3 variable loop generation.")
+    parser = argparse.ArgumentParser(description="Batch RFd3 -> LMPNN -> RF3 relative variable loop generation.")
     parser.add_argument("--ions", nargs='+', required=True, help="List of target metal ions (e.g. EU ZN TB DY CA)")
-    parser.add_argument("--num-designs", type=int, default=1, help="Number of sequences to generate per loop")
+    parser.add_argument("--num-configs", type=int, default=1, help="Number of unique loop length configurations to sample")
+    parser.add_argument("--batch-size", type=int, default=1, help="Number of sequences to generate PER length configuration")
     parser.add_argument("--input", type=str, default="../Data/8FNS.cif", help="Path to input CIF structure")
     parser.add_argument("--test", action="store_true", help="Run a short test by processing only the first loop")
-    parser.add_argument("--test-steps", type=int, default=10, help="Number of diffusion steps for RFd3 when in test mode (default: 10).")
-    parser.add_argument("--use-raw-lmpnn", action="store_true", help="Pass the fully redesigned LMPNN sequence to RF3 instead of splicing the loop into the wild-type backbone.")
+    parser.add_argument("--test-steps", type=int, default=10, help="Number of diffusion steps for RFd3 when in test mode.")
+    parser.add_argument("--use-raw-lmpnn", action="store_true", help="Pass the fully redesigned LMPNN sequence to RF3 instead of splicing.")
     return parser.parse_args()
 
 def get_sequence_from_array(atom_array, chain_id="A", res_ids=None):
@@ -76,9 +77,9 @@ def main():
     full_sequence_records = []
     
     # ---------------------------------------------------------
-    # STAGE 0: Preparation & Queuing (Now handles Variable Lengths)
+    # STAGE 0: Preparation & Queuing (Grouped Batching)
     # ---------------------------------------------------------
-    print("--- STAGE 0: Preparing Inputs & Sampling Lengths ---", flush=True)
+    print(f"--- STAGE 0: Sampling {args.num_configs} Configurations ---", flush=True)
     cif_file = CIFFile.read(args.input)
     base_atom_array = get_cif_structure(cif_file, model=1)
     
@@ -106,7 +107,6 @@ def main():
         min_res = int(np.min(ca_atoms.res_id))
         max_res = int(np.max(ca_atoms.res_id))
         
-        # LOG THE STARTING CONTEXT SEQUENCE
         context_seq = get_sequence_from_array(context_array, chain_id=chain_id)
         full_sequence_records.append({
             'ion': ion,
@@ -115,8 +115,7 @@ def main():
             'full_sequence': context_seq
         })
 
-        # Generate specific length permutations for each requested design
-        for design_idx in range(args.num_designs):
+        for config_idx in range(args.num_configs):
             contig_parts = []
             curr_res = min_res
             redesign_res_ids = []
@@ -129,37 +128,31 @@ def main():
                 start_res = loop_info["start_res"]
                 end_res = loop_info["end_res"]
                 
-                # Append preceding fixed scaffold
                 if start_res > curr_res:
                     segment_len = start_res - curr_res
                     contig_parts.append(f"{chain_id}{curr_res}-{start_res-1}")
                     new_res_counter += segment_len
                 
-                # Calculate the native wild-type loop length
+                # --- RELATIVE VARIABLE LENGTH SAMPLING ---
                 native_loop_length = end_res - start_res + 1
-                
-                # --- VARIABLE LENGTH SAMPLING ---
-                # Sample a length between (native - 2) and (native + 3)
-                min_len = max(1, native_loop_length - 2) # Safety check to prevent 0 or negative lengths
+                min_len = max(1, native_loop_length - 2) 
                 max_len = native_loop_length + 3
                 
-                sampled_loop_length = np.random.randint(min_len, max_len + 1) # +1 because high is exclusive
+                sampled_loop_length = np.random.randint(min_len, max_len + 1) 
                 contig_parts.append(str(sampled_loop_length))
                 
                 new_loop = loop_info.copy()
                 new_loop['start_res'] = new_res_counter
                 new_loop['end_res'] = new_res_counter + sampled_loop_length - 1
-                new_loop['loop_length'] = sampled_loop_length # Store length for catalog
+                new_loop['loop_length'] = sampled_loop_length 
                 new_loops.append(new_loop)
                 
-                # Track precise residue IDs for LMPNN
                 for r in range(new_loop['start_res'], new_loop['end_res'] + 1):
                     redesign_res_ids.append(r)
                     
                 new_res_counter += sampled_loop_length
-                curr_res = loop_info["end_res"] + 1 # Advance past the old wild-type loop
+                curr_res = end_res + 1 
                     
-            # Append final C-terminal scaffold
             if curr_res <= max_res:
                 contig_parts.append(f"{chain_id}{curr_res}-{max_res}")
                 new_res_counter += (max_res - curr_res + 1)
@@ -167,13 +160,11 @@ def main():
             contig_str = ",".join(contig_parts)
             new_total_len = new_res_counter - 1
             
-            # Shift metal IDs to the end of the newly sized chain
             for new_loop in new_loops:
                 new_loop['metal_res_id'] = new_total_len + new_loop['metal_idx'] + 1
                 new_loop['metal_chain_id'] = chain_id
             
-            # Save a specific context CIF for this design to prevent threading collisions
-            loop_cif_path = f"outputs/{ion}/rfd3/context_design{design_idx}.cif"
+            loop_cif_path = f"outputs/{ion}/rfd3/context_cfg{config_idx}.cif"
             to_cif_file(context_array, loop_cif_path)
             
             spec_input = DesignInputSpecification(
@@ -185,12 +176,9 @@ def main():
                 extra={}
             )
             
-            design_id = f"{ion}_design{design_idx}"
-            
             rfd3_queue.append({
                 'ion': ion,
-                'design_id': design_id,
-                'design_number': design_idx,
+                'config_idx': config_idx,
                 'loops': new_loops,
                 'spec': spec_input,
                 'total_len': new_total_len,
@@ -204,20 +192,22 @@ def main():
     # ---------------------------------------------------------
     # STAGE 1: Backbone Generation (RFd3)
     # ---------------------------------------------------------
-    print(f"\n--- STAGE 1: Running {len(rfd3_queue)} RFd3 Jobs ---", flush=True)
+    print(f"\n--- STAGE 1: Running {len(rfd3_queue)} RFd3 Configurations (Batch Size {args.batch_size}) ---", flush=True)
     mpnn_queue = []
     
-    for job in tqdm(rfd3_queue, desc="RFd3 Generation", unit="design"):
+    for job in tqdm(rfd3_queue, desc="RFd3 Batch Generation", unit="config"):
         print(f"Generating simultaneous backbones for {job['ion']}...", flush=True)
         print(f"Generated contig string: {job['contig_str']}", flush=True)
+
         try:
             inference_sampler_kwargs = {}
             if args.test:
                 test_steps = max(2, args.test_steps)
                 inference_sampler_kwargs['num_timesteps'] = test_steps
                 
+            # Utilize diffusion_batch_size properly!
             rfd3_config = getattr(__import__('rfd3.engine', fromlist=['RFD3InferenceConfig']), 'RFD3InferenceConfig')(
-                diffusion_batch_size=1, # One batch per job, since each job has specific lengths
+                diffusion_batch_size=args.batch_size, 
                 low_memory_mode=False,
                 specification={'length': job['total_len'], 'contig': job['contig_str'], 'extra': {}},
                 inference_sampler=inference_sampler_kwargs
@@ -230,22 +220,26 @@ def main():
                 for key, rfd3_out_list in rfd3_outputs_dict.items():
                     if not key.startswith("backbone"): continue
                     
-                    rfd3_out = rfd3_out_list[0]
-                    to_cif_file(rfd3_out.atom_array, f"outputs/{job['ion']}/rfd3/{job['design_id']}.cif", file_type="cif")
-                    
-                    full_sequence_records.append({
-                        'ion': job['ion'],
-                        'phase': 'RFd3',
-                        'design_id': job['design_id'],
-                        'full_sequence': get_sequence_from_array(rfd3_out.atom_array, chain_id=job['chain_id'])
-                    })
-                    
-                    mpnn_queue.append({
-                        **job, 
-                        'rfd3_atom_array': rfd3_out.atom_array
-                    })
+                    # Iterate through the generated batch
+                    for batch_idx, rfd3_out in enumerate(rfd3_out_list):
+                        design_id = f"{job['ion']}_cfg{job['config_idx']}_des{batch_idx}"
+                        to_cif_file(rfd3_out.atom_array, f"outputs/{job['ion']}/rfd3/{design_id}.cif", file_type="cif")
+                        
+                        full_sequence_records.append({
+                            'ion': job['ion'],
+                            'phase': 'RFd3',
+                            'design_id': design_id,
+                            'full_sequence': get_sequence_from_array(rfd3_out.atom_array, chain_id=job['chain_id'])
+                        })
+                        
+                        mpnn_queue.append({
+                            **job, 
+                            'design_id': design_id,
+                            'design_number': batch_idx,
+                            'rfd3_atom_array': rfd3_out.atom_array
+                        })
         except Exception as e:
-            print(f"Error during RFd3 generation for {job['design_id']}: {e}")
+            print(f"Error during RFd3 generation for Config {job['config_idx']}: {e}")
 
     gc.collect()
     torch.cuda.empty_cache()
@@ -261,31 +255,30 @@ def main():
     for job in tqdm(mpnn_queue, desc="LigandMPNN", unit="seq"):
         print(f"Running MPNN for {job['design_id']}...", flush=True)
         try:
-            fixed_res_set = set(range(job['min_res'], job['max_res'] + 1)) - set(job['redesign_res_ids'])
-            fixed_positions = {job['chain_id']: sorted(list(fixed_res_set))}
-            mpnn_input_configs = [{"batch_size": 1, "remove_waters": True, "fixed_positions_dict": fixed_positions}]
+            rfd3_array = job['rfd3_atom_array']
             
-            mpnn_outputs = lmpnn_engine.run(input_dicts=mpnn_input_configs, atom_arrays=[job['rfd3_atom_array']])
+            mpnn_input_configs = [{"batch_size": 1, "remove_waters": True}]
+            mpnn_outputs = lmpnn_engine.run(input_dicts=mpnn_input_configs, atom_arrays=[rfd3_array])
             
             if mpnn_outputs:
                 mpnn_out = mpnn_outputs[0]
                 valid_mask = ~np.isnan(mpnn_out.atom_array.coord[:, 0])
-                clean_mpnn_array = mpnn_out.atom_array[valid_mask]
+                raw_lmpnn_array = mpnn_out.atom_array[valid_mask]
                 
-                lmpnn_design_id = f"{job['design_id']}_LMPNN"
-                to_cif_file(clean_mpnn_array, f"outputs/{job['ion']}/lmpnn/{lmpnn_design_id}.cif", file_type="cif")
+                lmpnn_design_id = f"{job['design_id']}_LMPNN_Raw"
+                to_cif_file(raw_lmpnn_array, f"outputs/{job['ion']}/lmpnn/{lmpnn_design_id}.cif", file_type="cif")
                 
                 full_sequence_records.append({
                     'ion': job['ion'],
-                    'phase': 'LMPNN',
+                    'phase': 'LMPNN_Raw',
                     'design_id': lmpnn_design_id,
-                    'full_sequence': get_sequence_from_array(clean_mpnn_array, chain_id=job['chain_id'])
+                    'full_sequence': get_sequence_from_array(raw_lmpnn_array, chain_id=job['chain_id'])
                 })
                 
                 rf3_queue.append({
                     **job,
-                    'mpnn_atom_array': clean_mpnn_array,
-                    'rfd3_atom_array': job['rfd3_atom_array']
+                    'lmpnn_atom_array': raw_lmpnn_array,
+                    'rfd3_atom_array': rfd3_array
                 })
         except Exception as e:
             print(f"Error during LMPNN for {job['design_id']}: {e}")
@@ -295,7 +288,7 @@ def main():
     torch.cuda.empty_cache()
 
     # ---------------------------------------------------------
-    # STAGE 3: Validation & Scoring (RF3)
+    # STAGE 3: Validation & Scoring (RF3) - SPLICE OR RAW
     # ---------------------------------------------------------
     print(f"\n--- STAGE 3: Running {len(rf3_queue)} RF3 Validations ---", flush=True)
     rf3_engine = RF3InferenceEngine(ckpt_path='rf3', verbose=False)
@@ -305,31 +298,22 @@ def main():
         print(f"Running RF3 validation for {job['design_id']}...", flush=True)
         try:
             rfd3_array = job['rfd3_atom_array']
-            lmpnn_array = job['mpnn_atom_array']
+            lmpnn_array = job['lmpnn_atom_array']
             
-            # We strip sidechains in both cases to ensure RF3 rebuilds them cleanly without crashing
             valid_atoms = ['N', 'CA', 'C', 'O', 'CB', job['ion']]
             
             if not args.use_raw_lmpnn:
-                # --- THE FRANKENSTEIN SPLICE ---
-                # Start with RFd3 backbone (preserves WT scaffold)
                 array_for_rf3 = rfd3_array[np.isin(rfd3_array.atom_name, valid_atoms)].copy()
-                
-                # Inject ONLY the redesigned loop amino acids from LMPNN
                 for res_id in job['redesign_res_ids']:
                     lmpnn_ca_mask = (lmpnn_array.res_id == res_id) & (lmpnn_array.atom_name == "CA")
                     if np.any(lmpnn_ca_mask):
                         new_res_name = lmpnn_array.res_name[lmpnn_ca_mask][0]
                         array_for_rf3.res_name[array_for_rf3.res_id == res_id] = new_res_name
-                
                 phase_label = 'RF3_Spliced'
             else:
-                # --- USE FULLY HALLUCINATED LMPNN ---
-                # Take the entire wild structure LigandMPNN generated
                 array_for_rf3 = lmpnn_array[np.isin(lmpnn_array.atom_name, valid_atoms)].copy()
                 phase_label = 'RF3_Raw_LMPNN'
 
-            # Pass the chosen array into RF3
             input_structure = InferenceInput.from_atom_array(array_for_rf3, example_id=job['design_id'])
             rf3_outputs_dict = rf3_engine.run(inputs=input_structure)
             
@@ -350,7 +334,6 @@ def main():
                 os.makedirs(rf3_out_dir, exist_ok=True)
                 to_cif_file(rf3_atom_array, f"{rf3_out_dir}/{job['design_id']}_refolded.cif", file_type="cif")
                 
-                # Log the final, refolded sequence
                 full_rf3_seq = get_sequence_from_array(rf3_atom_array, chain_id=job['chain_id'])
                 full_sequence_records.append({
                     'ion': job['ion'],
@@ -359,8 +342,6 @@ def main():
                     'full_sequence': full_rf3_seq
                 })
                 
-                # --- Structure Verification & RMSD ---
-                # We always compare the RF3 output against the RFd3 geometry to measure structural shift
                 bb_mask_rfd3 = np.isin(job['rfd3_atom_array'].atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
                 bb_mask_rf3 = np.isin(rf3_atom_array.atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
                 
@@ -381,7 +362,6 @@ def main():
                 summary = rf3_output.summary_confidences
                 plddt = summary['overall_plddt']
                 
-                # Record metrics specifically for each loop
                 for loop_idx, loop_info in enumerate(job['loops']):
                     loop_start = loop_info['start_res']
                     loop_end = loop_info['end_res']
@@ -398,6 +378,7 @@ def main():
                     
                     final_records.append({
                         "metal_ion": job['ion'],
+                        "config_index": job['config_idx'],
                         "design_id": job['design_id'],
                         "design_number": job['design_number'],
                         "loop_index": loop_idx + 1,
