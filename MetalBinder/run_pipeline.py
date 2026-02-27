@@ -40,9 +40,9 @@ def parse_args():
     parser.add_argument("--num-configs", type=int, default=1, help="Number of unique loop length configurations to sample")
     parser.add_argument("--batch-size", type=int, default=1, help="Number of sequences to generate PER length configuration")
     parser.add_argument("--input", type=str, default="../Data/8FNS.cif", help="Path to input CIF structure")
-    parser.add_argument("--test", action="store_true", help="Run a short test by processing only the first loop")
-    parser.add_argument("--test-steps", type=int, default=10, help="Number of diffusion steps for RFd3 when in test mode.")
-    parser.add_argument("--use-raw-lmpnn", action="store_true", help="Pass the fully redesigned LMPNN sequence to RF3 instead of splicing.")
+    parser.add_argument("--out-dir", type=str, default="../Local/lanm_output", help="Root directory for outputs")
+    parser.add_argument("--splice-loops", action="store_true", help="Splice generated loops back into the generated backbone instead of running the full structure from LigandMPNN through RF3.")
+    parser.add_argument("--redesign-all", action="store_true", help="Allow LigandMPNN to redesign the entire protein structure. Default is to only redesign the loops modified by RFd3.")
     return parser.parse_args()
 
 def get_sequence_from_array(atom_array, chain_id="A", res_ids=None):
@@ -86,7 +86,7 @@ def main():
     rfd3_queue = []
     
     for ion in args.ions:
-        ion_dir = f"outputs/{ion}"
+        ion_dir = f"{args.out_dir}/{ion}"
         os.makedirs(f"{ion_dir}/rfd3", exist_ok=True)
         os.makedirs(f"{ion_dir}/lmpnn", exist_ok=True)
         os.makedirs(f"{ion_dir}/rf3", exist_ok=True)
@@ -95,9 +95,6 @@ def main():
         loops = get_ef_hand_loops(atom_array, metal_res_name=ion)
         
         print(f"\nFound {len(loops)} metal binding sites for {ion}.")
-        if args.test: 
-            print("Test mode enabled. Only processing the first metal binding site.")
-            loops = loops[:1]
             
         water_mask = atom_array.res_name == "HOH"
         context_array = atom_array[~water_mask]
@@ -164,7 +161,7 @@ def main():
                 new_loop['metal_res_id'] = new_total_len + new_loop['metal_idx'] + 1
                 new_loop['metal_chain_id'] = chain_id
             
-            loop_cif_path = f"outputs/{ion}/rfd3/context_cfg{config_idx}.cif"
+            loop_cif_path = f"{args.out_dir}/{ion}/rfd3/context_cfg{config_idx}.cif"
             to_cif_file(context_array, loop_cif_path)
             
             spec_input = DesignInputSpecification(
@@ -201,9 +198,6 @@ def main():
 
         try:
             inference_sampler_kwargs = {}
-            if args.test:
-                test_steps = max(2, args.test_steps)
-                inference_sampler_kwargs['num_timesteps'] = test_steps
                 
             # Utilize diffusion_batch_size properly!
             rfd3_config = getattr(__import__('rfd3.engine', fromlist=['RFD3InferenceConfig']), 'RFD3InferenceConfig')(
@@ -223,7 +217,7 @@ def main():
                     # Iterate through the generated batch
                     for batch_idx, rfd3_out in enumerate(rfd3_out_list):
                         design_id = f"{job['ion']}_cfg{job['config_idx']}_des{batch_idx}"
-                        to_cif_file(rfd3_out.atom_array, f"outputs/{job['ion']}/rfd3/{design_id}.cif", file_type="cif")
+                        to_cif_file(rfd3_out.atom_array, f"{args.out_dir}/{job['ion']}/rfd3/{design_id}.cif", file_type="cif")
                         
                         full_sequence_records.append({
                             'ion': job['ion'],
@@ -257,8 +251,29 @@ def main():
         try:
             rfd3_array = job['rfd3_atom_array']
             
-            mpnn_input_configs = [{"batch_size": 1, "remove_waters": True}]
-            mpnn_outputs = lmpnn_engine.run(input_dicts=mpnn_input_configs, atom_arrays=[rfd3_array])
+            mpnn_input_dict = {
+                "name": job['design_id'],
+                "batch_size": 1, 
+                "remove_waters": True,
+                "seed": 42
+            }
+            
+            if not args.redesign_all:
+                chain_id = job.get('chain_id', 'A')
+                mask = (rfd3_array.chain_id == chain_id) & (rfd3_array.atom_name == "CA")
+                ca_atoms = rfd3_array[mask]
+                all_res_ids = np.unique(ca_atoms.res_id)
+                designed_res_ids = job['redesign_res_ids']
+                
+                fixed_res_ids = [r for r in all_res_ids if r not in designed_res_ids]
+                fixed_residues_str = [f"{chain_id}{r}" for r in fixed_res_ids]
+                mpnn_input_dict["fixed_residues"] = fixed_residues_str
+                
+                print(f"  Fixing {len(fixed_res_ids)} residues, designing {len(designed_res_ids)} newly built residues.", flush=True)
+            else:
+                print("  Redesigning full structure.", flush=True)
+            
+            mpnn_outputs = lmpnn_engine.run(input_dicts=[mpnn_input_dict], atom_arrays=[rfd3_array])
             
             if mpnn_outputs:
                 mpnn_out = mpnn_outputs[0]
@@ -266,7 +281,7 @@ def main():
                 raw_lmpnn_array = mpnn_out.atom_array[valid_mask]
                 
                 lmpnn_design_id = f"{job['design_id']}_LMPNN_Raw"
-                to_cif_file(raw_lmpnn_array, f"outputs/{job['ion']}/lmpnn/{lmpnn_design_id}.cif", file_type="cif")
+                to_cif_file(raw_lmpnn_array, f"{args.out_dir}/{job['ion']}/lmpnn/{lmpnn_design_id}.cif", file_type="cif")
                 
                 full_sequence_records.append({
                     'ion': job['ion'],
@@ -302,7 +317,7 @@ def main():
             
             valid_atoms = ['N', 'CA', 'C', 'O', 'CB', job['ion']]
             
-            if not args.use_raw_lmpnn:
+            if args.splice_loops:
                 array_for_rf3 = rfd3_array[np.isin(rfd3_array.atom_name, valid_atoms)].copy()
                 for res_id in job['redesign_res_ids']:
                     lmpnn_ca_mask = (lmpnn_array.res_id == res_id) & (lmpnn_array.atom_name == "CA")
@@ -330,7 +345,7 @@ def main():
                 rf3_output = rf3_outputs_dict[rf3_target_key][0]
                 rf3_atom_array = rf3_output.atom_array
                 
-                rf3_out_dir = f"outputs/{job['ion']}/rf3"
+                rf3_out_dir = f"{args.out_dir}/{job['ion']}/rf3"
                 os.makedirs(rf3_out_dir, exist_ok=True)
                 to_cif_file(rf3_atom_array, f"{rf3_out_dir}/{job['design_id']}_refolded.cif", file_type="cif")
                 
@@ -403,13 +418,13 @@ def main():
     # ---------------------------------------------------------
     if full_sequence_records:
         seq_df = pd.DataFrame(full_sequence_records)
-        seq_df.to_csv("outputs/full_sequences_log.csv", index=False)
-        print("\nFull sequences logged to outputs/full_sequences_log.csv")
+        seq_df.to_csv(f"{args.out_dir}/full_sequences_log.csv", index=False)
+        print(f"\nFull sequences logged to {args.out_dir}/full_sequences_log.csv")
 
     if final_records:
         df = pd.DataFrame(final_records)
-        df.to_csv("outputs/global_sequence_catalog.csv", index=False)
-        print("Batch processing complete. Metrics saved to outputs/global_sequence_catalog.csv")
+        df.to_csv(f"{args.out_dir}/global_sequence_catalog.csv", index=False)
+        print(f"Batch processing complete. Metrics saved to {args.out_dir}/global_sequence_catalog.csv")
     else:
         print("\nPipeline finished, but no valid metric records were generated.")
 
