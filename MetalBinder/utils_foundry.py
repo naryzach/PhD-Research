@@ -87,53 +87,78 @@ def create_masked_input(atom_array, loop_info):
     context_array = atom_array[mask]
     return context_array, start_res, end_res
 
-def calculate_binding_radius(atom_array, loop_info, start_res, end_res):
+def calculate_binding_metrics(atom_array, loop_info, start_res, end_res):
     """
-    Calculates the effective binding radius between the target metal ion 
-    and the nearest coordinating oxygen atoms in the designed loop.
+    Calculates advanced binding metrics for the target metal ion.
+    Returns a dictionary of metrics.
     """
-    # 1. Locate the specific metal ion in the structure
+    metrics = {
+        "binding_radius_A": float('nan'),
+        "coordination_number": 0,
+        "net_charge": 0,
+        "bidentate_count": 0
+    }
+
+    # 1. Locate the specific metal ion
     metal_mask = (atom_array.res_id == loop_info['metal_res_id']) & \
                  (atom_array.chain_id == loop_info['metal_chain_id'])
-    
     metal_atoms = atom_array[metal_mask]
-    
     if len(metal_atoms) == 0:
-        print(f"Warning: Metal ion not found at {loop_info['metal_chain_id']}:{loop_info['metal_res_id']}")
-        return float('nan')
-        
-    # Get the 3D coordinates of the metal ion
+        return metrics
     metal_coord = metal_atoms.coord[0]
-    
-    # 2. Isolate the newly designed loop residues
+
+    # 2. Isolate the loop residues
     loop_mask = (atom_array.chain_id == loop_info["protein_chain_id"]) & \
                 (atom_array.res_id >= start_res) & \
                 (atom_array.res_id <= end_res)
-    
     loop_atoms = atom_array[loop_mask]
-    
     if len(loop_atoms) == 0:
-        return float('nan')
-        
-    # 3. Filter for likely coordinating atoms
-    # Lanthanides and EF-hands primarily coordinate via Oxygen (O, OD1, OD2, OE1, OE2)
-    oxygen_mask = np.char.startswith(loop_atoms.atom_name.astype(str), 'O')
-    coordinating_atoms = loop_atoms[oxygen_mask]
+        return metrics
+
+    # 3. Calculate Net Charge of the loop
+    # Asp (D) and Glu (E) are -1, Lys (K) and Arg (R) are +1, His (H) is ~0.1 (simplified)
+    # We focus on the formal charges.
+    res_names, res_ids = struc.get_residues(loop_atoms)
+    charge = 0
+    for rn in res_names:
+        if rn in ['ASP', 'GLU']: charge -= 1
+        elif rn in ['LYS', 'ARG']: charge += 1
+    metrics["net_charge"] = charge
+
+    # 4. Filter for coordinating Oxygens
+    # EF-hands coordinate via Oxygen (O, OD1, OD2, OE1, OE2)
+    potential_coord_mask = np.isin(loop_atoms.atom_name, ['O', 'OD1', 'OD2', 'OE1', 'OE2'])
+    coordinating_atoms = loop_atoms[potential_coord_mask]
     
-    # Fallback to all heavy atoms if no oxygens are present (e.g., if sidechains failed to pack)
     if len(coordinating_atoms) == 0:
-        coordinating_atoms = loop_atoms
-        
-    # 4. Calculate Euclidean distances from the metal to all coordinating atoms
+        return metrics
+
+    # 5. Calculate Distances
     distances = np.linalg.norm(coordinating_atoms.coord - metal_coord, axis=1)
     
-    # 5. Calculate the radius of the coordination sphere
-    # Lanthanides typically have a coordination number of 7 to 9.
-    # We take the mean of the 6 closest contacts to establish the primary binding radius.
-    closest_distances = np.sort(distances)[:6]
+    # Coordination Sphere Cutoff (typically ~3.1 A for Lanthanides/Calcium)
+    cutoff = 3.1
+    cn_mask = distances <= cutoff
+    metrics["coordination_number"] = int(np.sum(cn_mask))
     
+    # 6. Binding Radius (Mean of closest 6 contacts)
+    closest_distances = np.sort(distances)[:6]
     if len(closest_distances) > 0:
-        return np.mean(closest_distances)
-    else:
-        return float('nan')
+        metrics["binding_radius_A"] = np.mean(closest_distances)
+
+    # 7. Bidentate Detection
+    # If both oxygens of an Asp/Glu are within the cutoff, it's bidentate.
+    bidentate_count = 0
+    for res_id in np.unique(coordinating_atoms.res_id):
+        res_atoms = coordinating_atoms[coordinating_atoms.res_id == res_id]
+        # Check for OD1/OD2 (Asp) or OE1/OE2 (Glu)
+        sidechain_ox_mask = np.isin(res_atoms.atom_name, ['OD1', 'OD2', 'OE1', 'OE2'])
+        sc_oxygens = res_atoms[sidechain_ox_mask]
+        if len(sc_oxygens) >= 2:
+            sc_distances = np.linalg.norm(sc_oxygens.coord - metal_coord, axis=1)
+            if np.all(sc_distances <= cutoff):
+                bidentate_count += 1
+    metrics["bidentate_count"] = bidentate_count
+
+    return metrics
 

@@ -23,7 +23,7 @@ from atomworks.constants import PROTEIN_BACKBONE_ATOM_NAMES
 from rfd3.inference.input_parsing import DesignInputSpecification
 
 # Custom Utilities
-from utils_foundry import get_ef_hand_loops, create_masked_input, mutate_metals, calculate_binding_radius
+from utils_foundry import get_ef_hand_loops, create_masked_input, mutate_metals, calculate_binding_metrics
 
 torch.set_float32_matmul_precision('medium')
 
@@ -386,7 +386,7 @@ def main():
                     loop_bb_refolded_fitted = bb_refolded_fitted[loop_mask]
                     
                     loop_rmsd = rmsd(loop_bb_generated, loop_bb_refolded_fitted) if len(loop_bb_generated) > 0 else float('nan')
-                    rad = calculate_binding_radius(rf3_atom_array, loop_info, loop_start, loop_end)
+                    b_metrics = calculate_binding_metrics(rf3_atom_array, loop_info, loop_start, loop_end)
                     
                     loop_res_ids = list(range(loop_start, loop_end + 1))
                     loop_seq = get_sequence_from_array(rf3_atom_array, chain_id=job['chain_id'], res_ids=loop_res_ids)
@@ -403,7 +403,10 @@ def main():
                         "loop_rmsd": loop_rmsd,
                         "plddt": plddt,
                         "ptm": summary.get('ptm', 0),
-                        "binding_radius_A": rad
+                        "binding_radius_A": b_metrics["binding_radius_A"],
+                        "coordination_number": b_metrics["coordination_number"],
+                        "net_charge": b_metrics["net_charge"],
+                        "bidentate_count": b_metrics["bidentate_count"]
                     })
 
         except Exception as e:
