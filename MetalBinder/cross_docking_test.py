@@ -8,18 +8,29 @@ from biotite.structure.io.pdbx import CIFFile, get_structure as get_cif_structur
 from atomworks.io.utils.io_utils import to_cif_file
 
 # Foundry Inference imports
+from rfd3.engine import RFD3InferenceConfig, RFD3InferenceEngine
+from mpnn.inference_engines.mpnn import MPNNInferenceEngine
 from rf3.inference_engines.rf3 import RF3InferenceEngine
 from rf3.utils.inference import InferenceInput
 from biotite.structure import rmsd, superimpose
 from atomworks.constants import PROTEIN_BACKBONE_ATOM_NAMES
+from tqdm import tqdm
+import logging
+
+# Silence the noisy debug and info logs from these specific modules
+logging.getLogger("transforms").setLevel(logging.ERROR)
+logging.getLogger("atomworks.io").setLevel(logging.ERROR)
+logging.getLogger("atomworks.ml").setLevel(logging.ERROR)
+logging.getLogger("foundry").setLevel(logging.ERROR)
+logging.getLogger("rf3").setLevel(logging.ERROR)
 
 # Custom Utilities
 from utils_foundry import get_ef_hand_loops, calculate_binding_radius
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Automated Cross Docking: Swap metal ions in the best generated structures.")
-    parser.add_argument("--catalog", type=str, default="Local/lanm_output/global_sequence_catalog.csv", help="Path to pipeline sequence catalog")
-    parser.add_argument("--output-dir", type=str, default="Local/lanm_output/cross_docking", help="Base directory for cross docked structures")
+    parser.add_argument("--catalog", type=str, default="../Local/lanm_output/global_sequence_catalog.csv", help="Path to pipeline sequence catalog")
+    parser.add_argument("--output-dir", type=str, default="../Local/lanm_output/cross_docking", help="Base directory for cross docked structures")
     parser.add_argument("--top-k", type=int, default=5, help="Number of top structures per ion to cross-dock")
     parser.add_argument("--manual-input", type=str, default=None, help="If provided, acts as single-file mode instead of automated sequence parsing")
     parser.add_argument("--manual-new-ion", type=str, default=None, help="If provided with --manual-input, sets the target swap ion for single mode")
@@ -156,6 +167,11 @@ def analyze_cross_docking_results(df_results, df_native, output_dir):
 def main():
     args = parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
+    
+    checkpoint_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Tools", "foundry_checkpoints"))
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    os.environ["FOUNDRY_CHECKPOINT_DIRS"] = checkpoint_dir
+    
     base_folder = os.path.dirname(args.catalog)
     csv_path = os.path.join(base_folder, "cross_docking_catalog.csv")
     
@@ -249,6 +265,9 @@ def main():
     cross_dock_out_folder = os.path.join(args.output_dir, "batch_structures")
     os.makedirs(cross_dock_out_folder, exist_ok=True)
     
+    print(f"Preparing {len(top_designs) * (len(ions)-1)} potential structural combinations. This may take a few minutes as each is parsed...")
+    
+    pbar = tqdm(total=len(top_designs) * (len(ions)-1), desc="Preparing structural inputs")
     for design in top_designs:
         original_ion = design['ion']
         cif_path = design['file_path']
@@ -256,10 +275,12 @@ def main():
         
         if atom_array is None:
             print(f"Warning: Could not load {cif_path}, skipping.")
+            pbar.update(len(ions)-1)
             continue
             
         old_ion_detected = identify_existing_ion(atom_array)
         if not old_ion_detected or old_ion_detected != original_ion:
+            pbar.update(len(ions)-1)
             continue
             
         for swap_ion_target in ions:
@@ -274,6 +295,8 @@ def main():
                 'original_ion': original_ion,
                 'new_ion': swap_ion_target
             }
+            pbar.update(1)
+    pbar.close()
 
     if not inference_inputs:
         print("No valid structures prepared for validation.")
