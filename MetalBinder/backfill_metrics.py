@@ -32,7 +32,7 @@ def calculate_motif_match(seq):
     return score / 3.0
 
 def backfill():
-    base_path = "/home/ryangustafson/Documents/GitHubProj/PhD-Research/Local/lanm_output"
+    base_path = "../Local/lanm_output"
     catalog_path = os.path.join(base_path, "global_sequence_catalog.csv")
     checkpoint_path = os.path.join(base_path, "global_sequence_catalog_backfill.csv")
     

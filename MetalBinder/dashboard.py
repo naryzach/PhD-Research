@@ -13,10 +13,33 @@ st.set_page_config(page_title="Lanm Output Dashboard", layout="wide")
 st.title("🧬 Lanm Output Dashboard")
 st.markdown("Explore metal-binding protein designs with advanced structural and sequence analysis.")
 
+# --- Categorization ---
+ALKALI = ['LI', 'NA', 'K', 'RB', 'CS', 'FR']
+ALKALINE_EARTH = ['BE', 'MG', 'CA', 'SR', 'BA', 'RA']
+# Rare Earth: Sc, Y, Lanthanides (La-Lu), and Actinides (Ac-Lr)
+RARE_EARTH = [
+    'SC', 'Y', 'LA', 'CE', 'PR', 'ND', 'PM', 'SM', 'EU', 'GD', 'TB', 'DY', 'HO', 'ER', 'TM', 'YB', 'LU',
+    'AC', 'TH', 'PA', 'U', 'NP', 'PU', 'AM', 'CM', 'BK', 'CF', 'ES', 'FM', 'MD', 'NO', 'LR'
+]
+TRANSITION = [
+    'TI', 'V', 'CR', 'MN', 'FE', 'CO', 'NI', 'CU', 'ZN', 'ZR', 'NB', 'MO', 'TC', 'RU', 'RH', 'PD', 'AG', 'CD',
+    'HF', 'TA', 'W', 'RE', 'OS', 'IR', 'PT', 'AU', 'HG'
+]
+POST_TRANSITION = ['AL', 'GA', 'IN', 'SN', 'TL', 'PB', 'BI', 'PO']
+
+def get_category(ion):
+    ion_upper = str(ion).upper().replace('2+', '').replace('3+', '')
+    if ion_upper in ALKALI: return "Alkali"
+    if ion_upper in ALKALINE_EARTH: return "Alkaline Earth"
+    if ion_upper in RARE_EARTH: return "Rare Earth"
+    if ion_upper in TRANSITION: return "Transition"
+    if ion_upper in POST_TRANSITION: return "Post-transition"
+    return "Other"
+
 # --- Data Loading ---
 @st.cache_data
 def load_data():
-    base_path = "/home/ryangustafson/Documents/GitHubProj/PhD-Research/Local/lanm_output"
+    base_path = "Local/lanm_output"
     catalog_path = os.path.join(base_path, "global_sequence_catalog.csv")
     full_seq_path = os.path.join(base_path, "full_sequences_log.csv")
     
@@ -69,6 +92,9 @@ if df.empty:
     st.warning("⚠️ No data found in global_sequence_catalog.csv. Please ensure the pipeline has generated results.")
     st.stop()
 
+# Add categories
+df['metal_category'] = df['metal_ion'].apply(get_category)
+
 # --- Sidebar Filters ---
 st.sidebar.header("Filters")
 
@@ -101,8 +127,15 @@ def set_optimal():
 if st.sidebar.button("Set Optimal Presets", on_click=set_optimal):
     st.sidebar.success("Optimal filters applied!")
 
-# Ion selection
-selected_ions = st.sidebar.multiselect("Select Target Ions", options=sorted(available_ions), default=sorted(df['metal_ion'].unique()) if not df.empty else [])
+# Metal Category Filter
+st.sidebar.subheader("Metal Groups")
+available_categories = sorted(df['metal_category'].unique())
+category_choice = st.sidebar.multiselect("Metal Category", options=available_categories, default=available_categories)
+
+# Ion selection based on category
+possible_ions_df = df[df['metal_category'].isin(category_choice)]
+possible_ions = possible_ions_df['metal_ion'].unique()
+selected_ions = st.sidebar.multiselect("Select Target Ions", options=sorted(possible_ions), default=sorted(possible_ions))
 
 # Filter dataframe
 filtered_df = df.copy()
@@ -140,6 +173,7 @@ charge_range = get_range_filter(df, 'net_charge', "Net Charge Range", "net_charg
 
 if selected_ions:
     filtered_df = filtered_df[filtered_df['metal_ion'].isin(selected_ions)]
+filtered_df = filtered_df[filtered_df['metal_category'].isin(category_choice)]
 
 if plddt_range:
     filtered_df = filtered_df[(filtered_df['plddt'] >= plddt_range[0]) & (filtered_df['plddt'] <= plddt_range[1])]
@@ -164,12 +198,14 @@ if 'net_charge' in filtered_df.columns:
 
 # --- Plots ---
 st.header("📈 Comparative Analysis")
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "Candidate Evaluation", 
     "Structural Accuracy", 
     "Sequence Analysis", 
     "Loop Distributions", 
-    "Pairwise Comparison"
+    "Pairwise Comparison",
+    "Advanced Analytics",
+    "Category Comparison"
 ])
 
 with tab1:
@@ -225,6 +261,19 @@ with tab2:
         fig_box_rad.add_hrect(y0=2.3, y1=2.6, line_width=0, fillcolor="green", opacity=0.1)
         st.plotly_chart(fig_box_rad, width='stretch')
 
+    # Tertiary Analysis: Success Rate by Ion
+    st.divider()
+    st.subheader("Design Success Rate (pLDDT > 0.8 & RMSD < 2.0)")
+    success_df = filtered_df.copy()
+    p_max = success_df['plddt'].max()
+    p_thresh = 0.8 if p_max <= 1.0 else 80.0
+    success_df['is_success'] = (success_df['plddt'] >= p_thresh) & (success_df['overall_rmsd'] <= 2.0)
+    success_rate = success_df.groupby('metal_ion')['is_success'].mean().reset_index()
+    success_rate['Success Rate (%)'] = success_rate['is_success'] * 100
+    fig_success = px.bar(success_rate, x='metal_ion', y='Success Rate (%)', color='metal_ion', title="Binding Success Rate by Ion Type")
+    st.plotly_chart(fig_success, width='stretch')
+
+
 with tab3:
     st.subheader("Residue Frequency Analysis")
     
@@ -269,6 +318,19 @@ with tab3:
             title=f"Residue Frequency Heatmap ({ion_for_heatmap})"
         )
         st.plotly_chart(fig_heatmap, width='stretch')
+        
+        # Tertiary Analysis: pLDDT by Residue Type
+        if 'loop_sequence' in filtered_df.columns and 'plddt' in filtered_df.columns:
+            st.divider()
+            st.subheader("Structural Confidence vs. Loop Composition")
+            res_data = []
+            for _, row in heatmap_data.iterrows():
+                for res in set(row['loop_sequence']):
+                    res_data.append({'Residue': res, 'pLDDT': row['plddt'], 'Metal': row['metal_ion']})
+            res_df = pd.DataFrame(res_data)
+            fig_res = px.box(res_df, x='Residue', y='pLDDT', color='Metal', title=f"Residue Influence on Stability ({ion_for_heatmap})")
+            st.plotly_chart(fig_res, width='stretch')
+            st.caption("Shows if certain amino acids consistently correlate with higher structural confidence.")
 
 with tab4:
     fig_hist = px.histogram(
@@ -280,6 +342,21 @@ with tab4:
         labels={"loop_length": "Loop Length", "count": "Frequency"}
     )
     st.plotly_chart(fig_hist, width='stretch')
+    
+    # Tertiary Analysis: Loop Length vs structural Stability
+    if 'plddt' in filtered_df.columns:
+        st.divider()
+        st.subheader("Loop Length vs. Structural Stability")
+        fig_len_plddt = px.scatter(
+            filtered_df, 
+            x='loop_length', 
+            y='plddt', 
+            color='metal_ion', 
+            trendline="ols", 
+            title="Loop Length Impact on Confidence"
+        )
+        st.plotly_chart(fig_len_plddt, width='stretch')
+        st.caption("Investigates if longer or shorter loops tend to be more stable for specific metal ions.")
 
 with tab5:
     st.subheader("Compare Two Molecules")
@@ -348,7 +425,134 @@ with tab5:
             mode='markers+text', text=[f"B: {design_b}"], 
             marker=dict(color='red', size=15, symbol='star'), name='Molecule B'
         ))
-        st.plotly_chart(fig_context, width='stretch')
+# --- Advanced Analytics Tab ---
+with tab6:
+    st.header("📈 Advanced Analytics")
+    st.write("Deep dive into property correlations and feature influence.")
+    
+    # Select numeric columns for analysis
+    numeric_cols = filtered_df.select_dtypes(include=[np.number]).columns.tolist()
+    # Remove some less useful numeric columns if they exist
+    for col in ['config_index', 'design_index', 'loop_index']:
+        if col in numeric_cols: numeric_cols.remove(col)
+    
+    col_adv1, col_adv2 = st.columns(2)
+    
+    with col_adv1:
+        st.subheader("Property Correlation Heatmap")
+        if len(numeric_cols) > 1:
+            corr = filtered_df[numeric_cols].corr()
+            fig_corr = px.imshow(
+                corr, 
+                text_auto=True, 
+                aspect="auto",
+                color_continuous_scale='RdBu_r', 
+                zmin=-1, zmax=1,
+                title="Correlation between Binding Metrics"
+            )
+            st.plotly_chart(fig_corr, width='stretch')
+        else:
+            st.info("Not enough numeric columns for correlation analysis.")
+            
+    with col_adv2:
+        st.subheader("Pareto Front (Confidence vs Accuracy)")
+        if 'plddt' in filtered_df.columns and 'overall_rmsd' in filtered_df.columns:
+            fig_pareto = px.scatter(
+                filtered_df, 
+                x='overall_rmsd', 
+                y='plddt', 
+                color='metal_ion',
+                hover_data=['design_id'],
+                title="pLDDT vs. Overall RMSD",
+                labels={'overall_rmsd': 'Overall RMSD (Å)', 'plddt': 'pLDDT'}
+            )
+            # Annotate best designs (Top-Left corner)
+            st.plotly_chart(fig_pareto, width='stretch')
+            st.caption("Ideal designs are in the Top-Left: High Confidence, Low Error.")
+        else:
+            st.info("pLDDT and RMSD required for Pareto analysis.")
+
+    st.divider()
+    
+    st.subheader("Feature Influence Study")
+    influence_col = st.selectbox("Select Categorical Feature", ["metal_ion", "bidentate_count", "loop_index", "is_motif_match"] if "is_motif_match" in filtered_df.columns else ["metal_ion", "bidentate_count", "loop_index"])
+    target_metric = st.selectbox("Select Metric to Compare", ["plddt", "overall_rmsd", "loop_rmsd", "binding_radius_A", "coordination_number", "net_charge"], index=1)
+    
+    if influence_col in filtered_df.columns and target_metric in filtered_df.columns:
+        fig_infl = px.box(
+            filtered_df, 
+            x=influence_col, 
+            y=target_metric, 
+            color=influence_col,
+            notched=True,
+            points="all",
+            title=f"Influence of {influence_col} on {target_metric}"
+        )
+        st.plotly_chart(fig_infl, width='stretch')
+    
+    st.divider()
+    
+    st.subheader("Multi-Dimensional Property Matrix")
+    selected_metrics = st.multiselect("Select Metrics for Matrix", numeric_cols, default=numeric_cols[:4] if len(numeric_cols) >= 4 else numeric_cols)
+    if len(selected_metrics) > 1:
+        fig_matrix = px.scatter_matrix(
+            filtered_df,
+            dimensions=selected_metrics,
+            color='metal_ion',
+            hover_data=['design_id'],
+            title="Multi-Metric Relationship Matrix"
+        )
+        # Scatter matrix can be huge, adjust height
+        fig_matrix.update_layout(height=800)
+        st.plotly_chart(fig_matrix, width='stretch')
+
+# --- Category Comparison Tab ---
+with tab7:
+    st.header("⚖️ Group Performance Comparison")
+    
+    unique_cats = filtered_df['metal_category'].unique()
+    
+    if len(unique_cats) < 2:
+        st.warning("Please select at least two metal categories in the sidebar to perform a comparative analysis.")
+    else:
+        st.write(f"Comparing performance across **{len(unique_cats)}** selected categories.")
+        
+        col_cat1, col_cat2 = st.columns(2)
+        
+        with col_cat1:
+            st.subheader("Structural Confidence (pLDDT)")
+            fig_cat_plddt = px.box(filtered_df, x='metal_category', y='plddt', color='metal_category', notched=True, points="all", title="Design Confidence by Category")
+            st.plotly_chart(fig_cat_plddt, width='stretch')
+            
+        with col_cat2:
+            st.subheader("Geometric Accuracy (Loop RMSD)")
+            fig_cat_rmsd = px.box(filtered_df, x='metal_category', y='loop_rmsd', color='metal_category', notched=True, points="all", title="Loop Accuracy by Category")
+            st.plotly_chart(fig_cat_rmsd, width='stretch')
+            
+        st.divider()
+        
+        st.subheader("Global Yield Rates")
+        # Define success again locally
+        p_max = filtered_df['plddt'].max()
+        p_thresh = 0.8 if p_max <= 1.0 else 80.0
+        
+        # Calculate success per category
+        success_data = []
+        for cat in unique_cats:
+            sub = filtered_df[filtered_df['metal_category'] == cat]
+            rate = ((sub['plddt'] >= p_thresh) & (sub['overall_rmsd'] <= 2.0)).mean() * 100
+            success_data.append({'Category': cat, 'Success Rate (%)': rate})
+            
+        cat_success_df = pd.DataFrame(success_data)
+        fig_cat_success = px.bar(cat_success_df, x='Category', y='Success Rate (%)', color='Category', text_auto='.1f', title="Success Rate (pLDDT > 80, RMSD < 2.0)")
+        st.plotly_chart(fig_cat_success, width='stretch')
+        
+        st.divider()
+        
+        st.subheader("Binding Site Geometry")
+        fig_cat_radius = px.violin(filtered_df, x='metal_category', y='binding_radius_A', color='metal_category', box=True, title="Binding Radius Variance")
+        fig_cat_radius.add_hrect(y0=2.3, y1=2.6, line_width=0, fillcolor="green", opacity=0.1)
+        st.plotly_chart(fig_cat_radius, width='stretch')
 
 # --- Design Explorer ---
 st.header("🔍 Design Explorer")
