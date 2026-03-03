@@ -51,8 +51,8 @@ def load_data():
     
     return df, full_seq_df, ions, base_path
 
-def get_b_factor_range(cif_data):
-    """Parses B-factors from CIF focusing on CA atoms (amino acid scores)."""
+def get_b_metrics(cif_data):
+    """Parses B-factors from CIF and determines if they represent pLDDT or Error."""
     lines = cif_data.split('\n')
     col_b = -1
     col_atom = -1
@@ -73,7 +73,6 @@ def get_b_factor_range(cif_data):
             header_section = False
             parts = line.split()
             if col_b != -1 and col_atom != -1 and len(parts) > max(col_b, col_atom):
-                # Filter for CA atoms to get "Amino Acid" level scores
                 atom_name = parts[col_atom].strip('"').strip("'")
                 if atom_name == "CA":
                     try:
@@ -82,9 +81,26 @@ def get_b_factor_range(cif_data):
         elif not header_section and line.startswith('#'):
             break
             
-    if b_factors:
-        return min(b_factors), max(b_factors)
-    return 0.0, 1.0 # Fallback
+    if not b_factors:
+        return 0.0, 1.0, "roygb" # Default pLDDT
+    
+    b_min, b_max = min(b_factors), max(b_factors)
+    
+    # Adaptive Inversion Logic:
+    # 1. If max <= 1.0 and mean is very small, it's likely an Error metric (Low=Good, use bgyor)
+    # 2. If values are 0-100, it's likely pLDDT (High=Good, use roygb)
+    avg_b = sum(b_factors) / len(b_factors)
+    
+    if b_max <= 1.1: # 0-1 scale
+        if avg_b < 0.3: # Mostly small values = Error/Distance
+            return b_min, b_max, True # Invert
+        else: # Likely pLDDT 0-1
+            return b_min, b_max, False
+    else: # 0-100 scale
+        if avg_b < 30: # Likely RMSD or B-factor
+            return b_min, b_max, True # Invert
+        else: # Likely pLDDT 0-100
+            return b_min, b_max, False
 
 df, full_seq_df, available_ions, base_path = load_data()
 
@@ -94,6 +110,34 @@ if df.empty:
 
 # Add categories
 df['metal_category'] = df['metal_ion'].apply(get_category)
+
+# --- Helper Functions for Plots ---
+def generate_residue_heatmap(data, title, color_scale="YlOrRd"):
+    if data.empty:
+        return None
+    
+    max_len = data['loop_length'].max()
+    aa_list = list("ACDEFGHIKLMNPQRSTVWY")
+    freq_matrix = pd.DataFrame(0.0, index=aa_list, columns=range(max_len))
+    
+    for _, row in data.iterrows():
+        seq = row['loop_sequence']
+        for i, aa in enumerate(seq):
+            if aa in freq_matrix.index and i < max_len:
+                freq_matrix.loc[aa, i] += 1
+    
+    # Normalize
+    freq_matrix = freq_matrix.div(freq_matrix.sum(axis=0), axis=1).fillna(0)
+    
+    fig = px.imshow(
+        freq_matrix,
+        labels=dict(x="Loop Position", y="Amino Acid", color="Frequency"),
+        x=[f"Pos {i}" for i in range(max_len)],
+        y=aa_list,
+        color_continuous_scale=color_scale,
+        title=title
+    )
+    return fig
 
 # --- Sidebar Filters ---
 st.sidebar.header("Filters")
@@ -185,6 +229,18 @@ if cn_range:
     filtered_df = filtered_df[(filtered_df['coordination_number'] >= cn_range[0]) & (filtered_df['coordination_number'] <= cn_range[1])]
 if charge_range:
     filtered_df = filtered_df[(filtered_df['net_charge'] >= charge_range[0]) & (filtered_df['net_charge'] <= charge_range[1])]
+
+# --- Export (In Sidebar) ---
+st.sidebar.divider()
+st.sidebar.subheader("📥 Export Filtered Data")
+csv_data = filtered_df.to_csv(index=False).encode('utf-8')
+st.sidebar.download_button(
+    label="Download Filtered CSV",
+    data=csv_data,
+    file_name='lanm_filtered_catalog.csv',
+    mime='text/csv',
+    use_container_width=True
+)
 
 # --- Main Dashboard ---
 metrics_cols = st.columns(5)
@@ -287,37 +343,29 @@ with tab3:
     else:
         st.success("100% Sequence Specificity! Every generated sequence is unique to its target ion.")
     
-    # Heatmap Generation
-    ion_for_heatmap = st.selectbox("Select Ion for Residue Heatmap", options=["Global"] + sorted(filtered_df['metal_ion'].unique().tolist()))
+    st.divider()
+    col_heat1, col_heat2 = st.columns(2)
     
-    if ion_for_heatmap == "Global":
-        heatmap_data = filtered_df
-    else:
+    with col_heat1:
+        st.write("### Global Distribution")
+        fig_global = generate_residue_heatmap(filtered_df, "Global Residue Frequency", "YlOrRd")
+        if fig_global:
+            st.plotly_chart(fig_global, width='stretch')
+        else:
+            st.info("No data available for global heatmap.")
+            
+    with col_heat2:
+        st.write("### Ion-Specific Comparison")
+        ion_for_heatmap = st.selectbox("Select Ion for Comparison", options=sorted(filtered_df['metal_ion'].unique().tolist()))
+        
         heatmap_data = filtered_df[filtered_df['metal_ion'] == ion_for_heatmap]
+        fig_ion = generate_residue_heatmap(heatmap_data, f"{ion_for_heatmap} Residue Frequency", "Blues")
+        if fig_ion:
+            st.plotly_chart(fig_ion, width='stretch')
+        else:
+            st.info(f"No data available for {ion_for_heatmap}.")
     
-    if not heatmap_data.empty:
-        max_len = heatmap_data['loop_length'].max()
-        aa_list = list("ACDEFGHIKLMNPQRSTVWY")
-        freq_matrix = pd.DataFrame(0.0, index=aa_list, columns=range(max_len))
-        
-        for _, row in heatmap_data.iterrows():
-            seq = row['loop_sequence']
-            for i, aa in enumerate(seq):
-                if aa in freq_matrix.index and i < max_len:
-                    freq_matrix.loc[aa, i] += 1
-        
-        # Normalize
-        freq_matrix = freq_matrix.div(freq_matrix.sum(axis=0), axis=1).fillna(0)
-        
-        fig_heatmap = px.imshow(
-            freq_matrix,
-            labels=dict(x="Loop Position", y="Amino Acid", color="Frequency"),
-            x=[f"Pos {i}" for i in range(max_len)],
-            y=aa_list,
-            color_continuous_scale="YlOrRd" if ion_for_heatmap == "Global" else "Blues",
-            title=f"Residue Frequency Heatmap ({ion_for_heatmap})"
-        )
-        st.plotly_chart(fig_heatmap, width='stretch')
+    if not filtered_df.empty:
         
         # Tertiary Analysis: pLDDT by Residue Type
         if 'loop_sequence' in filtered_df.columns and 'plddt' in filtered_df.columns:
@@ -593,19 +641,22 @@ if selected_design:
             view = py3Dmol.view(width=800, height=500)
             view.addModel(cif_data, "cif")
             
-            # Relative pLDDT coloring (Blue=Local Max, Red=Local Min)
-            # This ensures contrast even if absolute pLDDT is low.
-            b_min, b_max = get_b_factor_range(cif_data)
+            # Adaptive Coloring (Blue=Good, Red=Bad)
+            b_min, b_max, invert = get_b_metrics(cif_data)
             
             # If the range is tiny, fall back to a standard 0-1 scale to avoid flickering
-            if b_max - b_min < 0.01:
-                is_0_1 = b_max <= 1.0
-                b_min, b_max = (0.0, 1.0) if is_0_1 else (0, 100)
-            
-            view.setStyle({'cartoon': {'colorscheme': {'prop': 'b', 'gradient': 'roygb', 'min': b_min, 'max': b_max}}})
+            if b_max - b_min < 0.0001:
+                b_min, b_max = 0.0, 1.0
+                invert = False
+                
+            # Reverse the gradient by swapping min and max if needed
+            if invert:
+                view.setStyle({'cartoon': {'colorscheme': {'prop': 'b', 'gradient': 'roygb', 'min': b_max, 'max': b_min}}})
+            else:
+                view.setStyle({'cartoon': {'colorscheme': {'prop': 'b', 'gradient': 'roygb', 'min': b_min, 'max': b_max}}})
             
             # Show metal
-            view.addStyle({'resn': design_info['metal_ion']}, {'sphere': {'radius': 1.5, 'color': 'red'}})
+            view.addStyle({'resn': design_info['metal_ion']}, {'sphere': {'radius': 1.5, 'color': 'silver'}})
             
             # Highlight loop residues - we need to find them in the structure.
             # Usually the loop is what we redesigned.
@@ -617,12 +668,4 @@ if selected_design:
         else:
             st.warning(f"Structure file not found at {cif_file}")
 
-# --- Export ---
-st.header("📥 Export Data")
-csv = filtered_df.to_csv(index=False).encode('utf-8')
-st.download_button(
-    label="Download Filtered Catalog as CSV",
-    data=csv,
-    file_name='lanm_filtered_catalog.csv',
-    mime='text/csv',
-)
+
