@@ -38,6 +38,13 @@ def get_category(ion):
 
 # --- Data Loading ---
 @st.cache_data
+def get_cif_data(cif_path):
+    if not os.path.exists(cif_path):
+        return None
+    with open(cif_path, "r") as f:
+        return f.read()
+
+@st.cache_data
 def load_data():
     base_path = "Local/lanm_output"
     catalog_path = os.path.join(base_path, "global_sequence_catalog.csv")
@@ -51,9 +58,15 @@ def load_data():
     
     return df, full_seq_df, ions, base_path
 
-def get_b_metrics(cif_data):
-    """Parses B-factors from CIF and determines if they represent pLDDT or Error."""
-    lines = cif_data.split('\n')
+@st.cache_data
+def get_b_metrics(cif_path):
+    """Parses B-factors from CIF file and determines if they represent pLDDT or Error."""
+    if not os.path.exists(cif_path):
+        return 0.0, 1.0, False
+        
+    with open(cif_path, "r") as f:
+        lines = f.readlines()
+        
     col_b = -1
     col_atom = -1
     col_count = 0
@@ -82,25 +95,18 @@ def get_b_metrics(cif_data):
             break
             
     if not b_factors:
-        return 0.0, 1.0, "roygb" # Default pLDDT
+        return 0.0, 1.0, False # Default pLDDT False (roygb)
     
     b_min, b_max = min(b_factors), max(b_factors)
-    
-    # Adaptive Inversion Logic:
-    # 1. If max <= 1.0 and mean is very small, it's likely an Error metric (Low=Good, use bgyor)
-    # 2. If values are 0-100, it's likely pLDDT (High=Good, use roygb)
     avg_b = sum(b_factors) / len(b_factors)
     
+    # Adaptive Inversion Logic:
     if b_max <= 1.1: # 0-1 scale
-        if avg_b < 0.3: # Mostly small values = Error/Distance
-            return b_min, b_max, True # Invert
-        else: # Likely pLDDT 0-1
-            return b_min, b_max, False
+        invert = avg_b < 0.3 # Mostly small values = Error/Distance
     else: # 0-100 scale
-        if avg_b < 30: # Likely RMSD or B-factor
-            return b_min, b_max, True # Invert
-        else: # Likely pLDDT 0-100
-            return b_min, b_max, False
+        invert = avg_b < 30 # Likely RMSD or B-factor
+        
+    return b_min, b_max, invert
 
 df, full_seq_df, available_ions, base_path = load_data()
 
@@ -112,7 +118,9 @@ if df.empty:
 df['metal_category'] = df['metal_ion'].apply(get_category)
 
 # --- Helper Functions for Plots ---
-def generate_residue_heatmap(data, title, color_scale="YlOrRd"):
+# --- Cached Plotting Functions ---
+@st.cache_resource
+def get_residue_heatmap_fig(data, title, color_scale="YlOrRd"):
     if data.empty:
         return None
     
@@ -137,6 +145,138 @@ def generate_residue_heatmap(data, title, color_scale="YlOrRd"):
         color_continuous_scale=color_scale,
         title=title
     )
+    return fig
+
+@st.cache_resource
+def get_eval_plot(df, selected_shape, rad_range_vals, rmsd_range_vals):
+    shape_options = {
+        "Loop Index": "loop_index",
+        "Bidentate Count": "bidentate_count",
+        "Metal Ion": "metal_ion",
+        "Configuration": "config_index",
+        "Motif Match": "motif_match"
+    }
+    # Filter for existing columns
+    active_shape_options = {k: v for k, v in shape_options.items() if v in df.columns}
+    symbol_col = active_shape_options.get(selected_shape, None)
+    
+    fig = px.scatter(
+        df, 
+        x='loop_rmsd', 
+        y='binding_radius_A', 
+        color='metal_ion', 
+        size='plddt' if 'plddt' in df.columns else None,
+        symbol=symbol_col,
+        hover_data=['design_id', 'loop_sequence', 'coordination_number', 'net_charge'] if 'coordination_number' in df.columns else ['design_id', 'loop_sequence'],
+        labels={'loop_rmsd': 'Individual Loop RMSD (Å)', 'binding_radius_A': 'Binding Radius (Å)'},
+        title="Candidate Evaluation (Thresholds: RMSD < 1.5, Radius 2.3-2.6)"
+    )
+    
+    # Force axis range to match filters
+    if rad_range_vals:
+        fig.update_yaxes(range=[rad_range_vals[0]-0.1, rad_range_vals[1]+0.1])
+    if rmsd_range_vals:
+        fig.update_xaxes(range=[0, max(1.5, df['loop_rmsd'].max() + 0.2)])
+        
+    # Add horizontal region for ideal radius
+    fig.add_hrect(y0=2.3, y1=2.6, line_width=0, fillcolor="green", opacity=0.1)
+    # Add vertical line for RMSD threshold
+    fig.add_vline(x=1.5, line_dash="dash", line_color="red", opacity=0.6)
+    return fig
+
+@st.cache_resource
+def get_accuracy_plots(df):
+    fig_violin_rmsd = px.violin(df, x='metal_ion', y='loop_rmsd', color='metal_ion', box=True, points="all", title="Loop RMSD Distribution")
+    
+    fig_box_rad = px.box(df, x='metal_ion', y='binding_radius_A', color='metal_ion', points="all", title="Binding Radius Distribution")
+    fig_box_rad.add_hrect(y0=2.3, y1=2.6, line_width=0, fillcolor="green", opacity=0.1)
+    
+    # Success Rate
+    p_max = df['plddt'].max()
+    p_thresh = 0.8 if p_max <= 1.0 else 80.0
+    success_df = df.copy()
+    success_df['is_success'] = (success_df['plddt'] >= p_thresh) & (success_df['overall_rmsd'] <= 2.0)
+    success_rate = success_df.groupby('metal_ion')['is_success'].mean().reset_index()
+    success_rate['Success Rate (%)'] = success_rate['is_success'] * 100
+    fig_success = px.bar(success_rate, x='metal_ion', y='Success Rate (%)', color='metal_ion', title="Binding Success Rate by Ion Type")
+    
+    return fig_violin_rmsd, fig_box_rad, fig_success
+
+@st.cache_resource
+def get_loop_dist_plots(df):
+    fig_hist = px.histogram(
+        df, x="loop_length", color="metal_ion", barmode="group",
+        title="Loop Length Distributions",
+        labels={"loop_length": "Loop Length", "count": "Frequency"}
+    )
+    fig_len_plddt = px.scatter(
+        df, x='loop_length', y='plddt', color='metal_ion', trendline="ols", 
+        title="Loop Length Impact on Confidence"
+    )
+    return fig_hist, fig_len_plddt
+
+@st.cache_resource
+def get_radar_chart(df, design_a, design_b):
+    metrics = ['plddt', 'overall_rmsd', 'loop_rmsd', 'binding_radius_A', 'coordination_number']
+    metrics = [m for m in metrics if m in df.columns]
+    
+    def normalize(val, col):
+        v_min = df[col].min()
+        v_max = df[col].max()
+        if v_max == v_min: return 0.5
+        return (val - v_min) / (v_max - v_min)
+        
+    fig = go.Figure()
+    for d_id, color in [(design_a, 'blue'), (design_b, 'red')]:
+        row = df[df['design_id'] == d_id].iloc[0]
+        r_values = [normalize(row[m], m) for m in metrics]
+        r_values.append(r_values[0])
+        theta_labels = metrics + [metrics[0]]
+        fig.add_trace(go.Scatterpolar(r=r_values, theta=theta_labels, fill='toself', name=d_id, line_color=color))
+        
+    fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1])), showlegend=True, title="Relative Metric Strength")
+    return fig
+
+@st.cache_resource
+def get_analytics_plots(df, numeric_cols):
+    corr_fig = None
+    if len(numeric_cols) > 1:
+        corr = df[numeric_cols].corr()
+        corr_fig = px.imshow(corr, text_auto=True, color_continuous_scale='RdBu_r', zmin=-1, zmax=1, title="Property Correlation")
+        
+    pareto_fig = px.scatter(df, x='overall_rmsd', y='plddt', color='metal_ion', hover_data=['design_id'], title="pLDDT vs. Overall RMSD")
+    return corr_fig, pareto_fig
+
+@st.cache_resource
+def get_category_plots(df):
+    fig_plddt = px.box(df, x='metal_category', y='plddt', color='metal_category', notched=True, points="all", title="Design Confidence by Category")
+    fig_rmsd = px.box(df, x='metal_category', y='loop_rmsd', color='metal_category', notched=True, points="all", title="Loop Accuracy by Category")
+    
+    # Success per category
+    unique_cats = df['metal_category'].unique()
+    p_max = df['plddt'].max()
+    p_thresh = 0.8 if p_max <= 1.0 else 80.0
+    success_data = []
+    for cat in unique_cats:
+        sub = df[df['metal_category'] == cat]
+        rate = ((sub['plddt'] >= p_thresh) & (sub['overall_rmsd'] <= 2.0)).mean() * 100
+        success_data.append({'Category': cat, 'Success Rate (%)': rate})
+    fig_success = px.bar(pd.DataFrame(success_data), x='Category', y='Success Rate (%)', color='Category', title="Success Rate per Category")
+    
+    fig_radius = px.violin(df, x='metal_category', y='binding_radius_A', color='metal_category', box=True, title="Binding Radius Variance")
+    fig_radius.add_hrect(y0=2.3, y1=2.6, line_width=0, fillcolor="green", opacity=0.1)
+    
+    return fig_plddt, fig_rmsd, fig_success, fig_radius
+
+@st.cache_resource
+def get_res_stability_plot(df, ion):
+    sub = df[df['metal_ion'] == ion]
+    res_data = []
+    for _, row in sub.iterrows():
+        for res in set(row['loop_sequence']):
+            res_data.append({'Residue': res, 'pLDDT': row['plddt'], 'Metal': row['metal_ion']})
+    res_df = pd.DataFrame(res_data)
+    fig = px.box(res_df, x='Residue', y='pLDDT', color='Metal', title=f"Residue Influence on Stability ({ion})")
     return fig
 
 # --- Sidebar Filters ---
@@ -239,7 +379,7 @@ st.sidebar.download_button(
     data=csv_data,
     file_name='lanm_filtered_catalog.csv',
     mime='text/csv',
-    use_container_width=True
+    width='stretch'
 )
 
 # --- Main Dashboard ---
@@ -280,53 +420,22 @@ with tab1:
         selected_shape = st.selectbox("Point Shape Mapping", options=list(shape_options.keys()))
         
     with col_eval_2:
-        fig_eval = px.scatter(
-            filtered_df, 
-            x='loop_rmsd', 
-            y='binding_radius_A', 
-            color='metal_ion', 
-            size='plddt' if 'plddt' in filtered_df.columns else None,
-            symbol=shape_options[selected_shape],
-            hover_data=['design_id', 'loop_sequence', 'coordination_number', 'net_charge'] if 'coordination_number' in filtered_df.columns else ['design_id', 'loop_sequence'],
-            labels={'loop_rmsd': 'Individual Loop RMSD (Å)', 'binding_radius_A': 'Binding Radius (Å)'},
-            title="Candidate Evaluation (Thresholds: RMSD < 1.5, Radius 2.3-2.6)"
-        )
-        
-        # Force axis range to match filters
-        if rad_range:
-            fig_eval.update_yaxes(range=[rad_range[0]-0.1, rad_range[1]+0.1])
-        if rmsd_range:
-            # We use loop_rmsd on X, so let's allow it to show a bit more
-            fig_eval.update_xaxes(range=[0, max(1.5, filtered_df['loop_rmsd'].max() + 0.2)])
-    
-    # Add horizontal region for ideal radius
-    fig_eval.add_hrect(y0=2.3, y1=2.6, line_width=0, fillcolor="green", opacity=0.1)
-    # Add vertical line for RMSD threshold
-    fig_eval.add_vline(x=1.5, line_dash="dash", line_color="red", opacity=0.6)
-    
-    st.plotly_chart(fig_eval, width='stretch')
+        fig_eval = get_eval_plot(filtered_df, selected_shape, rad_range, rmsd_range)
+        st.plotly_chart(fig_eval, width='stretch')
 
 with tab2:
     st.subheader("Structural Quality Distributions")
+    fig_violin_rmsd, fig_box_rad, fig_success = get_accuracy_plots(filtered_df)
+    
     col_v1, col_v2 = st.columns(2)
     with col_v1:
-        fig_violin_rmsd = px.violin(filtered_df, x='metal_ion', y='loop_rmsd', color='metal_ion', box=True, points="all", title="Loop RMSD Distribution")
         st.plotly_chart(fig_violin_rmsd, width='stretch')
     with col_v2:
-        fig_box_rad = px.box(filtered_df, x='metal_ion', y='binding_radius_A', color='metal_ion', points="all", title="Binding Radius Distribution")
-        fig_box_rad.add_hrect(y0=2.3, y1=2.6, line_width=0, fillcolor="green", opacity=0.1)
         st.plotly_chart(fig_box_rad, width='stretch')
 
     # Tertiary Analysis: Success Rate by Ion
     st.divider()
     st.subheader("Design Success Rate (pLDDT > 0.8 & RMSD < 2.0)")
-    success_df = filtered_df.copy()
-    p_max = success_df['plddt'].max()
-    p_thresh = 0.8 if p_max <= 1.0 else 80.0
-    success_df['is_success'] = (success_df['plddt'] >= p_thresh) & (success_df['overall_rmsd'] <= 2.0)
-    success_rate = success_df.groupby('metal_ion')['is_success'].mean().reset_index()
-    success_rate['Success Rate (%)'] = success_rate['is_success'] * 100
-    fig_success = px.bar(success_rate, x='metal_ion', y='Success Rate (%)', color='metal_ion', title="Binding Success Rate by Ion Type")
     st.plotly_chart(fig_success, width='stretch')
 
 
@@ -348,7 +457,7 @@ with tab3:
     
     with col_heat1:
         st.write("### Global Distribution")
-        fig_global = generate_residue_heatmap(filtered_df, "Global Residue Frequency", "YlOrRd")
+        fig_global = get_residue_heatmap_fig(filtered_df, "Global Residue Frequency", "YlOrRd")
         if fig_global:
             st.plotly_chart(fig_global, width='stretch')
         else:
@@ -359,7 +468,7 @@ with tab3:
         ion_for_heatmap = st.selectbox("Select Ion for Comparison", options=sorted(filtered_df['metal_ion'].unique().tolist()))
         
         heatmap_data = filtered_df[filtered_df['metal_ion'] == ion_for_heatmap]
-        fig_ion = generate_residue_heatmap(heatmap_data, f"{ion_for_heatmap} Residue Frequency", "Blues")
+        fig_ion = get_residue_heatmap_fig(heatmap_data, f"{ion_for_heatmap} Residue Frequency", "Blues")
         if fig_ion:
             st.plotly_chart(fig_ion, width='stretch')
         else:
@@ -371,38 +480,18 @@ with tab3:
         if 'loop_sequence' in filtered_df.columns and 'plddt' in filtered_df.columns:
             st.divider()
             st.subheader("Structural Confidence vs. Loop Composition")
-            res_data = []
-            for _, row in heatmap_data.iterrows():
-                for res in set(row['loop_sequence']):
-                    res_data.append({'Residue': res, 'pLDDT': row['plddt'], 'Metal': row['metal_ion']})
-            res_df = pd.DataFrame(res_data)
-            fig_res = px.box(res_df, x='Residue', y='pLDDT', color='Metal', title=f"Residue Influence on Stability ({ion_for_heatmap})")
+            fig_res = get_res_stability_plot(filtered_df, ion_for_heatmap)
             st.plotly_chart(fig_res, width='stretch')
             st.caption("Shows if certain amino acids consistently correlate with higher structural confidence.")
 
 with tab4:
-    fig_hist = px.histogram(
-        filtered_df, 
-        x="loop_length", 
-        color="metal_ion", 
-        barmode="group",
-        title="Loop Length Distributions",
-        labels={"loop_length": "Loop Length", "count": "Frequency"}
-    )
+    fig_hist, fig_len_plddt = get_loop_dist_plots(filtered_df)
     st.plotly_chart(fig_hist, width='stretch')
     
     # Tertiary Analysis: Loop Length vs structural Stability
     if 'plddt' in filtered_df.columns:
         st.divider()
         st.subheader("Loop Length vs. Structural Stability")
-        fig_len_plddt = px.scatter(
-            filtered_df, 
-            x='loop_length', 
-            y='plddt', 
-            color='metal_ion', 
-            trendline="ols", 
-            title="Loop Length Impact on Confidence"
-        )
         st.plotly_chart(fig_len_plddt, width='stretch')
         st.caption("Investigates if longer or shorter loops tend to be more stable for specific metal ions.")
 
@@ -484,20 +573,13 @@ with tab6:
     for col in ['config_index', 'design_index', 'loop_index']:
         if col in numeric_cols: numeric_cols.remove(col)
     
+    fig_corr, fig_pareto = get_analytics_plots(filtered_df, numeric_cols)
+    
     col_adv1, col_adv2 = st.columns(2)
     
     with col_adv1:
         st.subheader("Property Correlation Heatmap")
-        if len(numeric_cols) > 1:
-            corr = filtered_df[numeric_cols].corr()
-            fig_corr = px.imshow(
-                corr, 
-                text_auto=True, 
-                aspect="auto",
-                color_continuous_scale='RdBu_r', 
-                zmin=-1, zmax=1,
-                title="Correlation between Binding Metrics"
-            )
+        if fig_corr:
             st.plotly_chart(fig_corr, width='stretch')
         else:
             st.info("Not enough numeric columns for correlation analysis.")
@@ -505,16 +587,6 @@ with tab6:
     with col_adv2:
         st.subheader("Pareto Front (Confidence vs Accuracy)")
         if 'plddt' in filtered_df.columns and 'overall_rmsd' in filtered_df.columns:
-            fig_pareto = px.scatter(
-                filtered_df, 
-                x='overall_rmsd', 
-                y='plddt', 
-                color='metal_ion',
-                hover_data=['design_id'],
-                title="pLDDT vs. Overall RMSD",
-                labels={'overall_rmsd': 'Overall RMSD (Å)', 'plddt': 'pLDDT'}
-            )
-            # Annotate best designs (Top-Left corner)
             st.plotly_chart(fig_pareto, width='stretch')
             st.caption("Ideal designs are in the Top-Left: High Confidence, Low Error.")
         else:
@@ -564,42 +636,22 @@ with tab7:
         st.warning("Please select at least two metal categories in the sidebar to perform a comparative analysis.")
     else:
         st.write(f"Comparing performance across **{len(unique_cats)}** selected categories.")
+        fig_cat_plddt, fig_cat_rmsd, fig_cat_success, fig_cat_radius = get_category_plots(filtered_df)
         
         col_cat1, col_cat2 = st.columns(2)
-        
         with col_cat1:
             st.subheader("Structural Confidence (pLDDT)")
-            fig_cat_plddt = px.box(filtered_df, x='metal_category', y='plddt', color='metal_category', notched=True, points="all", title="Design Confidence by Category")
             st.plotly_chart(fig_cat_plddt, width='stretch')
-            
         with col_cat2:
             st.subheader("Geometric Accuracy (Loop RMSD)")
-            fig_cat_rmsd = px.box(filtered_df, x='metal_category', y='loop_rmsd', color='metal_category', notched=True, points="all", title="Loop Accuracy by Category")
             st.plotly_chart(fig_cat_rmsd, width='stretch')
             
         st.divider()
-        
         st.subheader("Global Yield Rates")
-        # Define success again locally
-        p_max = filtered_df['plddt'].max()
-        p_thresh = 0.8 if p_max <= 1.0 else 80.0
-        
-        # Calculate success per category
-        success_data = []
-        for cat in unique_cats:
-            sub = filtered_df[filtered_df['metal_category'] == cat]
-            rate = ((sub['plddt'] >= p_thresh) & (sub['overall_rmsd'] <= 2.0)).mean() * 100
-            success_data.append({'Category': cat, 'Success Rate (%)': rate})
-            
-        cat_success_df = pd.DataFrame(success_data)
-        fig_cat_success = px.bar(cat_success_df, x='Category', y='Success Rate (%)', color='Category', text_auto='.1f', title="Success Rate (pLDDT > 80, RMSD < 2.0)")
         st.plotly_chart(fig_cat_success, width='stretch')
         
         st.divider()
-        
         st.subheader("Binding Site Geometry")
-        fig_cat_radius = px.violin(filtered_df, x='metal_category', y='binding_radius_A', color='metal_category', box=True, title="Binding Radius Variance")
-        fig_cat_radius.add_hrect(y0=2.3, y1=2.6, line_width=0, fillcolor="green", opacity=0.1)
         st.plotly_chart(fig_cat_radius, width='stretch')
 
 # --- Design Explorer ---
@@ -632,17 +684,16 @@ if selected_design:
     with col_r:
         st.subheader("3D Preview")
         cif_file = f"{base_path}/{design_info['metal_ion']}/rf3/{selected_design}_refolded.cif"
-        if os.path.exists(cif_file):
+        cif_data = get_cif_data(cif_file)
+        
+        if cif_data:
             st.info(f"Structure: `{os.path.basename(cif_file)}`")
-            
-            with open(cif_file, "r") as f:
-                cif_data = f.read()
             
             view = py3Dmol.view(width=800, height=500)
             view.addModel(cif_data, "cif")
             
             # Adaptive Coloring (Blue=Good, Red=Bad)
-            b_min, b_max, invert = get_b_metrics(cif_data)
+            b_min, b_max, invert = get_b_metrics(cif_file)
             
             # If the range is tiny, fall back to a standard 0-1 scale to avoid flickering
             if b_max - b_min < 0.0001:
@@ -650,10 +701,8 @@ if selected_design:
                 invert = False
                 
             # Reverse the gradient by swapping min and max if needed
-            if invert:
-                view.setStyle({'cartoon': {'colorscheme': {'prop': 'b', 'gradient': 'roygb', 'min': b_max, 'max': b_min}}})
-            else:
-                view.setStyle({'cartoon': {'colorscheme': {'prop': 'b', 'gradient': 'roygb', 'min': b_min, 'max': b_max}}})
+            gradient_settings = {'prop': 'b', 'gradient': 'roygb', 'min': b_max if invert else b_min, 'max': b_min if invert else b_max}
+            view.setStyle({'cartoon': {'colorscheme': gradient_settings}})
             
             # Show metal
             view.addStyle({'resn': design_info['metal_ion']}, {'sphere': {'radius': 1.5, 'color': 'silver'}})
