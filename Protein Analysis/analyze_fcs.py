@@ -17,21 +17,27 @@ def install(package):
     import subprocess
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
-required_packages = ['fcsparser', 'seaborn', 'scipy', 'matplotlib', 'pandas', 'numpy']
+required_packages = ['fcsparser', 'seaborn', 'scipy', 'matplotlib', 'pandas', 'numpy', 'scikit-image']
 for pkg in required_packages:
     try:
-        __import__(pkg)
+        if pkg == 'scikit-image':
+            __import__('skimage')
+        else:
+            __import__(pkg)
     except ImportError:
         print(f"Installing {pkg}...")
         install(pkg)
 
 import fcsparser
+from scipy.stats import gaussian_kde
+from matplotlib.path import Path
+from skimage import measure
 
 # ---- CONFIGURATION ----
 # Paths relative to "DNA Analysis" folder
-DATA_DIR = r"../Local/BD6_Flow_Renamed"
-OUTPUT_DIR = r"../Local/FCS_Analysis_Results_2"
-NEG_CONTROL_PATTERN = "Negative Control" # Starts with this
+DATA_DIR = r"../Local/BD6 Flow Small test 20260227_151415"
+OUTPUT_DIR = r"../Local/FCS_Analysis_Results_3"
+NEG_CONTROL_PATTERN = "NC" # Starts with this
 POS_CONTROL_PATTERNS = ["Positive Control", "TIMP"] # Starts with any of these
 
 # Channels
@@ -58,47 +64,173 @@ def load_fcs(file_path):
         print(f"Error loading {file_path}: {e}")
         return None, None
 
-def gate_scatter(df, plot_ax=None):
-    """
-    Gates debris based on FSC-A vs SSC-A.
-    """
-    # Simple heuristic gate
-    mask = (df[CH_FSC_A] > 10000) & (df[CH_SSC_A] > 2000) & \
-           (df[CH_FSC_A] < df[CH_FSC_A].max() * 0.99)
-    
-    if plot_ax:
-        # Density plot
-        plot_ax.hexbin(df[CH_FSC_A], df[CH_SSC_A], gridsize=100, cmap='inferno', mincnt=1, bins='log')
-        plot_ax.set_xlabel("FSC-A")
-        plot_ax.set_ylabel("SSC-A")
-        plot_ax.set_title("Scatter Gate (Debris Removal)")
-    
-    return df[mask], mask
+from scipy.spatial import ConvexHull
 
-def gate_singlets(df, plot_ax=None):
+def simplify_polygon_vw(points, num_points=5):
     """
-    Gates singlets based on FSC-A vs FSC-H.
+    Simplifies a convex polygon to exactly `num_points` vertices
+    using the Visvalingam-Whyatt area-based minimization algorithm.
+    This guarantees the minimal possible bounded area while remaining convex 
+    and strictly inside the original hull!
+    """
+    pts = list(points)
+    # Ensure no duplicates at the end
+    if np.allclose(pts[0], pts[-1]):
+        pts.pop()
+        
+    while len(pts) > num_points:
+        min_area = float('inf')
+        min_idx = -1
+        for i in range(len(pts)):
+            p_prev = pts[i - 1]
+            p_curr = pts[i]
+            p_next = pts[(i + 1) % len(pts)]
+            # Triangle area
+            area = 0.5 * abs(p_prev[0]*(p_curr[1] - p_next[1]) + 
+                             p_curr[0]*(p_next[1] - p_prev[1]) + 
+                             p_next[0]*(p_prev[1] - p_curr[1]))
+            if area < min_area:
+                min_area = area
+                min_idx = i
+        pts.pop(min_idx)
+    return np.array(pts)
+
+def learn_pentagon_gate(df, fsc_col, ssc_col, fraction=0.90):
+    """
+    Learns a 5-point polygon (pentagon) gate on FSC vs SSC.
+    Actively rejects points near the origin (debris) before contouring 
+    to ensure the resulting polygon is tightly wrapped around the core events.
+    Captures approximately `fraction` (e.g., 90%) of the events,
+    Returns the matplotlib Path object representing the pentagon.
+    """
+    # 1. Reject obvious origin debris BEFORE learning density
+    # This ensures the KDE isn't skewed down towards (0,0)
+    origin_filter = (df[fsc_col] > 5000) & (df[ssc_col] > 1000)
+    core_df = df[origin_filter]
+    
+    if len(core_df) < 100:
+        print("Warning: Too few events after debris filtering. Using all data.")
+        core_df = df
+        
+    x = core_df[fsc_col].values
+    y = core_df[ssc_col].values
+    
+    # 2. Filter upper extreme outliers so KDE is focused tightly on main clusters
+    # This prevents the boundary from getting stretched to 10^7
+    fsc_99 = np.percentile(x, 99)
+    ssc_99 = np.percentile(y, 99)
+    core_idx = (x < fsc_99) & (y < ssc_99)
+    
+    x_core = x[core_idx]
+    y_core = y[core_idx]
+    
+    # Subsample for KDE performance
+    n_fit = min(10000, len(x_core))
+    idx_fit = np.random.choice(len(x_core), n_fit, replace=False)
+    fit_points = np.vstack([x_core[idx_fit], y_core[idx_fit]])
+    
+    kernel = gaussian_kde(fit_points)
+    
+    # Score a representative sample to quickly find the threshold
+    # Using the real data points themselves means the gate perfectly wraps the data
+    all_x = df[fsc_col].values
+    all_y = df[ssc_col].values
+    
+    n_score = min(20000, len(all_x))
+    idx_score = np.random.choice(len(all_x), n_score, replace=False)
+    score_points = np.vstack([all_x[idx_score], all_y[idx_score]])
+    
+    scores_sub = kernel(score_points)
+    
+    target_captured = fraction
+    low_pct = 0.0
+    high_pct = 100.0
+    
+    best_path = None
+    best_captured = 0
+    
+    # Binary search for the right contour threshold
+    for _ in range(25): # Binary search depth 
+        mid_pct = (low_pct + high_pct) / 2
+        
+        # We want the threshold such that we drop the lowest (mid_pct) scores.
+        # e.g., if mid_pct = 10, we keep top 90%
+        thresh = np.percentile(scores_sub, mid_pct)
+        
+        mask_sub = scores_sub >= thresh
+        if np.sum(mask_sub) < 10:
+            high_pct = mid_pct
+            continue
+            
+        in_pts = score_points.T[mask_sub]
+        try:
+            hull = ConvexHull(in_pts)
+            hull_pts = in_pts[hull.vertices]
+        except Exception:
+            # Collinear or too few points
+            high_pct = mid_pct
+            continue
+            
+        # Simplify to exactly 5 points using VW area minimization!
+        pent_pts = simplify_polygon_vw(hull_pts, 5)
+        pent_pts = np.vstack((pent_pts, pent_pts[0])) # close it
+        
+        path = Path(pent_pts)
+        
+        # Test how many of the exact data points fall in this path
+        captured = path.contains_points(score_points.T).mean()
+        
+        if abs(captured - target_captured) < abs(best_captured - target_captured):
+            best_captured = captured
+            best_path = path
+
+        if captured > target_captured:
+            # We captured too much. To shrink the area, we need a TIGHTER cluster,
+            # which means dropping MORE points, which means a HIGHER percentile threshold.
+            low_pct = mid_pct
+        else:
+            high_pct = mid_pct
+            
+        if abs(captured - target_captured) < 0.005:
+            break
+            
+    if best_path is None:
+        print("Warning: Could not form a proper polygon. Using a wide bounding box.")
+        xmin, xmax = x.min(), x.max()
+        ymin, ymax = y.min(), y.max()
+        poly_verts = [(xmin, ymin), (xmin, ymax), (xmax, ymax), (xmax, ymin), (xmin, ymin)]
+        best_path = Path(poly_verts)
+
+    exact_captured = best_path.contains_points(np.vstack([all_x, all_y]).T).mean()
+    print(f"Pentagon generated: captures ~{exact_captured*100:.1f}% events.")
+    
+    return best_path
+
+
+def apply_polygon_gate(df, path, fsc_col, ssc_col, plot_ax=None, title="Polygon Gate"):
+    """
+    Applies a matplotlib Path polygon gate to the dataframe.
     """
     if len(df) == 0:
         return df, []
-
-    ratio = df[CH_FSC_H] / df[CH_FSC_A]
-    median_ratio = ratio.median()
-    
-    # Allow +/- 20% deviation
-    mask = (ratio > median_ratio * 0.8) & (ratio < median_ratio * 1.2)
+        
+    points = np.vstack([df[fsc_col], df[ssc_col]]).T
+    mask = path.contains_points(points)
     
     if plot_ax:
-        plot_ax.hexbin(df[CH_FSC_A], df[CH_FSC_H], gridsize=100, cmap='inferno', mincnt=1, bins='log')
-        # Show gate lines roughly
-        x_vals = np.linspace(df[CH_FSC_A].min(), df[CH_FSC_A].max(), 100)
-        plot_ax.plot(x_vals, x_vals * median_ratio * 1.2, 'g--', linewidth=1)
-        plot_ax.plot(x_vals, x_vals * median_ratio * 0.8, 'g--', linewidth=1)
-        plot_ax.set_xlabel("FSC-A")
-        plot_ax.set_ylabel("FSC-H")
-        plot_ax.set_title("Singlet Gate")
+        # Density plot 
+        plot_ax.hexbin(df[fsc_col], df[ssc_col], gridsize=100, cmap='inferno', mincnt=1, bins='log')
+        plot_ax.set_xlabel(fsc_col)
+        plot_ax.set_ylabel(ssc_col)
+        plot_ax.set_title(f"{title} ({mask.sum()}/{len(df)} events)")
         
-    return df[mask], mask
+        # Overlay Polygon
+        import matplotlib.patches as patches
+        patch = patches.PathPatch(path, facecolor='none', edgecolor='cyan', lw=2, linestyle='--')
+        plot_ax.add_patch(patch)
+        
+    return df[mask]
+
 
 def transform_logicle(data, channels):
     """Simple log10 transform for plotting, handling negatives safely (clipping)."""
@@ -152,18 +284,34 @@ def main():
     neg_files = [f for f in all_files if os.path.basename(f).startswith(NEG_CONTROL_PATTERN)]
     print(f"Found {len(neg_files)} negative control files.")
     
+    # Learn Pentagon Gate from the First Negative Control
+    pentagon_path = None
+    if neg_files:
+        print("Learning pentagon gate from Negative Control...")
+        _, d_neg_learn = load_fcs(neg_files[0])
+        if d_neg_learn is not None:
+            # Drop pure zeros or negatives for KDE stability if needed, 
+            # but usually the origin points are handled by KDE
+            pentagon_path = learn_pentagon_gate(d_neg_learn, CH_FSC_A, CH_SSC_A, fraction=0.90)
+            
+    if pentagon_path is None:
+        print("Warning: Could not learn pentagon gate from NC. Cannot proceed accurately.")
+        return
+
+    # Process all Negative Controls with learned gate
     neg_dfs = []
     for f in neg_files:
         _, d = load_fcs(f)
         if d is not None:
-            d_scat, _ = gate_scatter(d)
-            d_sing, _ = gate_singlets(d_scat)
-            neg_dfs.append(d_sing)
+            d_gated = apply_polygon_gate(d, pentagon_path, CH_FSC_A, CH_SSC_A)
+            neg_dfs.append(d_gated)
             
     if neg_dfs:
         neg_concat = pd.concat(neg_dfs)
-        thresh_expr = np.percentile(neg_concat[CH_EXPR], 99)
-        thresh_bind = np.percentile(neg_concat[CH_BIND], 99)
+        # Learn Quadrant Gate Thresholds (99.9% NC in lower left)
+        # i.e., threshold is 99.9th percentile of NC
+        thresh_expr = np.percentile(neg_concat[CH_EXPR], 99.9)
+        thresh_bind = np.percentile(neg_concat[CH_BIND], 99.9)
         
         neg_mfi_expr = neg_concat[CH_EXPR].median()
         neg_mfi_bind = neg_concat[CH_BIND].median()
@@ -171,32 +319,20 @@ def main():
         neg_rsd_expr = stats.median_abs_deviation(neg_concat[CH_EXPR], scale='normal')
 
         # --- GATING VISUALIZATION (Representative Neg Control) ---
-        print("Generating Gating Strategy Plot...")
-        # Load the first negative control for visualization
+        print("Generating Gating Strategy Plot overlay on NC...")
         _, d_demo = load_fcs(neg_files[0])
         if d_demo is not None:
-            fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+            fig, ax = plt.subplots(1, 1, figsize=(6, 5))
             
-            # 1. Scatter Gate
-            d_scat, _ = gate_scatter(d_demo, plot_ax=axes[0])
-            axes[0].set_title("1. Scatter Gate (Debris Removal)")
-            
-            # 2. Singlet Gate
-            _, _ = gate_singlets(d_scat, plot_ax=axes[1])
-            axes[1].set_title("2. Singlet Gate (Doublet Removal)")
+            # Scatter/Density Gate Overlay
+            d_gated = apply_polygon_gate(d_demo, pentagon_path, CH_FSC_A, CH_SSC_A, plot_ax=ax, title="Pentagon Gate on NC")
             
             plt.tight_layout()
             plt.savefig(os.path.join(OUTPUT_DIR, "Gating_Strategy_NegCtrl.png"))
             plt.close()
     else:
-        print("Warning: No negative controls found matching pattern. Using default.")
-        thresh_expr = 1000
-        thresh_bind = 1000
-        neg_mfi_expr = 1
-        neg_mfi_bind = 1
-        neg_rsd_bind = 1
-        neg_rsd_expr = 1
-        neg_concat = None
+        print("Error: No negative controls found matching pattern. Required for dynamic gating.")
+        return
 
     # Positive Controls
     pos_files = [f for f in all_files if any(os.path.basename(f).startswith(p) for p in POS_CONTROL_PATTERNS)]
@@ -206,9 +342,8 @@ def main():
     for f in pos_files:
         _, d = load_fcs(f)
         if d is not None:
-            d_scat, _ = gate_scatter(d)
-            d_sing, _ = gate_singlets(d_scat)
-            pos_dfs.append(d_sing)
+            d_gated = apply_polygon_gate(d, pentagon_path, CH_FSC_A, CH_SSC_A)
+            pos_dfs.append(d_gated)
             
     pos_mfi_bind = 1.0
     pos_concat = None
@@ -238,13 +373,13 @@ def main():
         meta, df = load_fcs(f)
         if df is None: continue
         
-        # Gates
-        df_scat, _ = gate_scatter(df)
-        df_sing, _ = gate_singlets(df_scat)
+        # Gating
+        df_sing = apply_polygon_gate(df, pentagon_path, CH_FSC_A, CH_SSC_A)
         
         # Stats
         count_total = len(df)
         count_gated = len(df_sing)
+
         
         if count_gated == 0:
             print(f"Warning: No events gated for {clean_name}")
@@ -259,20 +394,22 @@ def main():
         pct_bind = bind_pos.mean() * 100
         pct_double = double_pos.mean() * 100
         
-        mfi_expr = df_sing[CH_EXPR].median()
-        mfi_bind = df_sing[CH_BIND].median()
+        # MFI Stats
+        mfi_expr = df_sing[CH_EXPR].median() if len(df_sing) > 0 else 0
+        mfi_bind = df_sing[CH_BIND].median() if len(df_sing) > 0 else 0
         
         # Formatting Ridge Data (Binding & Expression)
-        sub = df_sing.sample(n=min(len(df_sing), 2000))
-        t_vals_bind = np.log10(np.clip(sub[CH_BIND], 1, None))
-        t_vals_expr = np.log10(np.clip(sub[CH_EXPR], 1, None))
-        
-        for i in range(len(sub)):
-            ridge_data.append({
-                "Sample": clean_name, 
-                "LogBinding": t_vals_bind.iloc[i],
-                "LogExpression": t_vals_expr.iloc[i]
-            })
+        if len(df_sing) > 0:
+            sub = df_sing.sample(n=min(len(df_sing), 2000))
+            t_vals_bind = np.log10(np.clip(sub[CH_BIND], 1, None))
+            t_vals_expr = np.log10(np.clip(sub[CH_EXPR], 1, None))
+            
+            for i in range(len(sub)):
+                ridge_data.append({
+                    "Sample": clean_name, 
+                    "LogBinding": t_vals_bind.iloc[i],
+                    "LogExpression": t_vals_expr.iloc[i]
+                })
 
         # Advanced Stats
         fc_expr = mfi_expr / max(neg_mfi_expr, 1)
@@ -312,28 +449,59 @@ def main():
         # --- PLOTTING ---
         
         # 1. Main 4-panel Plot
-        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        fig, axes = plt.subplots(2, 2, figsize=(14, 12))
         
-        # Scatter
-        gate_scatter(df, plot_ax=axes[0,0])
-        gate_singlets(df_scat, plot_ax=axes[0,1])
+        # Panel 1: Original Scatter Overlay with Pentagon Gate
+        apply_polygon_gate(df, pentagon_path, CH_FSC_A, CH_SSC_A, plot_ax=axes[0,0], title="Pentagon Gating (from NC)")
         
-        # Density
+        # Log Transformations
         t_expr = np.log10(np.clip(df_sing[CH_EXPR], 1, None))
         t_bind = np.log10(np.clip(df_sing[CH_BIND], 1, None))
+        log_thresh_bind = np.log10(max(1, thresh_bind))
+        log_thresh_expr = np.log10(max(1, thresh_expr))
         
+        # Panel 2: Expression Distribution (FITC Histogram)
+        sns.kdeplot(t_expr, fill=True, ax=axes[0,1], color='purple', label='Sample')
+        if neg_log_expr is not None:
+            sns.kdeplot(neg_log_expr, fill=True, ax=axes[0,1], color='gray', alpha=0.3, label='Neg Ctrl')
+        axes[0,1].axvline(log_thresh_expr, color='r', linestyle='--')
+        pct_expr_left = 100 - pct_expr
+        axes[0,1].text(0.05, 0.95, f"Unexpressed: {pct_expr_left:.1f}%\nExpressed: {pct_expr:.1f}%", 
+                       transform=axes[0,1].transAxes, fontsize=10, verticalalignment='top',
+                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        axes[0,1].set_xlabel("Log10 FITC (Expression)")
+        axes[0,1].set_title(f"Expression Dist (FC: {fc_expr:.1f}x)")
+        axes[0,1].legend()
+
+        # Panel 3: Binding vs Expression (Hexbin)
         axes[1,0].hexbin(t_bind, t_expr, gridsize=100, cmap='jet', mincnt=1, bins='log')
-        axes[1,0].axvline(np.log10(max(1, thresh_bind)), color='k', linestyle='--')
-        axes[1,0].axhline(np.log10(max(1, thresh_expr)), color='k', linestyle='--')
+        axes[1,0].axvline(log_thresh_bind, color='k', linestyle='--')
+        axes[1,0].axhline(log_thresh_expr, color='k', linestyle='--')
         axes[1,0].set_xlabel("Log10 APC (Binding)")
         axes[1,0].set_ylabel("Log10 FITC (Expression)")
-        axes[1,0].set_title(f"Double+: {pct_double:.1f}%")
+        pct_ll = 100 - pct_expr - pct_bind + pct_double # roughly, or explicitly calculated:
+        expr_pos_only = (df_sing[CH_EXPR] >= thresh_expr) & (df_sing[CH_BIND] < thresh_bind)
+        bind_pos_only = (df_sing[CH_EXPR] < thresh_expr) & (df_sing[CH_BIND] >= thresh_bind)
+        double_neg = (df_sing[CH_EXPR] < thresh_expr) & (df_sing[CH_BIND] < thresh_bind)
         
-        # Histogram Overlay
+        pct_ll_v = double_neg.mean() * 100
+        pct_lr_v = bind_pos_only.mean() * 100
+        pct_ul_v = expr_pos_only.mean() * 100
+        pct_ur_v = double_pos.mean() * 100
+        
+        quadrant_str = f"Q1 (UL): {pct_ul_v:.1f}% | Q2 (UR): {pct_ur_v:.1f}%\nQ3 (LL): {pct_ll_v:.1f}% | Q4 (LR): {pct_lr_v:.1f}%"
+        axes[1,0].set_title(f"Quadrant Plot\n{quadrant_str}")
+        
+        # Panel 4: Binding Distribution (APC Histogram)
         sns.kdeplot(t_bind, fill=True, ax=axes[1,1], color='g', label='Sample')
         if neg_log_bind is not None:
             sns.kdeplot(neg_log_bind, fill=True, ax=axes[1,1], color='gray', alpha=0.3, label='Neg Ctrl')
-        axes[1,1].axvline(np.log10(max(1, thresh_bind)), color='r', linestyle='--')
+        axes[1,1].axvline(log_thresh_bind, color='r', linestyle='--')
+        pct_bind_left = 100 - pct_bind
+        axes[1,1].text(0.05, 0.95, f"Unbound: {pct_bind_left:.1f}%\nBound: {pct_bind:.1f}%", 
+                       transform=axes[1,1].transAxes, fontsize=10, verticalalignment='top',
+                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        axes[1,1].set_xlabel("Log10 APC (Binding)")
         axes[1,1].set_title(f"Binding Dist (FC: {fc_bind:.1f}x)")
         axes[1,1].legend()
         
@@ -342,58 +510,61 @@ def main():
         plt.close()
         
         # 2. Publication Plot
-        plt.figure(figsize=(6, 6))
-        plt.hexbin(t_bind, t_expr, gridsize=100, cmap='jet', mincnt=1, bins='log')
-        plt.axvline(np.log10(max(1, thresh_bind)), color='k', linestyle='--')
-        plt.axhline(np.log10(max(1, thresh_expr)), color='k', linestyle='--')
-        plt.xlabel("Log10 APC-A (Binding)")
-        plt.ylabel("Log10 FITC-A (Expression)")
-        plt.title(f"{clean_name}")
-        
-        textstr = '\n'.join((
-            f'Double+: {pct_double:.1f}%',
-            f'Bind+: {pct_bind:.1f}%',
-            f'Expr+: {pct_expr:.1f}%'
-        ))
-        props = dict(boxstyle='round', facecolor='white', alpha=0.8)
-        plt.gca().text(0.05, 0.95, textstr, transform=plt.gca().transAxes, fontsize=10,
-                verticalalignment='top', bbox=props)
+        if len(df_sing) > 0:
+            plt.figure(figsize=(6, 6))
+            plt.hexbin(t_bind, t_expr, gridsize=100, cmap='jet', mincnt=1, bins='log')
+            plt.axvline(log_thresh_bind, color='k', linestyle='--')
+            plt.axhline(log_thresh_expr, color='k', linestyle='--')
+            plt.xlabel("Log10 APC-A (Binding)")
+            plt.ylabel("Log10 FITC-A (Expression)")
+            plt.title(f"{clean_name}")
+            
+            textstr = '\n'.join((
+                f'Double+: {pct_ur_v:.1f}%',
+                f'Bind+ Only (LR): {pct_lr_v:.1f}%',
+                f'Expr+ Only (UL): {pct_ul_v:.1f}%'
+            ))
+            props = dict(boxstyle='round', facecolor='white', alpha=0.8)
+            plt.gca().text(0.05, 0.95, textstr, transform=plt.gca().transAxes, fontsize=10,
+                    verticalalignment='top', bbox=props)
+                    
+            plt.tight_layout()
+            plt.savefig(os.path.join(pub_dir, f"{clean_name}_iso.png"), dpi=200)
+            plt.close()
+            
+            # 3. Comparison vs Pos (Binding)
+            plt.figure(figsize=(8, 5))
+            if neg_log_bind is not None:
+                sns.kdeplot(neg_log_bind, fill=True, color='lightgray', label='Neg Ctrl', alpha=0.5)
+            if pos_log_bind is not None:
+                sns.kdeplot(pos_log_bind, color='blue', label='Pos Ctrl', linestyle='--', linewidth=2)
                 
-        plt.tight_layout()
-        plt.savefig(os.path.join(pub_dir, f"{clean_name}_iso.png"), dpi=200)
-        plt.close()
-        
-        # 3. Comparison vs Pos (Binding)
-        plt.figure(figsize=(8, 5))
-        if neg_log_bind is not None:
-            sns.kdeplot(neg_log_bind, fill=True, color='lightgray', label='Neg Ctrl', alpha=0.5)
-        if pos_log_bind is not None:
-            sns.kdeplot(pos_log_bind, color='blue', label='Pos Ctrl', linestyle='--', linewidth=2)
+            sns.kdeplot(t_bind, fill=True, color='green', label=clean_name, alpha=0.4)
+            plt.axvline(log_thresh_bind, color='r', linestyle='--', label='99.9% NC Thresh')
             
-        sns.kdeplot(t_bind, fill=True, color='green', label=clean_name, alpha=0.4)
-        
-        plt.xlabel("Log10 APC-A (Binding)")
-        plt.title(f"Binding Comparison: {clean_name}\n(Ratio vs Pos: {fc_vs_pos:.2f})")
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(os.path.join(comp_bind_dir, f"Comp_Bind_{clean_name}.png"))
-        plt.close()
+            plt.xlabel("Log10 APC-A (Binding)")
+            plt.title(f"Binding Comparison: {clean_name}\n(Ratio vs Pos: {fc_vs_pos:.2f})")
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(os.path.join(comp_bind_dir, f"Comp_Bind_{clean_name}.png"))
+            plt.close()
 
-        # 4. Comparison vs Pos (Expression)
-        plt.figure(figsize=(8, 5))
-        if neg_log_expr is not None:
-            sns.kdeplot(neg_log_expr, fill=True, color='lightgray', label='Neg Ctrl', alpha=0.5)
-        if pos_log_expr is not None:
-            sns.kdeplot(pos_log_expr, color='blue', label='Pos Ctrl', linestyle='--', linewidth=2)
+            # 4. Comparison vs Pos (Expression)
+            plt.figure(figsize=(8, 5))
+            if neg_log_expr is not None:
+                sns.kdeplot(neg_log_expr, fill=True, color='lightgray', label='Neg Ctrl', alpha=0.5)
+            if pos_log_expr is not None:
+                sns.kdeplot(pos_log_expr, color='blue', label='Pos Ctrl', linestyle='--', linewidth=2)
+                
+            sns.kdeplot(t_expr, fill=True, color='purple', label=clean_name, alpha=0.4)
+            plt.axvline(log_thresh_expr, color='r', linestyle='--', label='99.9% NC Thresh')
             
-        sns.kdeplot(t_expr, fill=True, color='purple', label=clean_name, alpha=0.4)
-        
-        plt.xlabel("Log10 FITC-A (Expression)")
-        plt.title(f"Expression Comparison: {clean_name}\n(FC: {fc_expr:.1f}x)")
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(os.path.join(comp_expr_dir, f"Comp_Expr_{clean_name}.png"))
-        plt.close()
+            plt.xlabel("Log10 FITC-A (Expression)")
+            plt.title(f"Expression Comparison: {clean_name}\n(FC: {fc_expr:.1f}x)")
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(os.path.join(comp_expr_dir, f"Comp_Expr_{clean_name}.png"))
+            plt.close()
 
     # Save Stats
     df_stats = pd.DataFrame(summary_stats)
@@ -475,8 +646,18 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
             g.set_xlabels(f"{m_info['x_lab']} - Group {group}")
             
             t_thresh = np.log10(max(1, m_info["thresh"]))
-            for ax in g.axes.flatten():
+            for ax, name in zip(g.axes.flatten(), order_mfi):
                 ax.axvline(t_thresh, color='r', alpha=0.5, linestyle='--')
+                # Calculate % on right
+                d_sample_all = df_group[df_group['Sample'] == name]
+                pct_right = (d_sample_all[m_info["col"]] > t_thresh).mean() * 100
+                
+                # Check metric title to change Ridgeline labels
+                label_text = f"Expressed: {pct_right:.1f}%" if m_name == "Expression" else f"Bound: {pct_right:.1f}%"
+                
+                ax.text(0.95, 0.2, label_text, 
+                       transform=ax.transAxes, fontsize=9, color='red',
+                       ha='right', va='bottom', fontweight='bold')
                 
             out_name = f"Aggregate_Ridgeline_{m_name}_{group}.png"
             g.savefig(os.path.join(output_dir, out_name))
@@ -506,44 +687,112 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
         g.set_xlabels(m_info['x_lab'])
         
         t_thresh = np.log10(max(1, m_info["thresh"]))
-        for ax in g.axes.flatten():
+        for ax, name in zip(g.axes.flatten(), order):
             ax.axvline(t_thresh, color='r', alpha=0.5, linestyle='--')
+            d_sample_all = df_ridge[df_ridge['Sample'] == name]
+            pct_right = (d_sample_all[m_info["col"]] > t_thresh).mean() * 100
+            
+            label_text = f"Expressed: {pct_right:.1f}%" if m_name == "Expression" else f"Bound: {pct_right:.1f}%"
+            
+            ax.text(0.95, 0.2, label_text, 
+                   transform=ax.transAxes, fontsize=9, color='red',
+                   ha='right', va='bottom', fontweight='bold')
             
         g.savefig(out_name)
         plt.close()
 
     # 2. Fold Change Bar Plot (Binding & Expression)
-    for m_name, col_name, title in [("Binding", "Bind Fold Change", "Binding Fold Change (vs Neg)"), 
-                                    ("Expression", "Expr Fold Change", "Expression Fold Change (vs Neg)")]:
+    for m_name, col_name, title, hue_col in [("Binding", "Bind Fold Change", "Binding Fold Change (vs Neg)", "Bind+ %"), 
+                                             ("Expression", "Expr Fold Change", "Expression Fold Change (vs Neg)", "Expr+ %")]:
         plt.figure(figsize=(12, 6))
         df_sorted = df_stats.sort_values(col_name, ascending=False)
-        sns.barplot(data=df_sorted, x="Filename", y=col_name, palette="viridis")
+        
+        # Determine max value for normalization based on Positive Controls
+        pos_ctrl_mask = df_stats['Filename'].apply(lambda x: any(p in x for p in POS_CONTROL_PATTERNS))
+        if pos_ctrl_mask.any():
+            vmax = df_stats.loc[pos_ctrl_mask, hue_col].max()
+        else:
+            vmax = df_stats[hue_col].max()
+        vmax = max(vmax, 1.0) # Ensure no divide-by-zero
+        
+        norm = plt.Normalize(0, vmax)
+        cmap = plt.cm.get_cmap("viridis" if m_name == "Binding" else "magma")
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        
+        # Map values to colors
+        colors = [cmap(norm(val)) for val in df_sorted[hue_col]]
+        
+        sns.barplot(data=df_sorted, x="Filename", y=col_name, palette=colors)
+        
         plt.xticks(rotation=90)
         plt.axhline(1, color='k', linestyle='--', label='No Change')
         plt.title(title)
         plt.ylabel("Fold Change")
+        cbar = plt.colorbar(sm, ax=plt.gca())
+        cbar.set_label(f"Positive Events (%)")
+        
         plt.tight_layout()
         plt.savefig(os.path.join(output_dir, f"Aggregate_FoldChange_{m_name}.png"))
         plt.close()
 
     # 3. Stain Index Bar Plot (Binding & Expression)
-    for m_name, col_name, title in [("Binding", "Bind Stain Index", "Binding Stain Index"), 
-                                    ("Expression", "Expr Stain Index", "Expression Stain Index")]:
+    for m_name, col_name, title, hue_col in [("Binding", "Bind Stain Index", "Binding Stain Index", "Bind+ %"), 
+                                             ("Expression", "Expr Stain Index", "Expression Stain Index", "Expr+ %")]:
         plt.figure(figsize=(12, 6))
         df_sorted = df_stats.sort_values(col_name, ascending=False)
-        sns.barplot(data=df_sorted, x="Filename", y=col_name, palette="magma")
+        
+        pos_ctrl_mask = df_stats['Filename'].apply(lambda x: any(p in x for p in POS_CONTROL_PATTERNS))
+        if pos_ctrl_mask.any():
+            vmax = df_stats.loc[pos_ctrl_mask, hue_col].max()
+        else:
+            vmax = df_stats[hue_col].max()
+        vmax = max(vmax, 1.0)
+        
+        norm = plt.Normalize(0, vmax)
+        cmap = plt.cm.get_cmap("viridis" if m_name == "Binding" else "magma")
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        
+        colors = [cmap(norm(val)) for val in df_sorted[hue_col]]
+        
+        sns.barplot(data=df_sorted, x="Filename", y=col_name, palette=colors)
+        
         plt.xticks(rotation=90)
         plt.title(title)
         plt.ylabel("Stain Index")
+        cbar = plt.colorbar(sm, ax=plt.gca())
+        cbar.set_label(f"Positive Events (%)")
+        
         plt.tight_layout()
         plt.savefig(os.path.join(output_dir, f"Aggregate_StainIndex_{m_name}.png"))
         plt.close()
     
     # 4. Bar plot of Double Positives
     plt.figure(figsize=(12, 6))
-    sns.barplot(data=df_stats, x="Filename", y="Double+ %", palette="Blues_d")
+    df_sorted = df_stats.sort_values("Double+ %", ascending=False)
+    
+    pos_ctrl_mask = df_stats['Filename'].apply(lambda x: any(p in x for p in POS_CONTROL_PATTERNS))
+    if pos_ctrl_mask.any():
+        vmax = df_stats.loc[pos_ctrl_mask, "Double+ %"].max()
+    else:
+        vmax = df_stats["Double+ %"].max()
+    vmax = max(vmax, 1.0)
+    
+    norm = plt.Normalize(0, vmax)
+    cmap = plt.cm.get_cmap("Blues")
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    
+    colors = [cmap(norm(val)) for val in df_sorted["Double+ %"]]
+    
+    sns.barplot(data=df_sorted, x="Filename", y="Double+ %", palette=colors)
+    
     plt.xticks(rotation=90)
     plt.title("Double Positive Population % by Sample")
+    cbar = plt.colorbar(sm, ax=plt.gca())
+    cbar.set_label("Double+ (%)")
+    
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "Aggregate_DoublePos_Bar.png"))
     plt.close()
