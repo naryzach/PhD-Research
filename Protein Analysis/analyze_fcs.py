@@ -237,20 +237,7 @@ def transform_logicle(data, channels):
         df_trans[ch] = np.log10(np.clip(df_trans[ch], 1, None))
     return df_trans
 
-def main():
-    parser = argparse.ArgumentParser(description="Analyze FCS files and generate gating plots and statistics.")
-    parser.add_argument("-i", "--input", required=True, help="Path to input directory containing .fcs files.")
-    parser.add_argument("-o", "--output", default=None, help="Path to output directory. Defaults to '<input>_Analysis'.")
-    args = parser.parse_args()
-
-    input_dir = os.path.abspath(args.input)
-    if args.output:
-        output_dir = os.path.abspath(args.output)
-    else:
-        # Generate output directory automatically
-        base = os.path.basename(os.path.normpath(input_dir))
-        output_dir = os.path.join(os.path.dirname(input_dir), f"{base}_Analysis")
-
+def process_directory(input_dir, output_dir):
     # 1. Setup
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -922,26 +909,22 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
     plt.figure(figsize=(12, 6))
     df_sorted = df_stats.sort_values("Double+ %", ascending=False)
     
-    pos_ctrl_mask = df_stats['Filename'].apply(lambda x: any(p in x for p in POS_CONTROL_PATTERNS))
-    if pos_ctrl_mask.any():
-        vmax = df_stats.loc[pos_ctrl_mask, "Double+ %"].max()
-    else:
-        vmax = df_stats["Double+ %"].max()
-    vmax = max(vmax, 1.0)
+    vmax_ratio = df_stats["Norm Pos Med Ratio"].max()
+    vmax_ratio = max(vmax_ratio, 1.0)
     
-    norm = plt.Normalize(0, vmax)
-    cmap = plt.cm.get_cmap("Blues")
+    norm = plt.Normalize(0, vmax_ratio)
+    cmap = plt.cm.get_cmap("viridis")
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     
-    colors = [cmap(norm(val)) for val in df_sorted["Double+ %"]]
+    colors = [cmap(norm(val)) for val in df_sorted["Norm Pos Med Ratio"]]
     
     sns.barplot(data=df_sorted, x="Filename", y="Double+ %", palette=colors)
     
     plt.xticks(rotation=90)
     plt.title("Double Positive Population % by Sample")
     cbar = plt.colorbar(sm, ax=plt.gca())
-    cbar.set_label("Double+ (%)")
+    cbar.set_label("Normalized Effectiveness (Pos Med Ratio)")
     
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "Aggregate_DoublePos_Bar.png"))
@@ -965,19 +948,37 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
     pos_ratio_dir = os.path.join(os.path.dirname(output_dir), "Positive_Ratios")
     if not os.path.exists(pos_ratio_dir):
         os.makedirs(pos_ratio_dir)
-    pos_ctrl_mask = df_stats['Filename'].apply(lambda x: any(p in x for p in POS_CONTROL_PATTERNS))
-    if pos_ctrl_mask.any():
-        vmax_dp = df_stats.loc[pos_ctrl_mask, "Double+ %"].max()
+        
+    # Filter out near-zero double positive populations (e.g. < 0.1%)
+    min_dp_thresh = 0.1
+    df_valid_ratio = df_stats[df_stats["Double+ %"] >= min_dp_thresh].copy()
+    dropped_samples = df_stats[df_stats["Double+ %"] < min_dp_thresh]["Filename"].tolist()
+    
+    # Wrap text if there are many dropped samples
+    if dropped_samples:
+        import textwrap
+        dropped_str = f"Excluded (< {min_dp_thresh}% Double+): " + ", ".join(dropped_samples)
+        dropped_text = "\n".join(textwrap.wrap(dropped_str, width=120))
     else:
-        vmax_dp = df_stats["Double+ %"].max()
+        dropped_text = ""
+    
+    pos_ctrl_mask = df_valid_ratio['Filename'].apply(lambda x: any(p in x for p in POS_CONTROL_PATTERNS))
+    if pos_ctrl_mask.any():
+        vmax_dp = df_valid_ratio.loc[pos_ctrl_mask, "Double+ %"].max()
+    else:
+        vmax_dp = df_valid_ratio["Double+ %"].max() if not df_valid_ratio.empty else 1.0
     vmax_dp = max(vmax_dp, 1.0)
         
     for m_col, title in [("Pos Mean Ratio", "Raw Pos Mean Ratio (Bind/Expr)"),
                          ("Pos Med Ratio", "Raw Pos Median Ratio (Bind/Expr)"),
                          ("Norm Pos Mean Ratio", "Normalized Pos Mean Ratio (Bind/Expr vs PosCtrl)"), 
                          ("Norm Pos Med Ratio", "Normalized Pos Median Ratio (Bind/Expr vs PosCtrl)")]:
-        plt.figure(figsize=(12, 6))
-        df_sorted = df_stats.sort_values(m_col, ascending=False)
+                         
+        if df_valid_ratio.empty:
+            continue
+            
+        plt.figure(figsize=(12, 7))
+        df_sorted = df_valid_ratio.sort_values(m_col, ascending=False)
         
         # Color scale based on Double+ % to give more context than just height
         norm = plt.Normalize(0, vmax_dp)
@@ -995,12 +996,19 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
         plt.xticks(rotation=90)
         plt.title(title)
         plt.ylabel("Ratio (Sample / PosCtrl)" if "Norm" in m_col else "Ratio (Bind / Expr)")
+        plt.xlabel("Sample")
         
         cbar = plt.colorbar(sm, ax=plt.gca())
         cbar.set_label("Double+ Population (%)")
         
         plt.tight_layout()
-        plt.savefig(os.path.join(pos_ratio_dir, f"Aggregate_{m_col.replace(' ', '_')}.png"))
+        
+        if dropped_text:
+            plt.figtext(0.5, 0.01, dropped_text, ha='center', va='bottom', fontsize=9, color='darkred',
+                        bbox=dict(boxstyle="round,pad=0.3", fc="whitesmoke", ec="darkred", lw=1))
+            plt.subplots_adjust(bottom=max(0.2, 0.15 + 0.03 * dropped_text.count('\n')))
+
+        plt.savefig(os.path.join(pos_ratio_dir, f"Aggregate_{m_col.replace(' ', '_')}.png"), bbox_inches="tight")
         plt.close()
 
 def generate_report(df, output_dir):
@@ -1108,6 +1116,52 @@ def stats_observation(fc_bind, fc_expr, efficiency, vs_pos=0):
         
     return " ".join(obs)
 
+def main():
+    parser = argparse.ArgumentParser(description="Analyze FCS files and generate gating plots and statistics.")
+    parser.add_argument("-i", "--input", required=True, help="Path to input directory containing .fcs files, or parent directory if using --batch.")
+    parser.add_argument("-o", "--output", default=None, help="Path to output directory. Defaults to '<input>_Analysis'. Ignored if using --batch.")
+    parser.add_argument("--batch", action="store_true", help="Batch mode: Treat the input directory as a parent folder containing multiple dataset subfolders. Processes each subfolder independently.")
+    args = parser.parse_args()
+
+    input_dir = os.path.abspath(args.input)
+    
+    if args.batch:
+        print(f"--- BATCH MODE ENGAGED ---")
+        print(f"Scanning {input_dir} for dataset folders...")
+        
+        # Find all direct subdirectories
+        subdirs = [f.path for f in os.scandir(input_dir) if f.is_dir() and not f.name.endswith("_Analysis")]
+        
+        if not subdirs:
+            print(f"No subdirectories found in {input_dir}.")
+            return
+            
+        print(f"Found {len(subdirs)} folders to process.")
+        for subdir in subdirs:
+            print(f"\n=========================================")
+            print(f"Processing Batch Folder: {os.path.basename(subdir)}")
+            print(f"=========================================")
+            
+            # Check if it actually contains FCS files
+            if not glob.glob(os.path.join(subdir, "*.fcs")):
+                print(f"Skipping: {os.path.basename(subdir)} (No .fcs files found)")
+                continue
+                
+            out_name = f"{os.path.basename(subdir)}_Analysis"
+            out_dir = os.path.join(input_dir, out_name)
+            process_directory(subdir, out_dir)
+            
+        print("\nBatch Processing Complete!")
+            
+    else:
+        if args.output:
+            output_dir = os.path.abspath(args.output)
+        else:
+            # Generate output directory automatically
+            base = os.path.basename(os.path.normpath(input_dir))
+            output_dir = os.path.join(os.path.dirname(input_dir), f"{base}_Analysis")
+            
+        process_directory(input_dir, output_dir)
+
 if __name__ == "__main__":
     main()
-
