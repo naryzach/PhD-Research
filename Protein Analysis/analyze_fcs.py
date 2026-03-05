@@ -1,6 +1,7 @@
 import os
 import sys
 import glob
+import argparse
 import warnings
 import numpy as np
 import pandas as pd
@@ -34,10 +35,7 @@ from matplotlib.path import Path
 from skimage import measure
 
 # ---- CONFIGURATION ----
-# Paths relative to "DNA Analysis" folder
-DATA_DIR = r"../Local/BD6 Flow Small test 20260227_151415"
-OUTPUT_DIR = r"../Local/FCS_Analysis_Results_3"
-NEG_CONTROL_PATTERN = "NC" # Starts with this
+NEG_CONTROL_PATTERNS = ["NC", "Negative Control"] # Starts with any of these
 POS_CONTROL_PATTERNS = ["Positive Control", "TIMP"] # Starts with any of these
 
 # Channels
@@ -240,33 +238,54 @@ def transform_logicle(data, channels):
     return df_trans
 
 def main():
+    parser = argparse.ArgumentParser(description="Analyze FCS files and generate gating plots and statistics.")
+    parser.add_argument("-i", "--input", required=True, help="Path to input directory containing .fcs files.")
+    parser.add_argument("-o", "--output", default=None, help="Path to output directory. Defaults to '<input>_Analysis'.")
+    args = parser.parse_args()
+
+    input_dir = os.path.abspath(args.input)
+    if args.output:
+        output_dir = os.path.abspath(args.output)
+    else:
+        # Generate output directory automatically
+        base = os.path.basename(os.path.normpath(input_dir))
+        output_dir = os.path.join(os.path.dirname(input_dir), f"{base}_Analysis")
+
     # 1. Setup
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
         
     # Updated Folder Structure
-    individual_dir = os.path.join(OUTPUT_DIR, "Individual_Plots")
+    individual_dir = os.path.join(output_dir, "Individual_Plots")
     if not os.path.exists(individual_dir):
         os.makedirs(individual_dir)
 
-    pub_dir = os.path.join(OUTPUT_DIR, "Publication_Ready")
+    pub_dir = os.path.join(output_dir, "Publication_Ready")
     if not os.path.exists(pub_dir):
         os.makedirs(pub_dir)
         
-    agg_dir = os.path.join(OUTPUT_DIR, "Aggregate_Plots")
+    agg_dir = os.path.join(output_dir, "Aggregate_Plots")
     if not os.path.exists(agg_dir):
         os.makedirs(agg_dir)
 
-    comp_bind_dir = os.path.join(OUTPUT_DIR, "Comparisons_vs_PosCtrl", "Binding")
+    comp_bind_dir = os.path.join(output_dir, "Comparisons_vs_PosCtrl", "Binding")
     if not os.path.exists(comp_bind_dir):
         os.makedirs(comp_bind_dir)
         
-    comp_expr_dir = os.path.join(OUTPUT_DIR, "Comparisons_vs_PosCtrl", "Expression")
+    comp_expr_dir = os.path.join(output_dir, "Comparisons_vs_PosCtrl", "Expression")
     if not os.path.exists(comp_expr_dir):
         os.makedirs(comp_expr_dir)
         
+    pos_dist_dir = os.path.join(output_dir, "Positive_Distributions")
+    if not os.path.exists(pos_dist_dir):
+        os.makedirs(pos_dist_dir)
+        
+    pos_ratio_dir = os.path.join(output_dir, "Positive_Ratios")
+    if not os.path.exists(pos_ratio_dir):
+        os.makedirs(pos_ratio_dir)
+        
     # Find files
-    search_path = os.path.join(os.getcwd(), DATA_DIR)
+    search_path = input_dir
     
     print(f"Searching in: {search_path}")
     all_files = glob.glob(os.path.join(search_path, "*.fcs"))
@@ -281,7 +300,7 @@ def main():
 
     # 2. Process Controls
     # Negative Controls
-    neg_files = [f for f in all_files if os.path.basename(f).startswith(NEG_CONTROL_PATTERN)]
+    neg_files = [f for f in all_files if any(os.path.basename(f).startswith(p) for p in NEG_CONTROL_PATTERNS)]
     print(f"Found {len(neg_files)} negative control files.")
     
     # Learn Pentagon Gate from the First Negative Control
@@ -304,6 +323,7 @@ def main():
         _, d = load_fcs(f)
         if d is not None:
             d_gated = apply_polygon_gate(d, pentagon_path, CH_FSC_A, CH_SSC_A)
+            d_gated = d_gated[(d_gated[CH_EXPR] > 0) & (d_gated[CH_BIND] > 0)]
             neg_dfs.append(d_gated)
             
     if neg_dfs:
@@ -325,11 +345,64 @@ def main():
             fig, ax = plt.subplots(1, 1, figsize=(6, 5))
             
             # Scatter/Density Gate Overlay
-            d_gated = apply_polygon_gate(d_demo, pentagon_path, CH_FSC_A, CH_SSC_A, plot_ax=ax, title="Pentagon Gate on NC")
+            d_gated_demo = apply_polygon_gate(d_demo, pentagon_path, CH_FSC_A, CH_SSC_A, plot_ax=ax, title="Pentagon Gate on NC")
+            d_gated_demo = d_gated_demo[(d_gated_demo[CH_EXPR] > 0) & (d_gated_demo[CH_BIND] > 0)]
             
             plt.tight_layout()
-            plt.savefig(os.path.join(OUTPUT_DIR, "Gating_Strategy_NegCtrl.png"))
+            plt.savefig(os.path.join(output_dir, "Gating_Strategy_NegCtrl.png"))
             plt.close()
+            
+            # Pure Density Gate Overlay (KDE)
+            fig_kde, ax_kde = plt.subplots(1, 1, figsize=(6, 5))
+            sns.kdeplot(x=d_demo[CH_FSC_A], y=d_demo[CH_SSC_A], fill=True, cmap="mako", ax=ax_kde, log_scale=(True, True))
+            import matplotlib.patches as patches
+            patch_kde = patches.PathPatch(pentagon_path, facecolor='none', edgecolor='cyan', lw=2, linestyle='--')
+            ax_kde.add_patch(patch_kde)
+            ax_kde.set_xlabel(CH_FSC_A)
+            ax_kde.set_ylabel(CH_SSC_A)
+            ax_kde.set_title(f"Pentagon Gate on NC (Density)")
+            plt.tight_layout()
+            plt.savefig(os.path.join(output_dir, "Gating_Strategy_NegCtrl_Density.png"))
+            plt.close()
+            
+            # Scatter/Density for Quad gate on NC
+            fig2, ax2 = plt.subplots(1, 1, figsize=(6, 6))
+            t_bind_nc = np.log10(np.clip(d_gated_demo[CH_BIND], 1, None))
+            t_expr_nc = np.log10(np.clip(d_gated_demo[CH_EXPR], 1, None))
+            
+            ax2.hexbin(t_bind_nc, t_expr_nc, gridsize=100, cmap='jet', mincnt=1, bins='log')
+            ax2.axvline(np.log10(max(thresh_bind, 1)), color='r', linestyle='--', label='99.9% Bind Thresh')
+            ax2.axhline(np.log10(max(thresh_expr, 1)), color='r', linestyle='--', label='99.9% Expr Thresh')
+            ax2.set_xlabel("Log10 APC-A (Binding)")
+            ax2.set_ylabel("Log10 FITC-A (Expression)")
+            ax2.set_title("99.9% Thresholds on Negative Control")
+            ax2.legend(loc='lower left')
+            plt.tight_layout()
+            plt.savefig(os.path.join(output_dir, "Gating_Strategy_NegCtrl_Quad.png"))
+            plt.close()
+            
+            # 1D Density for Expression on NC
+            fig_ex, ax_ex = plt.subplots(1, 1, figsize=(6, 4))
+            sns.kdeplot(t_expr_nc, fill=True, ax=ax_ex, color='purple')
+            ax_ex.axvline(np.log10(max(thresh_expr, 1)), color='r', linestyle='--', label=f'99.9% Thresh: {thresh_expr:.0f}')
+            ax_ex.set_xlabel("Log10 FITC-A (Expression)")
+            ax_ex.set_title("Negative Control Expression Density")
+            ax_ex.legend()
+            plt.tight_layout()
+            plt.savefig(os.path.join(output_dir, "Gating_Strategy_NegCtrl_Expr_Density.png"))
+            plt.close()
+
+            # 1D Density for Binding on NC
+            fig_bi, ax_bi = plt.subplots(1, 1, figsize=(6, 4))
+            sns.kdeplot(t_bind_nc, fill=True, ax=ax_bi, color='g')
+            ax_bi.axvline(np.log10(max(thresh_bind, 1)), color='r', linestyle='--', label=f'99.9% Thresh: {thresh_bind:.0f}')
+            ax_bi.set_xlabel("Log10 APC-A (Binding)")
+            ax_bi.set_title("Negative Control Binding Density")
+            ax_bi.legend()
+            plt.tight_layout()
+            plt.savefig(os.path.join(output_dir, "Gating_Strategy_NegCtrl_Bind_Density.png"))
+            plt.close()
+
     else:
         print("Error: No negative controls found matching pattern. Required for dynamic gating.")
         return
@@ -343,6 +416,7 @@ def main():
         _, d = load_fcs(f)
         if d is not None:
             d_gated = apply_polygon_gate(d, pentagon_path, CH_FSC_A, CH_SSC_A)
+            d_gated = d_gated[(d_gated[CH_EXPR] > 0) & (d_gated[CH_BIND] > 0)]
             pos_dfs.append(d_gated)
             
     pos_mfi_bind = 1.0
@@ -375,6 +449,7 @@ def main():
         
         # Gating
         df_sing = apply_polygon_gate(df, pentagon_path, CH_FSC_A, CH_SSC_A)
+        df_sing = df_sing[(df_sing[CH_EXPR] > 0) & (df_sing[CH_BIND] > 0)]
         
         # Stats
         count_total = len(df)
@@ -427,6 +502,20 @@ def main():
         si_bind = (mfi_bind - neg_mfi_bind) / (2 * neg_rsd_bind) if neg_rsd_bind > 0 else 0
         si_expr = (mfi_expr - neg_mfi_expr) / (2 * neg_rsd_expr) if neg_rsd_expr > 0 else 0
         
+        # Positive Population Analysis
+        df_pos_expr = df_sing[expr_pos]
+        df_pos_bind = df_sing[bind_pos]
+        
+        pos_mean_expr = df_pos_expr[CH_EXPR].mean() if len(df_pos_expr) > 0 else 0
+        pos_med_expr = df_pos_expr[CH_EXPR].median() if len(df_pos_expr) > 0 else 0
+        
+        pos_mean_bind = df_pos_bind[CH_BIND].mean() if len(df_pos_bind) > 0 else 0
+        pos_med_bind = df_pos_bind[CH_BIND].median() if len(df_pos_bind) > 0 else 0
+        
+        # Ratios (Bind / Expr) for Positive events
+        pos_mean_ratio = pos_mean_bind / pos_mean_expr if pos_mean_expr > 0 else 0
+        pos_med_ratio = pos_med_bind / pos_med_expr if pos_med_expr > 0 else 0
+
         summary_stats.append({
             "Filename": clean_name,
             "Total Events": count_total,
@@ -443,9 +532,51 @@ def main():
             "Bind Stain Index": si_bind,
             "Expr Stain Index": si_expr,
             "% of Pos Ctrl": pct_of_pos_mfi,
-            "Binding Efficiency": binding_eff
+            "Binding Efficiency": binding_eff,
+            "Pos Mean Bind": pos_mean_bind,
+            "Pos Med Bind": pos_med_bind,
+            "Pos Mean Expr": pos_mean_expr,
+            "Pos Med Expr": pos_med_expr,
+            "Pos Mean Ratio": pos_mean_ratio,
+            "Pos Med Ratio": pos_med_ratio
         })
         
+        # --- POSITIVE DISTRIBUTIONS PLOT ---
+        if len(df_pos_expr) > 0 or len(df_pos_bind) > 0:
+            fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+            
+            if len(df_pos_expr) > 0:
+                t_pos_expr = np.log10(np.clip(df_pos_expr[CH_EXPR], 1, None))
+                sns.histplot(t_pos_expr, ax=axes[0], color='purple', stat='count', element='step', fill=True)
+                
+                # We plot means and medians 
+                m_mean_ex = np.log10(max(1, pos_mean_expr))
+                m_med_ex = np.log10(max(1, pos_med_expr))
+                
+                axes[0].axvline(m_mean_ex, color='k', linestyle='--', label=f'Mean: {pos_mean_expr:.0f}')
+                axes[0].axvline(m_med_ex, color='b', linestyle=':', label=f'Median: {pos_med_expr:.0f}')
+                axes[0].set_title("Positive Expression Dist")
+                axes[0].set_xlabel("Log10 FITC-A (Expression)")
+                axes[0].legend()
+            
+            if len(df_pos_bind) > 0:
+                t_pos_bind = np.log10(np.clip(df_pos_bind[CH_BIND], 1, None))
+                sns.histplot(t_pos_bind, ax=axes[1], color='g', stat='count', element='step', fill=True)
+                
+                m_mean_bi = np.log10(max(1, pos_mean_bind))
+                m_med_bi = np.log10(max(1, pos_med_bind))
+                
+                axes[1].axvline(m_mean_bi, color='k', linestyle='--', label=f'Mean: {pos_mean_bind:.0f}')
+                axes[1].axvline(m_med_bi, color='b', linestyle=':', label=f'Median: {pos_med_bind:.0f}')
+                axes[1].set_title("Positive Binding Dist")
+                axes[1].set_xlabel("Log10 APC-A (Binding)")
+                axes[1].legend()
+                
+            plt.suptitle(f"{clean_name} - Positive Events Distributions")
+            plt.tight_layout()
+            plt.savefig(os.path.join(pos_dist_dir, f"{clean_name}_PosDist.png"))
+            plt.close()
+
         # --- PLOTTING ---
         
         # 1. Main 4-panel Plot
@@ -566,16 +697,35 @@ def main():
             plt.savefig(os.path.join(comp_expr_dir, f"Comp_Expr_{clean_name}.png"))
             plt.close()
 
-    # Save Stats
+    # Post-Calculation Normalization
     df_stats = pd.DataFrame(summary_stats)
-    df_stats.to_csv(os.path.join(OUTPUT_DIR, "summary_stats.csv"), index=False)
-    print(f"\nAnalysis complete. Saved to {os.path.join(OUTPUT_DIR, 'summary_stats.csv')}")
+    
+    # 5. Calculate Normalized Mean and Median Ratios
+    # Identify Positive Control to normalize ratios
+    pos_mask = df_stats['Filename'].apply(lambda x: any(p in x for p in POS_CONTROL_PATTERNS))
+    if pos_mask.any():
+        pos_mean_rat_ref = df_stats.loc[pos_mask, "Pos Mean Ratio"].median() # Use median of PosCtrls if multiple
+        pos_med_rat_ref = df_stats.loc[pos_mask, "Pos Med Ratio"].median()
+    else:
+        # Fallback if no Pos Ctrl: Normalize by maximum ratio found to keep scale 0-1
+        pos_mean_rat_ref = df_stats["Pos Mean Ratio"].max()
+        pos_med_rat_ref = df_stats["Pos Med Ratio"].max()
+        
+    pos_mean_rat_ref = max(pos_mean_rat_ref, 1e-9) # Avoid division by zero
+    pos_med_rat_ref = max(pos_med_rat_ref, 1e-9)
+
+    df_stats["Norm Pos Mean Ratio"] = df_stats["Pos Mean Ratio"] / pos_mean_rat_ref
+    df_stats["Norm Pos Med Ratio"] = df_stats["Pos Med Ratio"] / pos_med_rat_ref
+    
+    # Save Stats
+    df_stats.to_csv(os.path.join(output_dir, "summary_stats.csv"), index=False)
+    print(f"\nAnalysis complete. Saved to {os.path.join(output_dir, 'summary_stats.csv')}")
     
     # ---- AGGREGATE PLOTS ----
     generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, agg_dir)
     
     # Report
-    generate_report(df_stats)
+    generate_report(df_stats, output_dir)
 
 def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, output_dir):
     # Re-implementing the aggregation plots to ensure they exist
@@ -800,6 +950,8 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
     # 5. Scatter MFI
     plt.figure(figsize=(10, 6))
     sns.scatterplot(data=df_stats, x="Bind MFI", y="Expr MFI", hue="Filename", s=100)
+    plt.axvline(thresh_bind, color='r', linestyle='--', label='99.9% NC Bind Thresh')
+    plt.axhline(thresh_expr, color='r', linestyle='--', label='99.9% NC Expr Thresh')
     plt.title("Mean Fluorescence Intensity: Binding vs Expression")
     plt.xlabel("Binding MFI (APC)")
     plt.ylabel("Expression MFI (FITC)")
@@ -808,10 +960,53 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
     plt.savefig(os.path.join(output_dir, "Aggregate_MFI_Scatter.png"))
     plt.close()
 
-def generate_report(df):
+    # 6. Normalized Positive Ratios (Binding Effectiveness)
+    # Correcting the path to be at the top level of FCS_Analysis_Results_3, rather than inside Aggregate_Plots
+    pos_ratio_dir = os.path.join(os.path.dirname(output_dir), "Positive_Ratios")
+    if not os.path.exists(pos_ratio_dir):
+        os.makedirs(pos_ratio_dir)
+    pos_ctrl_mask = df_stats['Filename'].apply(lambda x: any(p in x for p in POS_CONTROL_PATTERNS))
+    if pos_ctrl_mask.any():
+        vmax_dp = df_stats.loc[pos_ctrl_mask, "Double+ %"].max()
+    else:
+        vmax_dp = df_stats["Double+ %"].max()
+    vmax_dp = max(vmax_dp, 1.0)
+        
+    for m_col, title in [("Pos Mean Ratio", "Raw Pos Mean Ratio (Bind/Expr)"),
+                         ("Pos Med Ratio", "Raw Pos Median Ratio (Bind/Expr)"),
+                         ("Norm Pos Mean Ratio", "Normalized Pos Mean Ratio (Bind/Expr vs PosCtrl)"), 
+                         ("Norm Pos Med Ratio", "Normalized Pos Median Ratio (Bind/Expr vs PosCtrl)")]:
+        plt.figure(figsize=(12, 6))
+        df_sorted = df_stats.sort_values(m_col, ascending=False)
+        
+        # Color scale based on Double+ % to give more context than just height
+        norm = plt.Normalize(0, vmax_dp)
+        cmap = plt.cm.get_cmap("viridis")
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        
+        colors = [cmap(norm(val)) for val in df_sorted["Double+ %"]]
+        
+        sns.barplot(data=df_sorted, x="Filename", y=m_col, palette=colors)
+        
+        if "Norm" in m_col:
+            plt.axhline(1, color='k', linestyle='--', label='Positive Control Baseline')
+            
+        plt.xticks(rotation=90)
+        plt.title(title)
+        plt.ylabel("Ratio (Sample / PosCtrl)" if "Norm" in m_col else "Ratio (Bind / Expr)")
+        
+        cbar = plt.colorbar(sm, ax=plt.gca())
+        cbar.set_label("Double+ Population (%)")
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(pos_ratio_dir, f"Aggregate_{m_col.replace(' ', '_')}.png"))
+        plt.close()
+
+def generate_report(df, output_dir):
     """Generates a text report summarizing the findings."""
     
-    report_path = os.path.join(OUTPUT_DIR, "Analysis_Report.md")
+    report_path = os.path.join(output_dir, "Analysis_Report.md")
     
     # Identify top performers
     top_binding = df.sort_values("Bind MFI", ascending=False).iloc[0]
@@ -831,6 +1026,10 @@ def generate_report(df):
         f.write("## 1. Executive Summary\n")
         f.write(f"- **Highest Binding (APC)**: {top_binding['Filename']} (MFI: {top_binding['Bind MFI']:.0f}, Ratio vs Pos: {top_binding['Bind FC vs Pos Ctrl']:.2f})\n")
         f.write(f"- **Highest Expression (FITC)**: {top_expr['Filename']} (MFI: {top_expr['Expr MFI']:.0f}, %+: {top_expr['Expr+ %']:.1f}%)\n")
+        
+        # Best Ratio Effectiveness
+        top_ratio = df.sort_values("Norm Pos Med Ratio", ascending=False).iloc[0]
+        f.write(f"- **Highest Normalized Positive Ratio (Effectiveness)**: {top_ratio['Filename']} ({top_ratio['Norm Pos Med Ratio']:.2f}x Pos Ctrl)\n")
         f.write("\n")
         
         f.write("## 2. Group Performance\n")
@@ -843,6 +1042,7 @@ def generate_report(df):
             avg_pct_pos = sub['% of Pos Ctrl'].mean()
             avg_si = sub['Bind Stain Index'].mean()
             avg_vs_pos = sub['Bind FC vs Pos Ctrl'].mean()
+            avg_norm_ratio = sub['Norm Pos Med Ratio'].mean()
             
             f.write(f"### Group {g}\n")
             f.write(f"- **Samples**: {len(sub)}\n")
@@ -850,9 +1050,18 @@ def generate_report(df):
             f.write(f"- **Avg Expression Fold Change (vs Neg)**: {avg_fc_expr:.2f}x\n")
             f.write(f"- **Avg Binding Ratio (vs Pos)**: {avg_vs_pos:.2f} (1.0 = Same as Pos)\n")
             f.write(f"- **Avg Binding Efficiency (Binding / Expression ratio)**: {avg_eff:.2f}\n")
+            f.write(f"- **Avg Normalized Pos Median Ratio**: {avg_norm_ratio:.2f}\n")
             f.write(f"- **Avg Stain Index**: {avg_si:.2f}\n")
             f.write(f"- **Avg % of Pos Ctrl**: {avg_pct_pos:.1f}%\n")
             f.write(f"- **Observation**: {stats_observation(avg_fc_bind, avg_fc_expr, avg_eff, avg_vs_pos)}\n\n")
+            
+        f.write("## 3. Explanation of Metrics\n")
+        f.write("- **Fold Change (vs Neg)**: The Median MFI of the sample divided by the Median MFI of the Negative Control. A value of 1.0 means it is identical to background.\n")
+        f.write("- **Binding Efficiency**: The ratio of Binding Fold Change to Expression Fold Change. Helps identify if a high binding signal is just due to abnormally high expression.\n")
+        f.write("- **Stain Index**: A measure of separation between the positive population and the negative population. Calculated as: `(Sample Median - Neg Median) / (2 * robust SD of Neg)`.\n")
+        f.write("- **Pos Mean / Median Ratio (Raw)**: For events strictly above the 99.9% Negative Control threshold, this is the ratio of their Binding level to their Expression level (`Pos Bind / Pos Expr`). Validates how effectively the expressed protein binds the target.\n")
+        f.write("- **Normalized Pos Mean / Median Ratio**: The Raw Ratio scaled against the Positive Control's ratio. A value of `1.0` means the sample's binding-to-expression effectiveness perfectly matches the Positive Control. `>1.0` is better than Pos Ctrl, `<1.0` is worse.\n")
+        f.write("- **Double+ %**: The percentage of *all* events in the sample that fell into the upper-right quadrant (i.e., they expressed *and* bound above the 99.9% Negative Control thresholds).\n")
 
 def stats_observation(fc_bind, fc_expr, efficiency, vs_pos=0):
     obs = []
