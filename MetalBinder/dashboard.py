@@ -6,6 +6,41 @@ import os
 import numpy as np
 from stmol import showmol
 import py3Dmol
+import math
+
+# --- Constants & Heuristics ---
+def calculate_binding_probability(row):
+    """
+    Heuristic score (0-1) for metal binding quality.
+    - Radius: Ideal ~2.45A (Gaussian decay)
+    - CN: Bonus for 6-8 coordinating oxygens
+    - Bidentate: Bonus for at least one bidentate ligand
+    - Confidence: Scaled pLDDT
+    """
+    # 1. Radius Factor (Gaussian around 2.45A)
+    # sigma=0.5 means at 3.0A (0.55 away) it's ~0.55
+    r = row.get('binding_radius_A', 5.0)
+    if pd.isna(r) or r <= 0: return 0.0
+    r_score = math.exp(-((r - 2.45)**2) / (2 * 0.5**2))
+    
+    # 2. Coordination Number Factor
+    cn = row.get('coordination_number', 0)
+    if pd.isna(cn): cn = 0
+    if 6 <= cn <= 8: cn_score = 1.0
+    elif cn > 0: cn_score = 0.5
+    else: cn_score = 0.0
+    
+    # 3. Bidentate Factor
+    bid = row.get('bidentate_count', 0)
+    bid_score = 1.0 if bid >= 1 else 0.0
+    
+    # 4. Confidence Factor (pLDDT)
+    p = row.get('plddt', 0)
+    p_score = p / 100.0 if p > 1.0 else p
+    
+    # Weighted average
+    total = (r_score * 0.4) + (cn_score * 0.2) + (bid_score * 0.1) + (p_score * 0.3)
+    return round(total, 3)
 
 # Set page config
 st.set_page_config(page_title="Lanm Output Dashboard", layout="wide")
@@ -55,6 +90,12 @@ def load_data():
     
     # Check for ions presence even if not in catalog
     ions = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d)) and d.isupper() and len(d) <= 2]
+    
+    if not df.empty:
+        # Update Metal Category
+        df['metal_category'] = df['metal_ion'].apply(get_category)
+        # Add Binding Probability
+        df['binding_probability'] = df.apply(calculate_binding_probability, axis=1)
     
     return df, full_seq_df, ions, base_path
 
@@ -148,7 +189,7 @@ def get_residue_heatmap_fig(data, title, color_scale="YlOrRd"):
     return fig
 
 @st.cache_resource
-def get_eval_plot(df, selected_shape, rad_range_vals, rmsd_range_vals):
+def get_eval_plot(df, selected_shape, selected_color, rad_range_vals, rmsd_range_vals):
     shape_options = {
         "Loop Index": "loop_index",
         "Bidentate Count": "bidentate_count",
@@ -156,19 +197,29 @@ def get_eval_plot(df, selected_shape, rad_range_vals, rmsd_range_vals):
         "Configuration": "config_index",
         "Motif Match": "motif_match"
     }
+    color_options = {
+        "Metal Ion": "metal_ion",
+        "Binding Probability": "binding_probability",
+        "pLDDT": "plddt"
+    }
+    
     # Filter for existing columns
     active_shape_options = {k: v for k, v in shape_options.items() if v in df.columns}
     symbol_col = active_shape_options.get(selected_shape, None)
+    
+    active_color_options = {k: v for k, v in color_options.items() if v in df.columns}
+    color_col = active_color_options.get(selected_color, "metal_ion")
     
     fig = px.scatter(
         df, 
         x='loop_rmsd', 
         y='binding_radius_A', 
-        color='metal_ion', 
+        color=color_col, 
         size='plddt' if 'plddt' in df.columns else None,
         symbol=symbol_col,
-        hover_data=['design_id', 'loop_sequence', 'coordination_number', 'net_charge'] if 'coordination_number' in df.columns else ['design_id', 'loop_sequence'],
-        labels={'loop_rmsd': 'Individual Loop RMSD (Å)', 'binding_radius_A': 'Binding Radius (Å)'},
+        hover_data=['design_id', 'loop_index', 'loop_sequence', 'binding_probability', 'coordination_number', 'net_charge'] if 'coordination_number' in df.columns else ['design_id', 'loop_index', 'loop_sequence', 'binding_probability'],
+        color_continuous_scale="Viridis" if color_col != "metal_ion" else None,
+        labels={'loop_rmsd': 'Individual Loop RMSD (Å)', 'binding_radius_A': 'Binding Radius (Å)', 'binding_probability': 'Probability'},
         title="Candidate Evaluation (Thresholds: RMSD < 1.5, Radius 2.3-2.6)"
     )
     
@@ -182,6 +233,31 @@ def get_eval_plot(df, selected_shape, rad_range_vals, rmsd_range_vals):
     fig.add_hrect(y0=2.3, y1=2.6, line_width=0, fillcolor="green", opacity=0.1)
     # Add vertical line for RMSD threshold
     fig.add_vline(x=1.5, line_dash="dash", line_color="red", opacity=0.6)
+    
+    # Improve legend layout on the right side to prevent overlapping
+    fig.update_layout(
+        legend=dict(
+            orientation="v",
+            yanchor="top",
+            y=1.0,
+            xanchor="left",
+            x=1.15, # Offset discrete legend further right
+            font=dict(size=10),
+            itemsizing="constant"
+        ),
+        margin=dict(r=200) # Increased margin for two side-by-side legends
+    )
+    
+    # Position colorbar specifically if it exists (for continuous scales)
+    fig.update_coloraxes(
+        colorbar=dict(
+            thickness=15,
+            x=1.02, # Keep colorbar closer to the plot
+            y=0.5,
+            len=0.75,
+            title=dict(side="right")
+        )
+    )
     return fig
 
 @st.cache_resource
@@ -216,23 +292,28 @@ def get_loop_dist_plots(df):
     return fig_hist, fig_len_plddt
 
 @st.cache_resource
-def get_radar_chart(df, design_a, design_b):
-    metrics = ['plddt', 'overall_rmsd', 'loop_rmsd', 'binding_radius_A', 'coordination_number']
+def get_radar_chart(df, design_a, design_b, loop_a=None, loop_b=None):
+    metrics = ['binding_probability', 'plddt', 'overall_rmsd', 'loop_rmsd', 'binding_radius_A', 'coordination_number']
     metrics = [m for m in metrics if m in df.columns]
     
-    def normalize(val, col):
-        v_min = df[col].min()
-        v_max = df[col].max()
+    def normalize(val, col, global_df):
+        v_min = global_df[col].min()
+        v_max = global_df[col].max()
         if v_max == v_min: return 0.5
         return (val - v_min) / (v_max - v_min)
         
     fig = go.Figure()
-    for d_id, color in [(design_a, 'blue'), (design_b, 'red')]:
-        row = df[df['design_id'] == d_id].iloc[0]
-        r_values = [normalize(row[m], m) for m in metrics]
+    for d_id, l_idx, color in [(design_a, loop_a, 'blue'), (design_b, loop_b, 'red')]:
+        sub = df[df['design_id'] == d_id]
+        if l_idx is not None:
+            sub = sub[sub['loop_index'] == l_idx]
+        row = sub.iloc[0]
+        
+        name = f"{d_id}" + (f" (Loop {l_idx})" if l_idx is not None else "")
+        r_values = [normalize(row[m], m, df) for m in metrics]
         r_values.append(r_values[0])
         theta_labels = metrics + [metrics[0]]
-        fig.add_trace(go.Scatterpolar(r=r_values, theta=theta_labels, fill='toself', name=d_id, line_color=color))
+        fig.add_trace(go.Scatterpolar(r=r_values, theta=theta_labels, fill='toself', name=name, line_color=color))
         
     fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1])), showlegend=True, title="Relative Metric Strength")
     return fig
@@ -354,6 +435,7 @@ rmsd_range = get_range_filter(df, 'overall_rmsd', "Overall RMSD Range", "overall
 rad_range = get_range_filter(df, 'binding_radius_A', "Binding Radius (A) Range", "binding_radius_A_slider")
 cn_range = get_range_filter(df, 'coordination_number', "Coordination Number Range", "coordination_number_slider")
 charge_range = get_range_filter(df, 'net_charge', "Net Charge Range", "net_charge_slider")
+prob_range = get_range_filter(df, 'binding_probability', "Binding Probability Range", "prob_slider")
 
 if selected_ions:
     filtered_df = filtered_df[filtered_df['metal_ion'].isin(selected_ions)]
@@ -369,6 +451,8 @@ if cn_range:
     filtered_df = filtered_df[(filtered_df['coordination_number'] >= cn_range[0]) & (filtered_df['coordination_number'] <= cn_range[1])]
 if charge_range:
     filtered_df = filtered_df[(filtered_df['net_charge'] >= charge_range[0]) & (filtered_df['net_charge'] <= charge_range[1])]
+if prob_range:
+    filtered_df = filtered_df[(filtered_df['binding_probability'] >= prob_range[0]) & (filtered_df['binding_probability'] <= prob_range[1])]
 
 # --- Export (In Sidebar) ---
 st.sidebar.divider()
@@ -383,7 +467,7 @@ st.sidebar.download_button(
 )
 
 # --- Main Dashboard ---
-metrics_cols = st.columns(5)
+metrics_cols = st.columns(6)
 metrics_cols[0].metric("Total Designs", len(filtered_df['design_id'].unique()))
 metrics_cols[1].metric("Mean pLDDT", f"{filtered_df['plddt'].mean():.2f}")
 metrics_cols[2].metric("Mean RMSD", f"{filtered_df['overall_rmsd'].mean():.2f}")
@@ -391,17 +475,19 @@ if 'coordination_number' in filtered_df.columns:
     metrics_cols[3].metric("Mean CN", f"{filtered_df['coordination_number'].mean():.1f}")
 if 'net_charge' in filtered_df.columns:
     metrics_cols[4].metric("Mean Net Charge", f"{filtered_df['net_charge'].mean():.1f}")
+metrics_cols[5].metric("Mean Probability", f"{filtered_df['binding_probability'].mean():.2f}")
 
 # --- Plots ---
 st.header("📈 Comparative Analysis")
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "Candidate Evaluation", 
     "Structural Accuracy", 
     "Sequence Analysis", 
     "Loop Distributions", 
     "Pairwise Comparison",
     "Advanced Analytics",
-    "Category Comparison"
+    "Category Comparison",
+    "Design Explorer"
 ])
 
 with tab1:
@@ -419,8 +505,10 @@ with tab1:
         shape_options = {k: v for k, v in shape_options.items() if v in filtered_df.columns}
         selected_shape = st.selectbox("Point Shape Mapping", options=list(shape_options.keys()))
         
+        selected_color = st.selectbox("Color By", options=["Metal Ion", "Binding Probability", "pLDDT"])
+        
     with col_eval_2:
-        fig_eval = get_eval_plot(filtered_df, selected_shape, rad_range, rmsd_range)
+        fig_eval = get_eval_plot(filtered_df, selected_shape, selected_color, rad_range, rmsd_range)
         st.plotly_chart(fig_eval, width='stretch')
 
 with tab2:
@@ -504,46 +592,24 @@ with tab5:
         design_b = st.selectbox("Select Molecule B", options=filtered_df['design_id'].unique(), index=min(1, len(filtered_df)-1), key="mol_b")
     
     if design_a and design_b:
-        df_a = filtered_df[filtered_df['design_id'] == design_a].iloc[0]
-        df_b = filtered_df[filtered_df['design_id'] == design_b].iloc[0]
+        df_a_all = filtered_df[filtered_df['design_id'] == design_a]
+        df_b_all = filtered_df[filtered_df['design_id'] == design_b]
+        
+        col_loop_a, col_loop_b = st.columns(2)
+        with col_loop_a:
+            loop_a = st.selectbox(f"Select Loop for {design_a}", options=sorted(df_a_all['loop_index'].unique()), key="loop_a")
+        with col_loop_b:
+            loop_b = st.selectbox(f"Select Loop for {design_b}", options=sorted(df_b_all['loop_index'].unique()), key="loop_b")
+            
+        df_a = df_a_all[df_a_all['loop_index'] == loop_a].iloc[0]
+        df_b = df_b_all[df_b_all['loop_index'] == loop_b].iloc[0]
         
         comparison_df = pd.DataFrame([df_a, df_b])
-        st.table(comparison_df[["design_id", "metal_ion", "plddt", "overall_rmsd", "loop_rmsd", "binding_radius_A", "loop_sequence"]])
+        st.table(comparison_df[["design_id", "loop_index", "metal_ion", "binding_probability", "plddt", "overall_rmsd", "loop_rmsd", "binding_radius_A", "loop_sequence"]])
 
         # Radar Chart for Comparison
         st.subheader("Radar Chart Comparison")
-        metrics = ['plddt', 'overall_rmsd', 'loop_rmsd', 'binding_radius_A', 'coordination_number']
-        metrics = [m for m in metrics if m in filtered_df.columns]
-        
-        # Normalize metrics for radar chart (0-1 scale)
-        def normalize(val, col):
-            v_min = df[col].min()
-            v_max = df[col].max()
-            if v_max == v_min: return 0.5
-            return (val - v_min) / (v_max - v_min)
-
-        fig_radar = go.Figure()
-
-        for d_id, color in [(design_a, 'blue'), (design_b, 'red')]:
-            row = filtered_df[filtered_df['design_id'] == d_id].iloc[0]
-            r_values = [normalize(row[m], m) for m in metrics]
-            # Close the circle
-            r_values.append(r_values[0])
-            theta_labels = metrics + [metrics[0]]
-            
-            fig_radar.add_trace(go.Scatterpolar(
-                r=r_values,
-                theta=theta_labels,
-                fill='toself',
-                name=d_id,
-                line_color=color
-            ))
-
-        fig_radar.update_layout(
-            polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
-            showlegend=True,
-            title="Relative Metric Strength (Normalized to Global Min/Max)"
-        )
+        fig_radar = get_radar_chart(filtered_df, design_a, design_b, loop_a, loop_b)
         st.plotly_chart(fig_radar, width='stretch')
 
         # Population Context
@@ -562,6 +628,7 @@ with tab5:
             mode='markers+text', text=[f"B: {design_b}"], 
             marker=dict(color='red', size=15, symbol='star'), name='Molecule B'
         ))
+        st.plotly_chart(fig_context, width='stretch')
 # --- Advanced Analytics Tab ---
 with tab6:
     st.header("📈 Advanced Analytics")
@@ -654,67 +721,84 @@ with tab7:
         st.subheader("Binding Site Geometry")
         st.plotly_chart(fig_cat_radius, width='stretch')
 
-# --- Design Explorer ---
-st.header("🔍 Design Explorer")
-selected_design = st.selectbox("Select a Design to Inspect", options=filtered_df['design_id'].unique())
-
-if selected_design:
-    design_info = filtered_df[filtered_df['design_id'] == selected_design].iloc[0]
+# --- Design Explorer Tab ---
+with tab8:
+    st.subheader("Design Inspection & 3D Preview")
+    selected_design = st.selectbox("Select a Design to Inspect", options=filtered_df['design_id'].unique())
     
-    col_l, col_r = st.columns([1, 2])
-    
-    with col_l:
-        st.subheader("Metrics")
-        st.write(f"**Ion:** {design_info['metal_ion']}")
-        st.write(f"**pLDDT:** {design_info['plddt']:.4f}")
-        st.write(f"**Overall RMSD:** {design_info['overall_rmsd']:.4f}")
-        st.write(f"**Loop RMSD:** {design_info['loop_rmsd']:.4f}")
-        st.write(f"**Binding Radius:** {design_info['binding_radius_A']:.4f} Å")
+    if selected_design:
+        design_loops = filtered_df[filtered_df['design_id'] == selected_design]
+        design_info = design_loops.iloc[0]
         
-        if 'coordination_number' in design_info:
-            st.write(f"**Coordination Number:** {design_info['coordination_number']}")
-        if 'net_charge' in design_info:
-            st.write(f"**Net Charge:** {design_info['net_charge']}")
-        if 'bidentate_count' in design_info:
-            st.write(f"**Bidentate Count:** {design_info['bidentate_count']}")
-            
-        st.write(f"**Loop Length:** {design_info['loop_length']}")
-        st.code(design_info['loop_sequence'], language=None)
+        st.subheader("Global Metrics")
+        met1, met2, met3 = st.columns(3)
+        met1.write(f"**Ion:** {design_info['metal_ion']}")
+        met2.write(f"**pLDDT:** {design_info['plddt']:.4f}")
+        met3.write(f"**Overall RMSD:** {design_info['overall_rmsd']:.4f}")
         
-    with col_r:
-        st.subheader("3D Preview")
-        cif_file = f"{base_path}/{design_info['metal_ion']}/rf3/{selected_design}_refolded.cif"
-        cif_data = get_cif_data(cif_file)
+        st.subheader("Loop Summary")
+        loop_table = design_loops[["loop_index", "binding_probability", "loop_rmsd", "binding_radius_A", "loop_length", "loop_sequence"]]
+        st.dataframe(loop_table, width='stretch')
         
-        if cif_data:
-            st.info(f"Structure: `{os.path.basename(cif_file)}`")
+        st.divider()
+        
+        col_l, col_r = st.columns([1, 2])
+        
+        with col_l:
+            st.subheader("Detailed Loop Info")
+            selected_loop_idx = st.selectbox("Select Loop to Inspect", options=sorted(design_loops['loop_index'].unique()))
+            loop_info = design_loops[design_loops['loop_index'] == selected_loop_idx].iloc[0]
             
-            view = py3Dmol.view(width=800, height=500)
-            view.addModel(cif_data, "cif")
+            st.write(f"**Binding Probability:** {loop_info['binding_probability']:.3f}")
+            if 'coordination_number' in loop_info:
+                st.write(f"**Coordination Number:** {loop_info['coordination_number']}")
+            if 'net_charge' in loop_info:
+                st.write(f"**Net Charge:** {loop_info['net_charge']}")
+            if 'bidentate_count' in loop_info:
+                st.write(f"**Bidentate Count:** {loop_info['bidentate_count']}")
             
-            # Adaptive Coloring (Blue=Good, Red=Bad)
-            b_min, b_max, invert = get_b_metrics(cif_file)
+            st.code(loop_info['loop_sequence'], language=None)
             
-            # If the range is tiny, fall back to a standard 0-1 scale to avoid flickering
-            if b_max - b_min < 0.0001:
-                b_min, b_max = 0.0, 1.0
-                invert = False
+        with col_r:
+            st.subheader("3D Preview")
+            cif_file = f"{base_path}/{design_info['metal_ion']}/rf3/{selected_design}_refolded.cif"
+            cif_data = get_cif_data(cif_file)
+            
+            if cif_data:
+                st.info(f"Structure: `{os.path.basename(cif_file)}`")
+                st.download_button(
+                    label="Download Structure (.cif)",
+                    data=cif_data,
+                    file_name=os.path.basename(cif_file),
+                    mime="chemical/x-cif"
+                )
                 
-            # Reverse the gradient by swapping min and max if needed
-            gradient_settings = {'prop': 'b', 'gradient': 'roygb', 'min': b_max if invert else b_min, 'max': b_min if invert else b_max}
-            view.setStyle({'cartoon': {'colorscheme': gradient_settings}})
-            
-            # Show metal
-            view.addStyle({'resn': design_info['metal_ion']}, {'sphere': {'radius': 1.5, 'color': 'silver'}})
-            
-            # Highlight loop residues - we need to find them in the structure.
-            # Usually the loop is what we redesigned.
-            # We can't easily know the residue IDs from the catalog alone without indexing.
-            # But the catalog has loop_sequence.
-            
-            view.zoomTo()
-            showmol(view, height=500, width=800)
-        else:
-            st.warning(f"Structure file not found at {cif_file}")
+                view = py3Dmol.view(width=800, height=500)
+                view.addModel(cif_data, "cif")
+                
+                # Adaptive Coloring (Blue=Good, Red=Bad)
+                b_min, b_max, invert = get_b_metrics(cif_file)
+                
+                # If the range is tiny, fall back to a standard 0-1 scale to avoid flickering
+                if b_max - b_min < 0.0001:
+                    b_min, b_max = 0.0, 1.0
+                    invert = False
+                    
+                # Reverse the gradient by swapping min and max if needed
+                gradient_settings = {'prop': 'b', 'gradient': 'roygb', 'min': b_max if invert else b_min, 'max': b_min if invert else b_max}
+                view.setStyle({'cartoon': {'colorscheme': gradient_settings}})
+                
+                # Show metal
+                view.addStyle({'resn': design_info['metal_ion']}, {'sphere': {'radius': 1.5, 'color': 'silver'}})
+                
+                # Highlight loop residues - we need to find them in the structure.
+                # Usually the loop is what we redesigned.
+                # We can't easily know the residue IDs from the catalog alone without indexing.
+                # But the catalog has loop_sequence.
+                
+                view.zoomTo()
+                showmol(view, height=500, width=800)
+            else:
+                st.warning(f"Structure file not found at {cif_file}")
 
 
