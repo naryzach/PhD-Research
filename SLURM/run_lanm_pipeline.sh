@@ -2,7 +2,7 @@
 
 # Setup SLURM
 source SLURM_credentials.sh
-#SBATCH --job-name=RFDiffusion
+#SBATCH --job-name=LanMPipeline
 #SBATCH --time=5-00:00:00         # Set a time limit (5 days)
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
@@ -20,5 +20,5 @@ source ~/miniconda3/etc/profile.d/conda.sh
 # Run Pipeline
 conda activate foundry
 export DISABLE_CUEQUIVARIANCE=1
-python run_pipeline.py --ion ZN CA SC Y LA CE PR ND PM SM EU GD TB DY HO ER TM YB LU --num-configs 20 --batch-size 20
+python run_pipeline.py --ion ZN CA CO NI CU FE SC Y LA CE PR ND PM SM EU GD TB DY HO ER TM YB LU MN --num-configs 40 --batch-size 25 --out-dir ../Local/lanm_output_tmp
 conda deactivate
