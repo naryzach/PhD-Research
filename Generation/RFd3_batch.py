@@ -210,17 +210,19 @@ def main():
             generated_arrays = []
             
             if rfd3_outputs_dict:
+                global_idx = 0
                 for key, rfd3_out_list in rfd3_outputs_dict.items():
                     if not key.startswith("backbone"): continue
                     
-                    for batch_idx, rfd3_out in enumerate(rfd3_out_list):
-                        if batch_idx >= num_sequences_to_generate: break
-                        design_id = f"{output_prefix}_{batch_idx}"
+                    for rfd3_out in rfd3_out_list:
+                        if global_idx >= num_sequences_to_generate: break
+                        design_id = f"{output_prefix}_{global_idx}"
                         
                         clean_array = renumber_atom_array_residues(rfd3_out.atom_array)
                         
                         to_cif_file(clean_array, f"{rfd3_out_dir}/{design_id}.cif", file_type="cif")
                         generated_arrays.append((design_id, clean_array))
+                        global_idx += 1
             
             del rfd3_engine
             torch.cuda.empty_cache()

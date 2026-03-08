@@ -25,7 +25,7 @@ logging.getLogger("foundry").setLevel(logging.ERROR)
 logging.getLogger("rf3").setLevel(logging.ERROR)
 
 # Custom Utilities
-from utils_foundry import get_ef_hand_loops, calculate_binding_radius
+from utils_foundry import get_ef_hand_loops, calculate_binding_metrics
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Automated Cross Docking: Swap metal ions in the best generated structures.")
@@ -82,12 +82,33 @@ def process_rf3_results(new_design_id, swapped_array, rf3_output, new_ion, origi
         rmsd_val = rmsd(bb_orig, bb_final_fitted)
         
     avg_rad = None
+    avg_cn = None
+    avg_charge = None
+    avg_bidentate = None
+    
     loops = get_ef_hand_loops(final_array, metal_res_name=new_ion)
     if loops:
-        radii = [calculate_binding_radius(final_array, l, l['start_res'], l['end_res']) for l in loops]
-        radii = [r for r in radii if r > 0]
-        if radii:
-            avg_rad = sum(radii) / len(radii)
+        b_metrics_list = []
+        for l in loops:
+            # We don't have the original start/end perfectly if it reshaped, but EF hand loops uses the new detected coordinates
+            metrics = calculate_binding_metrics(final_array, l, l['start_res'], l['end_res'])
+            b_metrics_list.append(metrics)
+            
+        valid_radii = [m['binding_radius_A'] for m in b_metrics_list if m['binding_radius_A'] > 0]
+        if valid_radii:
+            avg_rad = sum(valid_radii) / len(valid_radii)
+            
+        valid_cn = [m['coordination_number'] for m in b_metrics_list]
+        if valid_cn:
+            avg_cn = sum(valid_cn) / len(valid_cn)
+            
+        valid_charge = [m['net_charge'] for m in b_metrics_list]
+        if valid_charge:
+            avg_charge = sum(valid_charge) / len(valid_charge)
+            
+        valid_bid = [m['bidentate_count'] for m in b_metrics_list]
+        if valid_bid:
+            avg_bidentate = sum(valid_bid) / len(valid_bid)
             
     return {
         'original_design': new_design_id.replace(f"_swapped_{new_ion}", ""),
@@ -96,7 +117,10 @@ def process_rf3_results(new_design_id, swapped_array, rf3_output, new_ion, origi
         'swapped_design_id': new_design_id,
         'structural_deviation_rmsd': rmsd_val,
         'plddt': plddt,
-        'new_binding_radius': avg_rad
+        'new_binding_radius': avg_rad,
+        'coordination_number': avg_cn,
+        'net_charge': avg_charge,
+        'bidentate_count': avg_bidentate
     }
 
 def analyze_cross_docking_results(df_results, df_native, output_dir):

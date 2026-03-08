@@ -149,6 +149,13 @@ def get_b_metrics(cif_path):
         
     return b_min, b_max, invert
 
+@st.cache_data
+def load_cross_docking_data(base_path):
+    cross_dock_path = os.path.join(base_path, "cross_docking_catalog.csv")
+    if os.path.exists(cross_dock_path):
+        return pd.read_csv(cross_dock_path)
+    return pd.DataFrame()
+
 df, full_seq_df, available_ions, base_path = load_data()
 
 if df.empty:
@@ -479,7 +486,7 @@ metrics_cols[5].metric("Mean Probability", f"{filtered_df['binding_probability']
 
 # --- Plots ---
 st.header("📈 Comparative Analysis")
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "Candidate Evaluation", 
     "Structural Accuracy", 
     "Sequence Analysis", 
@@ -487,7 +494,8 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "Pairwise Comparison",
     "Advanced Analytics",
     "Category Comparison",
-    "Design Explorer"
+    "Design Explorer",
+    "Cross-Docking Analysis"
 ])
 
 with tab1:
@@ -801,4 +809,78 @@ with tab8:
             else:
                 st.warning(f"Structure file not found at {cif_file}")
 
+# --- Cross-Docking Analysis Tab ---
+with tab9:
+    cross_dock_df = load_cross_docking_data(base_path)
+    if not cross_dock_df.empty and selected_ions:
+        cross_dock_df = cross_dock_df[
+            cross_dock_df['original_ion'].isin(selected_ions) & 
+            cross_dock_df['new_ion'].isin(selected_ions)
+        ]
+        
+    if not cross_dock_df.empty:
+        st.subheader("🔄 Cross-Docking Analysis")
+        st.write("Analysis of how designs for one ion perform when modeled with a different ion.")
+        
+        st.subheader("Cross-Docking Metrics")
+        
+        # Base Metrics
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total Cross-Docking Runs", len(cross_dock_df))
+        m2.metric("Mean RMSD Deviation", f"{cross_dock_df['structural_deviation_rmsd'].mean():.2f}")
+        m3.metric("Mean Swap pLDDT", f"{cross_dock_df['plddt'].mean():.2f}")
+        
+        # Conditional New Metrics
+        extra_metrics = [m for m in ['coordination_number', 'net_charge', 'bidentate_count'] if m in cross_dock_df.columns]
+        if extra_metrics:
+            extra_cols = st.columns(len(extra_metrics))
+            for i, col_name in enumerate(extra_metrics):
+                title = col_name.replace("_", " ").title()
+                val = cross_dock_df[col_name].mean()
+                extra_cols[i].metric(f"Mean {title}", f"{val:.2f}")
+        
+        col_cd1, col_cd2 = st.columns(2)
+        
+        with col_cd1:
+            st.subheader("Structural Deviation by Original Ion")
+            fig_cd_rmsd = px.box(cross_dock_df, x='original_ion', y='structural_deviation_rmsd', color='original_ion', 
+                               points="all", title="Deviation When Swapping Metal Ion")
+            st.plotly_chart(fig_cd_rmsd, width='stretch')
+            
+        with col_cd2:
+            st.subheader("Confidence (pLDDT) After Swap")
+            fig_cd_plddt = px.box(cross_dock_df, x='new_ion', y='plddt', color='new_ion', 
+                                points="all", title="pLDDT for Swapped Targets")
+            st.plotly_chart(fig_cd_plddt, width='stretch')
+            
+        # Optional Property Distributions
+        if extra_metrics:
+            st.divider()
+            st.subheader("Chemical Property Distributions Post-Swap")
+            prop_cols = st.columns(len(extra_metrics))
+            
+            for i, col_name in enumerate(extra_metrics):
+                with prop_cols[i]:
+                    title = col_name.replace("_", " ").title()
+                    fig_prop = px.box(cross_dock_df, x='new_ion', y=col_name, color='new_ion',
+                                      points="all", title=f"{title} by Target Ion")
+                    st.plotly_chart(fig_prop, width='stretch')
+            
+        st.divider()
+        st.subheader("Cross-Docking Matrix (Average Deviation)")
+        
+        # Create a pivot table for the heatmap
+        pivot_df = cross_dock_df.pivot_table(values='structural_deviation_rmsd', index='original_ion', columns='new_ion', aggfunc='mean')
+        
+        fig_cd_heat = px.imshow(pivot_df, text_auto=".2f", aspect="auto", 
+                              labels=dict(x="new_ion", y="original_ion", color="Mean RMSD"),
+                              title="Average Structural Deviation (RMSD) Heatmap",
+                              color_continuous_scale="Viridis_r")
+        st.plotly_chart(fig_cd_heat, width='stretch')
 
+        st.divider()
+        st.subheader("Cross-Docking Explorer")
+        st.dataframe(cross_dock_df, use_container_width=True)
+        
+    else:
+        st.info("No cross-docking data available for the selected target ions, or the cross-docking workflow has not been run.")
