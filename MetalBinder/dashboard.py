@@ -207,7 +207,8 @@ def get_eval_plot(df, selected_shape, selected_color, rad_range_vals, rmsd_range
     color_options = {
         "Metal Ion": "metal_ion",
         "Binding Probability": "binding_probability",
-        "pLDDT": "plddt"
+        "pLDDT": "plddt",
+        "Loop Index": "loop_index"
     }
     
     # Filter for existing columns
@@ -226,9 +227,14 @@ def get_eval_plot(df, selected_shape, selected_color, rad_range_vals, rmsd_range
         symbol=symbol_col,
         hover_data=['design_id', 'loop_index', 'loop_sequence', 'binding_probability', 'coordination_number', 'net_charge'] if 'coordination_number' in df.columns else ['design_id', 'loop_index', 'loop_sequence', 'binding_probability'],
         color_continuous_scale="Viridis" if color_col != "metal_ion" else None,
+        size_max=8, # Reduced from default 20
         labels={'loop_rmsd': 'Individual Loop RMSD (Å)', 'binding_radius_A': 'Binding Radius (Å)', 'binding_probability': 'Probability'},
         title="Candidate Evaluation (Thresholds: RMSD < 1.5, Radius 2.3-2.6)"
     )
+    
+    # If size is NOT mapped to pLDDT, set a small fixed size
+    if 'plddt' not in df.columns:
+        fig.update_traces(marker=dict(size=6))
     
     # Force axis range to match filters
     if rad_range_vals:
@@ -409,8 +415,20 @@ possible_ions_df = df[df['metal_category'].isin(category_choice)]
 possible_ions = possible_ions_df['metal_ion'].unique()
 selected_ions = st.sidebar.multiselect("Select Target Ions", options=sorted(possible_ions), default=sorted(possible_ions))
 
+# EF Loop selection
+st.sidebar.subheader("Binding Site Selection")
+available_loops = sorted(df['loop_index'].unique().tolist()) if 'loop_index' in df.columns else [1, 2, 3, 4]
+selected_loops = st.sidebar.multiselect("Select EF Loops", options=available_loops, default=available_loops)
+
 # Filter dataframe
 filtered_df = df.copy()
+
+if selected_ions:
+    filtered_df = filtered_df[filtered_df['metal_ion'].isin(selected_ions)]
+filtered_df = filtered_df[filtered_df['metal_category'].isin(category_choice)]
+
+if 'loop_index' in filtered_df.columns:
+    filtered_df = filtered_df[filtered_df['loop_index'].isin(selected_loops)]
 
 # Metric filters (checking if columns exist)
 st.sidebar.subheader("Quality Metrics")
@@ -513,7 +531,7 @@ with tab1:
         shape_options = {k: v for k, v in shape_options.items() if v in filtered_df.columns}
         selected_shape = st.selectbox("Point Shape Mapping", options=list(shape_options.keys()))
         
-        selected_color = st.selectbox("Color By", options=["Metal Ion", "Binding Probability", "pLDDT"])
+        selected_color = st.selectbox("Color By", options=["Metal Ion", "Binding Probability", "pLDDT", "Loop Index"])
         
     with col_eval_2:
         fig_eval = get_eval_plot(filtered_df, selected_shape, selected_color, rad_range, rmsd_range)
