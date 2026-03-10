@@ -140,3 +140,9 @@ Ensure your sequence isn't "promiscuous."
 Metal binding is often a competition with solvent (water).
 - **The Strategy**: Look for designs with a **Coordination Number (CN) of 7 or 8** and **Bidentate Count of 2+**.
 - **Goal**: The more "double-grips" (Bidentate) and coordinating atoms (CN) a design has, the more it "locks" the metal in place, making it less likely to be displaced by water or other competing ions in a laboratory setting.
+
+
+## Converting to PDF
+```bash
+pandoc documentation_dashboard.md -o using_dashboard.pdf
+```
