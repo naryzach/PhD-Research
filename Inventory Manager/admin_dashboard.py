@@ -1,6 +1,7 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
+from friday_mailer import send_friday_digest
 
 # --- Authentication Setup ---
 def check_password():
@@ -56,6 +57,28 @@ choice = st.sidebar.radio("Admin Tools", menu)
 # --- 0. Manage Order Status ---
 if choice == "🔄 Manage Order Status":
     st.header("Order Pipeline Manager")
+    
+    # Action for Manager: Generate Digest
+    if st.button("📨 Send Weekly Email Digest (Beta)"):
+        with st.spinner("Preparing digest..."):
+            success, message, body = send_friday_digest(include_all_pending=False)
+            if success:
+                st.success(message)
+            else:
+                st.error(message)
+                if body:
+                    st.warning("⚠️ **Network Restriction Detected**: The server blocked the direct email. You can copy the digest below and send it manually.")
+                    
+                    # Create a mailto link
+                    # Note: We hardcode the manager email or pull from secrets if available
+                    manager_email = st.secrets["email"]["manager_email"]
+                    subject = "🧪 Weekly Lab Orders Digest"
+                    mailto_link = f"mailto:{manager_email}?subject={subject}&body={body.replace('\n', '%0D%0A')}"
+                    st.link_button("✉️ Open in Mail Client", mailto_link)
+                    
+                    with st.expander("📋 View Digest Content to Copy"):
+                        st.code(body, language="text")
+    
     st.info("Update the status of pending lab requests.")
     
     conn = get_conn()

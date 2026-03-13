@@ -4,7 +4,6 @@ import pandas as pd
 from datetime import datetime, timedelta
 import smtplib
 from email.message import EmailMessage
-from friday_mailer import send_friday_digest
 
 # --- Smart Defaults Configuration ---
 CATEGORY_DEFAULTS = {
@@ -351,15 +350,6 @@ elif choice == "Request a Purchase":
 elif choice == "Process Orders":
     st.header("Order Management Pipeline")
     
-    # Action for Manager: Generate Digest
-    if st.button("Send Weekly Email Digest"):
-        with st.spinner("Sending email..."):
-            success, message = send_friday_digest(include_all_pending=False)
-            if success:
-                st.success(message)
-            else:
-                st.warning(message)
-
     st.subheader("Pending Orders")
     df_pending = db.get_query_df("SELECT * FROM purchase_requests WHERE status NOT IN ('Received', 'Cancelled', 'LOST')")
     

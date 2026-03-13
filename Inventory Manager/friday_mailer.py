@@ -65,7 +65,7 @@ def send_friday_digest(include_all_pending=False):
     if df_orders.empty and not predictive_alerts:
         msg = "No new orders and no predictive alerts this week. Exiting."
         print(msg)
-        return False, msg
+        return False, msg, ""
         
     body = "Here is your weekly lab digest:\n\n"
     
@@ -82,13 +82,21 @@ def send_friday_digest(include_all_pending=False):
     if df_orders.empty:
         body += "No new purchase requests this week.\n"
     else:
+        total_cost = 0.0
         for _, row in df_orders.iterrows():
+            item_price = float(row['price']) if pd.notna(row['price']) else 0.0
+            total_cost += item_price
+            
             body += f"📦 {row['item_name']}\n"
             body += f"   Requested by: {row['requester_name']}\n"
             body += f"   Specs: {row['specs']}\n"
             body += f"   Catalog #: {row['catalog_number']} | Seller: {row['seller']}\n"
+            body += f"   Price: ${item_price:,.2f}\n"
             body += f"   Link: {row['link']}\n"
             body += "-" * 40 + "\n"
+        
+        body += f"\n💰 TOTAL ESTIMATED COST: ${total_cost:,.2f}\n"
+        body += "-" * 40 + "\n"
             
     # --- PART 4: Load Credentials & Send ---
     try:
@@ -112,7 +120,7 @@ def send_friday_digest(include_all_pending=False):
     except Exception as e:
         msg = f"Error loading credentials: {e}"
         print(msg)
-        return False, msg
+        return False, msg, body
 
     try:
         msg = EmailMessage()
@@ -129,12 +137,13 @@ def send_friday_digest(include_all_pending=False):
         server.quit()
         success_msg = "Success: Weekly digest sent!"
         print(success_msg)
-        return True, success_msg
+        return True, success_msg, body
         
     except Exception as e:
         fail_msg = f"Failed to send email: {e}"
         print(fail_msg)
-        return False, fail_msg
+        return False, fail_msg, body
+
 
 
 if __name__ == "__main__":
