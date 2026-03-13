@@ -2,6 +2,41 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 
+# --- Authentication Setup ---
+def check_password():
+    """Returns True if the user has entered the correct password."""
+    
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if st.session_state["admin_pwd"] == st.secrets["admin"]["password"]:
+            st.session_state["password_correct"] = True
+            # Delete the password from session state for security
+            del st.session_state["admin_pwd"]  
+        else:
+            st.session_state["password_correct"] = False
+
+    # If they are already authenticated, let them through
+    if st.session_state.get("password_correct", False):
+        return True
+
+    # Otherwise, show the password input box
+    st.text_input(
+        "🔒 Enter Admin Password to Access Database", 
+        type="password", 
+        on_change=password_entered, 
+        key="admin_pwd"
+    )
+    
+    if "password_correct" in st.session_state and not st.session_state["password_correct"]:
+        st.error("Incorrect password.")
+        
+    return False
+
+# --- Security Gate ---
+# If the password is wrong or not entered yet, stop the script entirely
+if not check_password():
+    st.stop()
+
 # --- Setup & Configuration ---
 st.set_page_config(page_title="Lab Admin DB", layout="wide", page_icon="⚙️")
 st.title("⚙️ Lab Database Administration")
@@ -15,8 +50,51 @@ def get_conn():
 # The core tables in your database
 TABLES = ["inventory", "purchase_requests", "usage_log"]
 
-menu = ["✏️ Edit Tables Directly", "📥 Export Data (CSV)", "💻 Advanced: Raw SQL"]
+menu = ["🔄 Manage Order Status", "✏️ Edit Tables Directly", "📥 Export Data (CSV)", "💻 Advanced: Raw SQL"]
 choice = st.sidebar.radio("Admin Tools", menu)
+
+# --- 0. Manage Order Status ---
+if choice == "🔄 Manage Order Status":
+    st.header("Order Pipeline Manager")
+    st.info("Update the status of pending lab requests.")
+    
+    conn = get_conn()
+    
+    # Fetch all active orders
+    df_active = pd.read_sql_query("SELECT request_id, item_name, requester_name, seller, status, request_date FROM purchase_requests WHERE status NOT IN ('Received', 'Cancelled', 'LOST')", conn)
+    
+    if df_active.empty:
+        st.success("There are no active orders to manage!")
+    else:
+        st.dataframe(df_active, hide_index=True, width='stretch')
+        st.markdown("---")
+        
+        # Select an order to update
+        order_list = df_active.apply(lambda x: f"[{x['request_id']}] {x['item_name']} (Current: {x['status']})", axis=1).tolist()
+        selected_order = st.selectbox("Select Order to Update", order_list)
+        
+        # The full list of your lab's specific statuses
+        status_options = [
+            "Need to order", "Ordered", "Pending", "Waiting for Shipment", 
+            "Sent to Dr. MRS", "Delayed", "Back order", "Needs to be fixed!", 
+            "Misc.", "Do not order yet", "Cancelled", "LOST", "Received"
+        ]
+        
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            new_status = st.selectbox("New Status", status_options)
+        with col2:
+            st.write("") # Spacing
+            st.write("")
+            if st.button("Update Status", width='stretch'):
+                req_id = int(selected_order.split("]")[0].replace("[", ""))
+                cursor = conn.cursor()
+                cursor.execute("UPDATE purchase_requests SET status = ? WHERE request_id = ?", (new_status, req_id))
+                conn.commit()
+                st.success(f"Updated order #{req_id} to '{new_status}'!")
+                st.rerun()
+                
+    conn.close()
 
 # --- 1. Direct Table Editor ---
 if choice == "✏️ Edit Tables Directly":
@@ -34,7 +112,7 @@ if choice == "✏️ Edit Tables Directly":
     st.caption("You can edit cells directly, click column headers to sort, or use the UI to add/delete rows.")
     
     # st.data_editor allows full CRUD (Create, Read, Update, Delete) right in the browser
-    edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True, key=f"editor_{selected_table}")
+    edited_df = st.data_editor(df, num_rows="dynamic", width='stretch', key=f"editor_{selected_table}")
     
     if st.button("💾 Save Changes to Database"):
         try:
@@ -72,7 +150,7 @@ elif choice == "📥 Export Data (CSV)":
                 data=csv_data,
                 file_name=f"{table}_backup.csv",
                 mime='text/csv',
-                use_container_width=True
+                width='stretch'
             )
             st.caption(f"Rows: {len(df_export)}")
             
@@ -92,7 +170,7 @@ elif choice == "💻 Advanced: Raw SQL":
                 # If it's a read query, show the results
                 if query.strip().upper().startswith("SELECT"):
                     df_res = pd.read_sql_query(query, conn)
-                    st.dataframe(df_res, use_container_width=True)
+                    st.dataframe(df_res, width='stretch')
                     st.success(f"Query returned {len(df_res)} rows.")
                 # If it's a write query, execute and commit
                 else:

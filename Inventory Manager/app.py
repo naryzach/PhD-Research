@@ -5,6 +5,20 @@ from datetime import datetime, timedelta
 import smtplib
 from email.message import EmailMessage
 
+# --- Smart Defaults Configuration ---
+CATEGORY_DEFAULTS = {
+    "Buffer": {"unit": "mL", "threshold": 100.0},
+    "Chemical": {"unit": "g", "threshold": 50.0},
+    "Consumables": {"unit": "boxes", "threshold": 2.0},
+    "Equipment": {"unit": "units", "threshold": 0.0},
+    "Glassware": {"unit": "units", "threshold": 5.0},
+    "Kits": {"unit": "kits", "threshold": 1.0},
+    "Media": {"unit": "mL", "threshold": 500.0},
+    "Plasmid": {"unit": "uL", "threshold": 5.0},
+    "Protein": {"unit": "mg", "threshold": 1.0}, # e.g., for custom constructs like Lanmodulin-cd-
+    "Other": {"unit": "units", "threshold": 5.0}
+}
+
 # --- Database Setup & Management ---
 class AdvancedLabInventory:
     def __init__(self, db_name="lab_inventory.db"):
@@ -43,7 +57,7 @@ class AdvancedLabInventory:
                 seller TEXT,
                 link TEXT,
                 price REAL, -- NEW COLUMN
-                status TEXT DEFAULT 'Pending',
+                status TEXT DEFAULT 'Need to order',
                 request_date TIMESTAMP
             );
 
@@ -250,12 +264,12 @@ if choice == "Inventory Dashboard":
             tabs = st.tabs(["All Items"] + categories)
             
             with tabs[0]:
-                st.dataframe(df_display.style.apply(highlight_low_stock, axis=1), use_container_width=True, hide_index=True)
+                st.dataframe(df_display.style.apply(highlight_low_stock, axis=1), width='stretch', hide_index=True)
                 
             for i, cat in enumerate(categories):
                 with tabs[i+1]:
                     cat_df = df_display[df_display['Category'] == cat]
-                    st.dataframe(cat_df.style.apply(highlight_low_stock, axis=1), use_container_width=True, hide_index=True)
+                    st.dataframe(cat_df.style.apply(highlight_low_stock, axis=1), width='stretch', hide_index=True)
 
 elif choice == "Request a Purchase":
     st.header("Submit a Purchase Request")
@@ -290,7 +304,7 @@ elif choice == "Request a Purchase":
                     )
                     # Fill NaN catalog numbers with empty strings so it looks clean
                     display_df = display_df.fillna("") 
-                    st.dataframe(display_df, hide_index=True, use_container_width=True)
+                    st.dataframe(display_df, hide_index=True, width='stretch')
                     
                     st.markdown("#### 🔄 Need to top up an existing item?")
                     # Create a dropdown mapping formatted display strings to the raw row data
@@ -314,7 +328,7 @@ elif choice == "Request a Purchase":
                     clean_req = req_match[['item_name', 'catalog_number', 'requester_name', 'status']].rename(
                         columns={"item_name": "Item Name", "catalog_number": "Cat #", "requester_name": "Requested By", "status": "Status"}
                     ).fillna("")
-                    st.dataframe(clean_req, hide_index=True, use_container_width=True)
+                    st.dataframe(clean_req, hide_index=True, width='stretch')
                 
                 st.markdown("#### 🆕 Ordering something completely new?")
             else:
@@ -384,10 +398,10 @@ elif choice == "Process Orders":
                 st.warning(message)
 
     st.subheader("Pending Orders")
-    df_pending = db.get_query_df("SELECT * FROM purchase_requests WHERE status != 'Completed'")
+    df_pending = db.get_query_df("SELECT * FROM purchase_requests WHERE status NOT IN ('Received', 'Cancelled', 'LOST')")
     
     if not df_pending.empty:
-        st.dataframe(df_pending, use_container_width=True, hide_index=True)
+        st.dataframe(df_pending, width='stretch', hide_index=True)
         
         st.markdown("---")
         st.subheader("Mark Order as Received & Add to Inventory")
@@ -400,21 +414,34 @@ elif choice == "Process Orders":
             req_id = int(selected_order_str.split("]")[0].replace("[", ""))
             order_data = df_pending[df_pending['request_id'] == req_id].iloc[0]
             
+            st.write(f"### Integrating: {order_data['item_name']}")
+            
+            # 1. Dynamic Selectors (Outside the form for instant updates)
+            col_a, col_b = st.columns(2)
+            with col_a:
+                # Default to 'Other' if the category isn't known
+                category = st.selectbox("Assign Category", list(CATEGORY_DEFAULTS.keys()))
+            with col_b:
+                source = st.selectbox("Source Type", ["Purchased", "Made in Lab"], index=0)
+
+            # Look up the smart defaults based on the selected category
+            default_unit = CATEGORY_DEFAULTS[category]["unit"]
+            default_threshold = CATEGORY_DEFAULTS[category]["threshold"]
+            
+            # 2. The Form (Uses the variables pulled from above)
             with st.form("receive_order_form"):
-                st.write(f"**Integrating:** {order_data['item_name']}")
                 c1, c2, c3 = st.columns(3)
                 with c1:
-                    qty = st.number_input("Quantity Received", min_value=0.01)
-                    unit = st.text_input("Unit (e.g., g, mL, boxes)")
-                    # Bring in the requested price, but allow editing for the final total
-                    final_price = st.number_input("Final Invoice Price ($)", value=float(order_data.get('price', 0.0)), step=0.01)
+                    qty = st.number_input("Quantity Received", min_value=0.01, value=1.0)
+                    # Pre-fills with the smart default, but allows manual overriding
+                    unit = st.text_input("Unit", value=default_unit)
                 with c2:
-                    category = st.selectbox("Category", ["Chemical", "Media", "Buffer", "Plasmid", "Glassware", "Other"])
-                    source = st.selectbox("Source Type", ["Purchased", "Made in Lab"], index=0)
+                    final_price = st.number_input("Final Invoice Price ($)", value=float(order_data.get('price', 0.0)), step=0.01)
+                    # Pre-fills the threshold based on category
+                    threshold = st.number_input("Reorder Threshold", min_value=0.0, value=default_threshold)
                 with c3:
                     location = st.text_input("Storage Location (e.g., -80C Box 4)")
                     owner = st.text_input("Owner (Optional)")
-                    threshold = st.number_input("Reorder Threshold", min_value=0.0)
                 
                 confirm = st.form_submit_button("Add to Inventory & Close Order")
                 
@@ -424,11 +451,14 @@ elif choice == "Process Orders":
                         "quantity": qty, "unit": unit, "reorder_threshold": threshold,
                         "location": location, "owner": owner, "catalog_number": order_data['catalog_number'],
                         "seller": order_data['seller'], "link": order_data['link'], "specs": order_data['specs'],
-                        "price": final_price, # Save the final price to inventory
-                        "date_added": datetime.now()
+                        "price": final_price, "date_added": datetime.now()
                     })
-                    db.complete_order(req_id)
-                    st.success("Item added to inventory and order closed! Refresh page to update list.")
+                    # Specifically set the status to "Received"
+                    db.cursor.execute("UPDATE purchase_requests SET status = 'Received' WHERE request_id = ?", (req_id,))
+                    db.conn.commit()
+                    
+                    st.success(f"{order_data['item_name']} successfully added to inventory!")
+                    st.rerun()
     else:
         st.info("No pending orders.")
 
@@ -535,12 +565,12 @@ elif choice == "Metrics & History":
         with c1:
             st.markdown("**Most Frequently Used Items**")
             item_usage = df_usage.groupby("name")['times_used'].sum().reset_index().sort_values("times_used", ascending=False)
-            st.dataframe(item_usage.rename(columns={"name": "Item Name", "times_used": "Total Log Entries"}), hide_index=True, use_container_width=True)
+            st.dataframe(item_usage.rename(columns={"name": "Item Name", "times_used": "Total Log Entries"}), hide_index=True, width='stretch')
             
         with c2:
             st.markdown("**Most Active Lab Members**")
             user_usage = df_usage.groupby("user_name")['times_used'].sum().reset_index().sort_values("times_used", ascending=False)
-            st.dataframe(user_usage.rename(columns={"user_name": "Lab Member", "times_used": "Items Logged"}), hide_index=True, use_container_width=True)
+            st.dataframe(user_usage.rename(columns={"user_name": "Lab Member", "times_used": "Items Logged"}), hide_index=True, width='stretch')
             
         # Optional: Show a raw, chronological history of the last 20 actions
         st.markdown("**Recent Activity Log**")
@@ -555,7 +585,7 @@ elif choice == "Metrics & History":
         df_recent['date_used'] = pd.to_datetime(df_recent['date_used']).dt.strftime('%Y-%m-%d %H:%M')
         st.dataframe(df_recent.rename(columns={
             "name": "Item", "user_name": "User", "amount_used": "Amount", "unit": "Unit", "date_used": "Date & Time"
-        }), hide_index=True, use_container_width=True)
+        }), hide_index=True, width='stretch')
         
     else:
         st.info("No usage logs have been recorded yet. Once lab members start logging materials, usage metrics will populate here.")
