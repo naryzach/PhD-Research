@@ -21,4 +21,6 @@ source ~/miniconda3/etc/profile.d/conda.sh
 conda activate foundry
 export DISABLE_CUEQUIVARIANCE=1
 python run_pipeline.py --ion ZN CA CO NI CU FE SC Y LA CE PR ND PM SM EU GD TB DY HO ER TM YB LU MN --num-configs 40 --batch-size 25 --out-dir ../Local/lanm_output_tmp
+python cross_docking_test.py --catalog ../Local/lanm_output_tmp/global_sequence_catalog.csv --output-dir ../Local/lanm_output_tmp/cross_docking --top-k 10
+python analyze_results.py
 conda deactivate
