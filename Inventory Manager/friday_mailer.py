@@ -5,27 +5,36 @@ import smtplib
 from email.message import EmailMessage
 import toml
 
-def send_friday_digest():
+def send_friday_digest(include_all_pending=False):
     print(f"[{datetime.now()}] Running weekly lab order digest with predictive insights...")
     
     # 1. Connect to the existing database
-    conn = sqlite3.connect("lab_inventory.db")
-    
-    # --- PART 1: Pending Orders ---
-    last_week = datetime.now() - timedelta(days=7)
-    pending_query = "SELECT * FROM purchase_requests WHERE status IN ('Pending', 'Ordered') AND request_date >= ?"
-    df_orders = pd.read_sql_query(pending_query, conn, params=(last_week,))
-    
-    # --- PART 2: Predictive Reordering (Burn Rate Analysis) ---
-    thirty_days_ago = datetime.now() - timedelta(days=30)
-    usage_query = """
-        SELECT u.item_id, i.name, i.quantity, i.unit, i.reorder_threshold, SUM(u.amount_used) as total_used_30d
-        FROM usage_log u
-        JOIN inventory i ON u.item_id = i.item_id
-        WHERE u.date_used >= ? AND i.is_depleted = 0
-        GROUP BY u.item_id
-    """
-    df_usage = pd.read_sql_query(usage_query, conn, params=(thirty_days_ago,))
+    with sqlite3.connect("lab_inventory.db") as conn:
+        # --- PART 1: Pending Orders ---
+        last_week = datetime.now() - timedelta(days=7)
+        
+        # We exclude Received, Cancelled, LOST, and Completed to match "Process Orders" logic
+        excluded_statuses = "('Received', 'Cancelled', 'LOST', 'Completed')"
+        
+        if include_all_pending:
+            # Get ALL pending/ordered requests regardless of date
+            pending_query = f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses}"
+            df_orders = pd.read_sql_query(pending_query, conn)
+        else:
+            # Standard weekly filter, but still inclusive of all active statuses
+            pending_query = f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses} AND request_date >= ?"
+            df_orders = pd.read_sql_query(pending_query, conn, params=(last_week,))
+        
+        # --- PART 2: Predictive Reordering (Burn Rate Analysis) ---
+        thirty_days_ago = datetime.now() - timedelta(days=30)
+        usage_query = """
+            SELECT u.item_id, i.name, i.quantity, i.unit, i.reorder_threshold, SUM(u.amount_used) as total_used_30d
+            FROM usage_log u
+            JOIN inventory i ON u.item_id = i.item_id
+            WHERE u.date_used >= ? AND i.is_depleted = 0
+            GROUP BY u.item_id
+        """
+        df_usage = pd.read_sql_query(usage_query, conn, params=(thirty_days_ago,))
     
     predictive_alerts = []
     if not df_usage.empty:
@@ -51,13 +60,12 @@ def send_friday_digest():
                 f"   Burning ~{row['daily_burn']:.2f} {row['unit']}/day. "
                 f"Estimated to run out in {int(row['days_remaining'])} days."
             )
-            
-    conn.close()
     
     # --- PART 3: Format the Email Body ---
     if df_orders.empty and not predictive_alerts:
-        print("No new orders and no predictive alerts this week. Exiting.")
-        return
+        msg = "No new orders and no predictive alerts this week. Exiting."
+        print(msg)
+        return False, msg
         
     body = "Here is your weekly lab digest:\n\n"
     
@@ -84,34 +92,50 @@ def send_friday_digest():
             
     # --- PART 4: Load Credentials & Send ---
     try:
-        secrets = toml.load(".streamlit/secrets.toml")
-        sender = secrets["email"]["sender"]
-        password = secrets["email"]["password"]
-        manager = secrets["email"]["manager_email"]
-        server_url = secrets["email"]["server"]
-        port = secrets["email"]["port"]
+        # Try Loading from Streamlit secrets first (if running within app)
+        import streamlit as st
+        try:
+            email_secrets = st.secrets["email"]
+            sender = email_secrets["sender"]
+            password = email_secrets["password"]
+            manager = email_secrets["manager_email"]
+            server_url = email_secrets["server"]
+            port = email_secrets["port"]
+        except (KeyError, AttributeError, RuntimeError):
+            # Fallback to local toml if st.secrets is unavailable
+            secrets = toml.load(".streamlit/secrets.toml")
+            sender = secrets["email"]["sender"]
+            password = secrets["email"]["password"]
+            manager = secrets["email"]["manager_email"]
+            server_url = secrets["email"]["server"]
+            port = secrets["email"]["port"]
     except Exception as e:
-        print(f"Error loading credentials: {e}")
-        return
+        msg = f"Error loading credentials: {e}"
+        print(msg)
+        return False, msg
 
     try:
-        # Note: If manager is a comma-separated string, smtplib handles it fine, 
-        # but EmailMessage['To'] is safer with a string joined by commas.
         msg = EmailMessage()
         msg.set_content(body)
         msg['Subject'] = '🧪 Friday Lab Orders & Inventory Digest'
         msg['From'] = sender
         msg['To'] = manager 
 
-        server = smtplib.SMTP(server_url, port)
+        # Using a 10s timeout to prevent hanging
+        server = smtplib.SMTP(server_url, port, timeout=10)
         server.starttls()
         server.login(sender, password)
         server.send_message(msg)
         server.quit()
-        print("Success: Weekly digest with predictive analytics sent!")
+        success_msg = "Success: Weekly digest sent!"
+        print(success_msg)
+        return True, success_msg
         
     except Exception as e:
-        print(f"Failed to send email: {e}")
+        fail_msg = f"Failed to send email: {e}"
+        print(fail_msg)
+        return False, fail_msg
+
 
 if __name__ == "__main__":
     send_friday_digest()

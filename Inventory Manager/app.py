@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import smtplib
 from email.message import EmailMessage
+from friday_mailer import send_friday_digest
 
 # --- Smart Defaults Configuration ---
 CATEGORY_DEFAULTS = {
@@ -155,45 +156,7 @@ def get_db():
 db = get_db()
 
 # --- Email Digest Function ---
-def send_weekly_digest():
-    """Drafts and sends an email of all pending/ordered requests from the last 7 days."""
-    last_week = datetime.now() - timedelta(days=7)
-    df_orders = db.get_query_df("SELECT * FROM purchase_requests WHERE status IN ('Pending', 'Ordered') AND request_date >= ?", (last_week,))
-    
-    if df_orders.empty:
-        return False, "No new orders this week to send."
-        
-    body = "Weekly Lab Order Digest:\n\n"
-    for _, row in df_orders.iterrows():
-        body += f"- {row['item_name']} (Requested by: {row['requester_name']})\n"
-        body += f"  Specs: {row['specs']} | Cat#: {row['catalog_number']} | Seller: {row['seller']}\n"
-        body += f"  Link: {row['link']}\n\n"
-        
-    try:
-        # Pull credentials from .streamlit/secrets.toml
-        sender = st.secrets["email"]["sender"]
-        password = st.secrets["email"]["password"]
-        manager = st.secrets["email"]["manager_email"]
-        server_url = st.secrets["email"]["server"]
-        port = st.secrets["email"]["port"]
-
-        msg = EmailMessage()
-        msg.set_content(body)
-        msg['Subject'] = '🧪 Weekly Lab Orders Digest'
-        msg['From'] = sender
-        msg['To'] = manager
-
-        # Connect to server and send
-        server = smtplib.SMTP(server_url, port)
-        server.starttls() # Upgrades connection to secure
-        server.login(sender, password)
-        server.send_message(msg)
-        server.quit()
-        
-        return True, "Email sent successfully to the manager!"
-        
-    except Exception as e:
-        return False, f"Failed to send email: {e}"
+# Remote function imported from friday_mailer
 
 # --- Helper function for UI styling ---
 def highlight_low_stock(row):
@@ -290,7 +253,7 @@ elif choice == "Request a Purchase":
         st.info("Search by item name or catalog number to see if we have it or if it's on order.")
         
         # Updated placeholder to reflect the new capabilities
-        search_input = st.text_input("Search inventory...", placeholder="e.g., Lanmodulin-cd-, pET28a, or Cat# T1234")
+        search_input = st.text_input("Search inventory...", placeholder="e.g., Tris-HCl, pET28a, or Cat# T1234")
         
         if search_input:
             inv_match, req_match = db.search_similar_items(search_input)
@@ -391,7 +354,7 @@ elif choice == "Process Orders":
     # Action for Manager: Generate Digest
     if st.button("Send Weekly Email Digest"):
         with st.spinner("Sending email..."):
-            success, message = send_weekly_digest()
+            success, message = send_friday_digest(include_all_pending=False)
             if success:
                 st.success(message)
             else:
