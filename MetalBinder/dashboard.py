@@ -81,7 +81,7 @@ def get_cif_data(cif_path):
 
 @st.cache_data
 def load_data():
-    base_path = "Local/lanm_output"
+    base_path = "../Local/lanm_output"
     catalog_path = os.path.join(base_path, "global_sequence_catalog.csv")
     full_seq_path = os.path.join(base_path, "full_sequences_log.csv")
     
