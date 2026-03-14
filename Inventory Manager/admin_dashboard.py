@@ -1,6 +1,7 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
+from db_manager import AdvancedLabInventory
 from friday_mailer import send_friday_digest
 
 # --- Authentication Setup ---
@@ -44,9 +45,12 @@ st.title("⚙️ Lab Database Administration")
 
 DB_NAME = "lab_inventory.db"
 
-def get_conn():
-    """Creates a fresh connection to the database."""
-    return sqlite3.connect(DB_NAME, check_same_thread=False)
+# --- Shared Database Connection ---
+@st.cache_resource
+def get_db():
+    return AdvancedLabInventory()
+
+db = get_db()
 
 # The core tables in your database
 TABLES = ["inventory", "purchase_requests", "usage_log"]
@@ -81,10 +85,8 @@ if choice == "🔄 Manage Order Status":
     
     st.info("Update the status of pending lab requests.")
     
-    conn = get_conn()
-    
     # Fetch all active orders
-    df_active = pd.read_sql_query("SELECT request_id, item_name, requester_name, seller, status, request_date FROM purchase_requests WHERE status NOT IN ('Received', 'Cancelled', 'LOST')", conn)
+    df_active = db.get_query_df("SELECT request_id, item_name, requester_name, seller, status, request_date FROM purchase_requests WHERE status NOT IN ('Received', 'Cancelled', 'LOST')")
     
     if df_active.empty:
         st.success("There are no active orders to manage!")
@@ -111,13 +113,12 @@ if choice == "🔄 Manage Order Status":
             st.write("")
             if st.button("Update Status", width='stretch'):
                 req_id = int(selected_order.split("]")[0].replace("[", ""))
-                cursor = conn.cursor()
-                cursor.execute("UPDATE purchase_requests SET status = ? WHERE request_id = ?", (new_status, req_id))
-                conn.commit()
+                db.cursor.execute("UPDATE purchase_requests SET status = ? WHERE request_id = ?", (new_status, req_id))
+                db.conn.commit()
                 st.success(f"Updated order #{req_id} to '{new_status}'!")
                 st.rerun()
                 
-    conn.close()
+    # conn.close()
 
 # --- 1. Direct Table Editor ---
 if choice == "✏️ Edit Tables Directly":
@@ -126,9 +127,8 @@ if choice == "✏️ Edit Tables Directly":
     
     selected_table = st.selectbox("Select Table to Edit", TABLES)
     
-    conn = get_conn()
     # Load the current data
-    df = pd.read_sql_query(f"SELECT * FROM {selected_table}", conn)
+    df = db.get_query_df(f"SELECT * FROM {selected_table}")
     
     # Display the interactive editor
     st.markdown(f"### Editing: `{selected_table}`")
@@ -139,31 +139,26 @@ if choice == "✏️ Edit Tables Directly":
     
     if st.button("💾 Save Changes to Database"):
         try:
-            cursor = conn.cursor()
             # To preserve your schema (primary keys, defaults), we empty the table...
-            cursor.execute(f"DELETE FROM {selected_table}")
+            db.cursor.execute(f"DELETE FROM {selected_table}")
             # ...and re-insert the perfectly edited dataframe. 
             # Because edited_df still contains the original IDs, relationships remain intact.
-            edited_df.to_sql(selected_table, conn, if_exists='append', index=False)
-            conn.commit()
+            edited_df.to_sql(selected_table, db.conn, if_exists='append', index=False)
+            db.conn.commit()
             st.success(f"Successfully updated the '{selected_table}' table!")
         except Exception as e:
             st.error(f"Error saving data: {e}")
-        finally:
-            conn.close()
 
 # --- 2. Data Export ---
 elif choice == "📥 Export Data (CSV)":
     st.header("Download Database Backups")
     st.info("Click below to generate and download a CSV snapshot of any table.")
     
-    conn = get_conn()
-    
     # Create a nice layout for the download buttons
     cols = st.columns(len(TABLES))
     
     for i, table in enumerate(TABLES):
-        df_export = pd.read_sql_query(f"SELECT * FROM {table}", conn)
+        df_export = db.get_query_df(f"SELECT * FROM {table}")
         # Convert dataframe to CSV format in memory
         csv_data = df_export.to_csv(index=False).encode('utf-8')
         
@@ -177,7 +172,24 @@ elif choice == "📥 Export Data (CSV)":
             )
             st.caption(f"Rows: {len(df_export)}")
             
-    conn.close()
+    st.markdown("---")
+    st.subheader("🛠️ Full Database Backup")
+    st.info("Download the entire raw SQLite database file. This is useful for moving the data to another system or manual editing.")
+    
+    try:
+        with open(db.db_path, "rb") as f:
+            db_bytes = f.read()
+            st.download_button(
+                label="📁 Download lab_inventory.db",
+                data=db_bytes,
+                file_name="lab_inventory_backup.db",
+                mime="application/x-sqlite3",
+                width='stretch'
+            )
+    except Exception as e:
+        st.error(f"Error preparing database backup: {e}")
+
+    # conn.close()
 
 # --- 3. Raw SQL Execution ---
 elif choice == "💻 Advanced: Raw SQL":

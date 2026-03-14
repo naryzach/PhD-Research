@@ -4,37 +4,41 @@ from datetime import datetime, timedelta
 import smtplib
 from email.message import EmailMessage
 import toml
+from db_manager import AdvancedLabInventory
 
 def send_friday_digest(include_all_pending=False):
     print(f"[{datetime.now()}] Running weekly lab order digest with predictive insights...")
     
     # 1. Connect to the existing database
-    with sqlite3.connect("lab_inventory.db") as conn:
-        # --- PART 1: Pending Orders ---
-        last_week = datetime.now() - timedelta(days=7)
-        
-        # We exclude Received, Cancelled, LOST, and Completed to match "Process Orders" logic
-        excluded_statuses = "('Received', 'Cancelled', 'LOST', 'Completed')"
-        
-        if include_all_pending:
-            # Get ALL pending/ordered requests regardless of date
-            pending_query = f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses}"
-            df_orders = pd.read_sql_query(pending_query, conn)
-        else:
-            # Standard weekly filter, but still inclusive of all active statuses
-            pending_query = f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses} AND request_date >= ?"
-            df_orders = pd.read_sql_query(pending_query, conn, params=(last_week,))
-        
-        # --- PART 2: Predictive Reordering (Burn Rate Analysis) ---
-        thirty_days_ago = datetime.now() - timedelta(days=30)
-        usage_query = """
-            SELECT u.item_id, i.name, i.quantity, i.unit, i.reorder_threshold, SUM(u.amount_used) as total_used_30d
-            FROM usage_log u
-            JOIN inventory i ON u.item_id = i.item_id
-            WHERE u.date_used >= ? AND i.is_depleted = 0
-            GROUP BY u.item_id
-        """
-        df_usage = pd.read_sql_query(usage_query, conn, params=(thirty_days_ago,))
+    db = AdvancedLabInventory()
+    
+    # --- PART 1: Pending Orders ---
+    last_week = datetime.now() - timedelta(days=7)
+    
+    # We exclude Received, Cancelled, LOST, and Completed to match "Process Orders" logic
+    excluded_statuses = "('Received', 'Cancelled', 'LOST', 'Completed')"
+    
+    if include_all_pending:
+        # Get ALL pending/ordered requests regardless of date
+        pending_query = f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses}"
+        df_orders = db.get_query_df(pending_query)
+    else:
+        # Standard weekly filter, but still inclusive of all active statuses
+        pending_query = f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses} AND request_date >= ?"
+        df_orders = db.get_query_df(pending_query, params=(last_week,))
+    
+    # --- PART 2: Predictive Reordering (Burn Rate Analysis) ---
+    thirty_days_ago = datetime.now() - timedelta(days=30)
+    usage_query = """
+        SELECT u.item_id, i.name, i.quantity, i.unit, i.reorder_threshold, SUM(u.amount_used) as total_used_30d
+        FROM usage_log u
+        JOIN inventory i ON u.item_id = i.item_id
+        WHERE u.date_used >= ? AND i.is_depleted = 0
+        GROUP BY u.item_id
+    """
+    df_usage = db.get_query_df(usage_query, params=(thirty_days_ago,))
+    
+    db.close()
     
     predictive_alerts = []
     if not df_usage.empty:
