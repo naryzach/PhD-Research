@@ -1,6 +1,5 @@
-numpy==2.4.3
-pandas==3.0.1
-plotly==6.6.0
-py3dmol==2.5.4
-stmol==0.0.9
-streamlit==1.55.0
+numpy
+pandas
+plotly
+py3dmol
+stmol
