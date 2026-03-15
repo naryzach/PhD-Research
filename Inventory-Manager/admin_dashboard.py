@@ -69,8 +69,17 @@ db = get_db()
 # The core tables in your database
 TABLES = ["inventory", "purchase_requests", "usage_log"]
 
-menu = ["🔄 Manage Order Status", "✏️ Edit Tables Directly", "📥 Export Data (CSV)", "💻 Advanced: Raw SQL", "🛠️ Database Maintenance"]
+menu = ["🔄 Manage Order Status", "✏️ Edit Tables Directly", "📥 Export Data (CSV)", "💻 Advanced: Raw SQL", "🛠️ Database Maintenance", "🧹 Clear System Cache"]
 choice = st.sidebar.radio("Admin Tools", menu)
+
+if choice == "🧹 Clear System Cache":
+    st.header("System Maintenance")
+    st.write("If you are seeing errors about missing methods or old data after an update, clearing the cache will force the app to reload the latest code and database connection.")
+    if st.button("🧼 Clear Class & Connection Cache"):
+        st.cache_resource.clear()
+        st.success("Cache cleared! Reloading...")
+        time.sleep(1)
+        st.rerun()
 
 # --- 0. Manage Order Status ---
 if choice == "🔄 Manage Order Status":
@@ -286,14 +295,17 @@ elif choice == "🛠️ Database Maintenance":
         st.warning("⚠️ This action is irreversible. It's recommended to download a CSV backup first.")
         
         if st.button("🚀 Merge Duplicate Received Items"):
-            with st.spinner("Consolidating data..."):
-                success, message = db.merge_duplicate_inventory()
-                if success:
-                    st.success(message)
-                    time.sleep(2)
-                    st.rerun()
-                else:
-                    st.error(message)
+            if not hasattr(db, 'merge_duplicate_inventory'):
+                st.error("❌ Link broken: Your browser is currently running an older version of the database connection. Please use the '🧹 Clear System Cache' tool in the sidebar to refresh.")
+            else:
+                with st.spinner("Consolidating data..."):
+                    success, message = db.merge_duplicate_inventory()
+                    if success:
+                        st.success(message)
+                        time.sleep(2)
+                        st.rerun()
+                    else:
+                        st.error(message)
 
     with st.expander("Cancel Stale Purchase Requests", expanded=False):
         st.write("This tool will find all open purchase requests that are **NOT** marked as 'Ordered' or 'Need to order' and mark them as **Cancelled**.")
