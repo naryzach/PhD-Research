@@ -66,6 +66,8 @@ def migrate():
                     # Fix for PostgreSQL: Convert columns that should be boolean
                     if 'is_depleted' in df.columns:
                         df['is_depleted'] = df['is_depleted'].astype(bool)
+                    if 'archived' in df.columns:
+                        df['archived'] = df['archived'].astype(bool)
                     
                     # Write to Supabase
                     df.to_sql(table, db.conn, if_exists='append', index=False)
@@ -74,6 +76,12 @@ def migrate():
                 else:
                     st.write(f"ℹ️ Table `{table}` is empty, skipping.")
                 
+            except sqlite3.OperationalError as e:
+                if "no such table" in str(e):
+                    st.info(f"ℹ️ Table `{table}` does not exist in local SQLite, skipping.")
+                else:
+                    st.error(f"SQLite Error on `{table}`: {e}")
+                    errors += 1
             except Exception as e:
                 st.error(f"Error migrating `{table}`: {e}")
                 errors += 1

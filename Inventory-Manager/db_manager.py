@@ -141,13 +141,30 @@ class AdvancedLabInventory:
 
     def _convert_query(self, query, params):
         """Internal helper to convert SQLite '?' to Postgres ':p' named parameters."""
-        if params and isinstance(params, (list, tuple)) and "?" in query:
+        if params is None:
+            return query, None
+            
+        # Ensure params is a list/tuple for processing
+        if not isinstance(params, (list, tuple)):
+            if isinstance(params, dict):
+                return query, params
+            params = [params]
+            
+        if "?" in query:
             new_query = query
             param_dict = {}
             for i, p in enumerate(params):
+                # Standardize to native Python types if it's a single value from Pandas
+                val = p.item() if hasattr(p, 'item') and not isinstance(p, (list, tuple, dict)) else p
                 new_query = new_query.replace("?", f":p{i}", 1)
-                param_dict[f"p{i}"] = p
+                param_dict[f"p{i}"] = val
             return new_query, param_dict
+            
+        # For Postgres/SQLAlchemy, we always prefer a dict if params exist
+        if isinstance(params, (list, tuple)):
+            param_dict = {f"p{i}": (p.item() if hasattr(p, 'item') and not isinstance(p, (list, tuple, dict)) else p) for i, p in enumerate(params)}
+            return query, param_dict
+            
         return query, params
 
     @property
@@ -316,10 +333,10 @@ class AdvancedLabInventory:
             # Group and process
             for (name, cat), group in df.groupby(['name_norm', 'cat_norm']):
                 if len(group) > 1:
-                    # Keep the first ID, sum quantities
-                    primary_id = group.iloc[0]['item_id'].item()
-                    total_qty = group['quantity'].sum().item()
-                    other_ids = [oid.item() for oid in group.iloc[1:]['item_id']]
+                    # Keep the first ID, sum quantities - use robust casting
+                    primary_id = int(group.iloc[0]['item_id'])
+                    total_qty = float(group['quantity'].sum())
+                    other_ids = [int(oid) for oid in group.iloc[1:]['item_id']]
                     
                     # Update primary
                     self.execute("UPDATE inventory SET quantity = :qty WHERE item_id = :id" if self.is_postgres else "UPDATE inventory SET quantity = ? WHERE item_id = ?", 

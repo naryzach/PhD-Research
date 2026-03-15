@@ -1,8 +1,8 @@
-import sqlite3
 import pandas as pd
 from datetime import datetime
+import sqlite3
 
-def migrate_old_data(csv_filename="old_orders_f25.csv", db_name="lab_inventory.db"):
+def migrate_old_data(csv_filename="old_orders.csv", db_name="lab_inventory.db"):
     print(f"Loading data from {csv_filename}...")
     
     # 1. Load the CSV with the correct Windows encoding for special characters
@@ -25,6 +25,54 @@ def migrate_old_data(csv_filename="old_orders_f25.csv", db_name="lab_inventory.d
 
     conn = sqlite3.connect(db_name)
     cursor = conn.cursor()
+
+    # 3. Create tables if they don't exist (ensures standalone reliability)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS purchase_requests (
+            request_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            requester_name TEXT,
+            item_name TEXT,
+            specs TEXT,
+            catalog_number TEXT,
+            seller TEXT,
+            link TEXT,
+            price REAL,
+            status TEXT DEFAULT 'Need to order',
+            request_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS inventory (
+            item_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            category TEXT,
+            source_type TEXT,
+            quantity REAL,
+            unit TEXT,
+            reorder_threshold REAL,
+            location TEXT,
+            owner TEXT,
+            catalog_number TEXT,
+            seller TEXT,
+            link TEXT,
+            specs TEXT,
+            price REAL,
+            date_added TIMESTAMP,
+            is_depleted BOOLEAN DEFAULT 0,
+            last_depleted TIMESTAMP,
+            archived BOOLEAN DEFAULT 0
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS usage_log (
+            log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_id INTEGER,
+            user_name TEXT,
+            amount_used REAL,
+            date_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (item_id) REFERENCES inventory (item_id)
+        )
+    ''')
 
     print("Migrating records...")
     added_to_inv = 0
