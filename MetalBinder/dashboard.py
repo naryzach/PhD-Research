@@ -81,8 +81,14 @@ def get_cif_data(cif_path):
 
 @st.cache_data
 def load_data():
-    # Potential data directories
-    potential_paths = ["../Local/lanm_output", "lanm_data"]
+    # Get the directory where dashboard.py is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Potential data directories (constructed relative to this script)
+    potential_paths = [
+        os.path.join(script_dir, "..", "Local", "lanm_output"),
+        os.path.join(script_dir, "lanm_data")
+    ]
     base_path = None
     
     # Try to find a valid base path
