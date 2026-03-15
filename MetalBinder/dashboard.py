@@ -81,7 +81,20 @@ def get_cif_data(cif_path):
 
 @st.cache_data
 def load_data():
-    base_path = "../Local/lanm_output"
+    # Potential data directories
+    potential_paths = ["../Local/lanm_output", "lanm_data"]
+    base_path = None
+    
+    # Try to find a valid base path
+    for path in potential_paths:
+        if os.path.exists(os.path.join(path, "global_sequence_catalog.csv")):
+            base_path = path
+            break
+            
+    # Fallback to the first path if none found (to avoid base_path being None)
+    if base_path is None:
+        base_path = potential_paths[0]
+        
     catalog_path = os.path.join(base_path, "global_sequence_catalog.csv")
     full_seq_path = os.path.join(base_path, "full_sequences_log.csv")
     
@@ -89,7 +102,9 @@ def load_data():
     full_seq_df = pd.read_csv(full_seq_path) if os.path.exists(full_seq_path) else pd.DataFrame()
     
     # Check for ions presence even if not in catalog
-    ions = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d)) and d.isupper() and len(d) <= 2]
+    ions = []
+    if os.path.exists(base_path):
+        ions = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d)) and d.isupper() and len(d) <= 2]
     
     if not df.empty:
         # Update Metal Category
@@ -898,7 +913,7 @@ with tab9:
 
         st.divider()
         st.subheader("Cross-Docking Explorer")
-        st.dataframe(cross_dock_df, use_container_width=True)
+        st.dataframe(cross_dock_df, width='stretch')
         
     else:
         st.info("No cross-docking data available for the selected target ions, or the cross-docking workflow has not been run.")

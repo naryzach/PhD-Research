@@ -61,7 +61,8 @@ class AdvancedLabInventory:
                 price REAL,
                 date_added TIMESTAMP,
                 is_depleted BOOLEAN DEFAULT {bool_default},
-                last_depleted TIMESTAMP
+                last_depleted TIMESTAMP,
+                archived BOOLEAN DEFAULT {bool_default}
             )
             """,
             f"""
@@ -103,6 +104,7 @@ class AdvancedLabInventory:
         try:
             if self.is_postgres:
                 self.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS last_depleted TIMESTAMP")
+                self.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT FALSE")
                 
                 # Sync ALL sequences to prevent UniqueViolation
                 with self._conn.session as s:
@@ -123,6 +125,7 @@ class AdvancedLabInventory:
                     s.commit()
             else:
                 self.execute("ALTER TABLE inventory ADD COLUMN last_depleted TIMESTAMP")
+                self.execute("ALTER TABLE inventory ADD COLUMN archived BOOLEAN DEFAULT 0")
             self.commit()
         except Exception:
             # Column likely already exists or other non-critical error
@@ -131,9 +134,21 @@ class AdvancedLabInventory:
     def get_query_df(self, query, params=None, ttl=0):
         """Helper to run a query and return a pandas DataFrame."""
         if self.is_postgres:
+            query, params = self._convert_query(query, params)
             return self._conn.query(query, params=params, ttl=ttl)
         else:
             return pd.read_sql_query(query, self.conn_sqlite, params=params)
+
+    def _convert_query(self, query, params):
+        """Internal helper to convert SQLite '?' to Postgres ':p' named parameters."""
+        if params and isinstance(params, (list, tuple)) and "?" in query:
+            new_query = query
+            param_dict = {}
+            for i, p in enumerate(params):
+                new_query = new_query.replace("?", f":p{i}", 1)
+                param_dict[f"p{i}"] = p
+            return new_query, param_dict
+        return query, params
 
     @property
     def cursor(self):
@@ -147,30 +162,14 @@ class AdvancedLabInventory:
         if self.is_postgres:
             # If it's a SELECT, we use .query() to store result for fetchone()
             if query.strip().upper().startswith("SELECT"):
-                # Handle positional params for SQLAlchemy if they are tuples
-                if isinstance(params, (list, tuple)):
-                    # Convert to dict if possible or use positional if query is already text(?)
-                    # Actually st.connection.query doesn't handle positional ? well for all dialects
-                    # But for now, let's assume simple queries or named params
-                    self._last_result = self._conn.query(query, params=params)
-                else:
-                    self._last_result = self._conn.query(query, params=params)
+                query, params = self._convert_query(query, params)
+                self._last_result = self._conn.query(query, params=params)
                 self._row_index = 0
             else:
                 # For non-SELECT, use session
+                query, params = self._convert_query(query, params)
                 with self._conn.session as s:
-                    # Replace ? with :name if needed? No, let's hope sqlalchemy handles it or user uses named.
-                    # Actually sqlite uses ?, Postgres uses %s or :name.
-                    # We'll do a simple replacement of ? with :p1, :p2 etc if sqlite-style is used
-                    if params and isinstance(params, (list, tuple)) and "?" in query:
-                        new_query = query
-                        param_dict = {}
-                        for i, p in enumerate(params):
-                            new_query = new_query.replace("?", f":p{i}", 1)
-                            param_dict[f"p{i}"] = p
-                        res = s.execute(text(new_query), param_dict)
-                    else:
-                        res = s.execute(text(query), params)
+                    res = s.execute(text(query), params)
                     self.rowcount = res.rowcount
                     s.commit()
         else:
@@ -189,6 +188,11 @@ class AdvancedLabInventory:
     def commit(self):
         if not self.is_postgres:
             self.conn_sqlite.commit()
+
+    def close(self):
+        """Closes the connection."""
+        if not self.is_postgres:
+            self.conn_sqlite.close()
 
     @property
     def conn(self):
@@ -216,12 +220,14 @@ class AdvancedLabInventory:
     def search_similar_items(self, search_term):
         term = f"%{search_term}%"
         if self.is_postgres:
-            inv = self.get_query_df("SELECT * FROM inventory WHERE name ILIKE :term OR catalog_number ILIKE :term", {"term": term})
-            req = self.get_query_df("SELECT * FROM purchase_requests WHERE item_name ILIKE :term OR catalog_number ILIKE :term", {"term": term})
+            inv = self.get_query_df("SELECT * FROM inventory WHERE (name ILIKE :term OR catalog_number ILIKE :term) AND archived IS FALSE", {"term": term})
+            archived = self.get_query_df("SELECT * FROM inventory WHERE (name ILIKE :term OR catalog_number ILIKE :term) AND archived IS TRUE", {"term": term})
+            req = self.get_query_df("SELECT * FROM purchase_requests WHERE (item_name ILIKE :term OR catalog_number ILIKE :term) AND status NOT IN ('Received', 'Cancelled', 'LOST')", {"term": term})
         else:
-            inv = self.get_query_df("SELECT * FROM inventory WHERE name LIKE ? OR catalog_number LIKE ?", (term, term))
-            req = self.get_query_df("SELECT * FROM purchase_requests WHERE item_name LIKE ? OR catalog_number LIKE ?", (term, term))
-        return inv, req
+            inv = self.get_query_df("SELECT * FROM inventory WHERE (name LIKE ? OR catalog_number LIKE ?) AND archived = 0", (term, term))
+            archived = self.get_query_df("SELECT * FROM inventory WHERE (name LIKE ? OR catalog_number LIKE ?) AND archived = 1", (term, term))
+            req = self.get_query_df("SELECT * FROM purchase_requests WHERE (item_name LIKE ? OR catalog_number LIKE ?) AND status NOT IN ('Received', 'Cancelled', 'LOST')", (term, term))
+        return inv, req, archived
 
     def log_usage(self, item_id, amount, user):
         try:
@@ -253,3 +259,101 @@ class AdvancedLabInventory:
             return True, f"Logged usage of {amount} units."
         except Exception as e:
             return False, f"Error: {e}"
+
+    def dismiss_item(self, item_id):
+        """Marks an item as archived so it no longer appears in depletion/low stock lists."""
+        self.execute("UPDATE inventory SET archived = TRUE WHERE item_id = :id" if self.is_postgres else "UPDATE inventory SET archived = 1 WHERE item_id = ?", 
+                     {"id": item_id} if self.is_postgres else (item_id,))
+        self.commit()
+
+    def reorder_item(self, item_id, requester_name):
+        """Automatically creates a purchase request based on an existing inventory item."""
+        # 1. Fetch item details
+        df = self.get_query_df("SELECT * FROM inventory WHERE item_id = :id" if self.is_postgres else "SELECT * FROM inventory WHERE item_id = ?", 
+                               params={"id": item_id} if self.is_postgres else (item_id,))
+        if df.empty:
+            return False, "Item not found."
+        
+        item = df.iloc[0]
+        # 2. Submit request
+        price = float(item['price']) if pd.notna(item['price']) else 0.0
+        self.submit_purchase_request({
+            "requester_name": requester_name,
+            "item_name": item['name'],
+            "specs": item['specs'],
+            "catalog_number": item['catalog_number'] if pd.notna(item['catalog_number']) else "",
+            "seller": item['seller'] if pd.notna(item['seller']) else "",
+            "link": item['link'] if pd.notna(item['link']) else "",
+            "price": price,
+            "request_date": datetime.now()
+        })
+        return True, f"Reorder request submitted for {item['name']}."
+
+    def merge_duplicate_inventory(self):
+        """Consolidates inventory items with matching names and catalog numbers by summing quantities."""
+        try:
+            # 1. Identify duplicates (ignoring archived)
+            # Strategy: Group by name and catalog_number, sum quantity, keep the earliest date_added and most recent last_depleted.
+            if self.is_postgres:
+                # PostgreSQL approach: Use a CTE to find groups and update the oldest record, then delete others.
+                # However, for simplicity across both, we can pull the data, process in Pandas, and re-upload.
+                pass 
+
+            # Cross-platform safe approach using Pandas
+            df = self.get_query_df("SELECT * FROM inventory WHERE archived IS FALSE")
+            if df.empty:
+                return False, "Inventory is empty."
+
+            # Normalize catalog numbers for matching
+            df['cat_norm'] = df['catalog_number'].apply(lambda x: str(x).strip().upper() if pd.notna(x) else "")
+            df['name_norm'] = df['name'].apply(lambda x: str(x).strip().lower())
+
+            duplicates = df.groupby(['name_norm', 'cat_norm']).filter(lambda x: len(x) > 1)
+            if duplicates.empty:
+                return True, "No duplicates found."
+
+            merged_count = 0
+            # Group and process
+            for (name, cat), group in df.groupby(['name_norm', 'cat_norm']):
+                if len(group) > 1:
+                    # Keep the first ID, sum quantities
+                    primary_id = group.iloc[0]['item_id'].item()
+                    total_qty = group['quantity'].sum().item()
+                    other_ids = [oid.item() for oid in group.iloc[1:]['item_id']]
+                    
+                    # Update primary
+                    self.execute("UPDATE inventory SET quantity = :qty WHERE item_id = :id" if self.is_postgres else "UPDATE inventory SET quantity = ? WHERE item_id = ?", 
+                                 {"qty": total_qty, "id": primary_id} if self.is_postgres else (total_qty, primary_id))
+                    
+                    # Archive others
+                    placeholders = ",".join([f":id{i}" for i in range(len(other_ids))]) if self.is_postgres else ",".join(["?" for _ in other_ids])
+                    archive_query = f"UPDATE inventory SET archived = TRUE WHERE item_id IN ({placeholders})" if self.is_postgres else f"UPDATE inventory SET archived = 1 WHERE item_id IN ({placeholders})"
+                    self.execute(archive_query, {f"id{i}": oid for i, oid in enumerate(other_ids)} if self.is_postgres else tuple(other_ids))
+                    merged_count += 1
+
+            self.commit()
+            return True, f"Successfully merged {merged_count} groups of duplicates."
+        except Exception as e:
+            return False, f"Merge error: {e}"
+
+    def cleanup_stale_requests(self):
+        """Marks open purchase requests as 'Cancelled' if they are not active (Need to order/Ordered)."""
+        try:
+            # Active statuses that we want to keep
+            active_statuses = "('Need to order', 'Ordered')"
+            
+            # Any request NOT in active_statuses and NOT already terminal (Received, Cancelled, LOST)
+            # is considered stale/draft and should be cleaned up.
+            terminal_statuses = "('Received', 'Cancelled', 'LOST', 'Completed')"
+            
+            query = f"""
+                UPDATE purchase_requests 
+                SET status = 'Cancelled' 
+                WHERE status NOT IN {active_statuses} 
+                AND status NOT IN {terminal_statuses}
+            """
+            self.execute(query)
+            self.commit()
+            return True, "Successfully cleared stale/inactive purchase requests."
+        except Exception as e:
+            return False, f"Cleanup error: {e}"

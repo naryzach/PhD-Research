@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import smtplib
 from email.message import EmailMessage
+import time
 
 # --- Smart Defaults Configuration ---
 CATEGORY_DEFAULTS = {
@@ -40,11 +41,16 @@ db = get_db()
 
 # --- Helper function for UI styling ---
 def highlight_low_stock(row):
-    """Highlights rows red if stock is at or below the reorder threshold."""
-    # Updated to look for the clean display names
-    if row['Quantity'] <= row['Reorder Threshold']:
-        # High-contrast dark red text on light red background
-        return ['background-color: #ffcccc; color: #900000'] * len(row)
+    """Highlights rows based on stock level."""
+    # Note: These keys match the display names in the dashboard
+    qty = row.get('Quantity', 0)
+    threshold = row.get('Reorder Threshold', 0)
+    is_depleted = row.get('is_depleted', False)
+    
+    if is_depleted or qty <= 0:
+        return ['background-color: rgba(255, 0, 0, 0.2)'] * len(row) # Red
+    elif qty <= threshold:
+        return ['background-color: rgba(255, 255, 0, 0.2)'] * len(row) # Yellow
     return [''] * len(row)
 
 def color_status(row):
@@ -57,6 +63,19 @@ def color_status(row):
         return ['background-color: rgba(128, 0, 128, 0.2)'] * len(row) # Purple
     return ['background-color: rgba(0, 0, 255, 0.1)'] * len(row) # Blue
 
+def color_inventory_matches(row):
+    """Highlights inventory search results based on stock level."""
+    # Note: Using 'Qty' to match the renamed column in search results
+    qty = float(row.get('Qty', 0))
+    threshold = float(row.get('reorder_threshold', 0))
+    is_depleted = row.get('is_depleted', False)
+    
+    if is_depleted or qty <= 0:
+        return ['background-color: rgba(255, 0, 0, 0.2)'] * len(row) # Light Red
+    elif qty <= threshold:
+        return ['background-color: rgba(255, 255, 0, 0.2)'] * len(row) # Light Yellow
+    return [''] * len(row)
+
 # --- Streamlit UI ---
 st.set_page_config(page_title="Lab Manager", layout="wide", page_icon="🔬")
 st.title("Lab Manager")
@@ -68,14 +87,16 @@ if choice == "Inventory Dashboard":
     st.header("Inventory Dashboard")
     
     # Fetch active inventory
-    df_inv = db.get_query_df("SELECT name, category, source_type, quantity, unit, reorder_threshold, location, owner FROM inventory WHERE is_depleted IS FALSE")
+    # Fetch active inventory (including depleted, excluding archived)
+    df_inv = db.get_query_df("SELECT name, category, source_type, quantity, unit, reorder_threshold, location, owner, is_depleted FROM inventory WHERE archived IS FALSE")
     
     if df_inv.empty:
         st.info("Your inventory is currently empty.")
     else:
         # --- Top Level Metrics ---
         total_items = len(df_inv)
-        low_stock_count = len(df_inv[df_inv['quantity'] <= df_inv['reorder_threshold']])
+        # Factor in both low stock and depleted items
+        low_stock_count = len(df_inv[(df_inv['quantity'] <= df_inv['reorder_threshold']) | (df_inv['is_depleted'] == True)])
         
         col1, col2, col3 = st.columns(3)
         col1.metric("Total Unique Items", total_items)
@@ -113,35 +134,92 @@ if choice == "Inventory Dashboard":
         }
         df_display = df_inv.rename(columns=clean_headers)
         
+        # Define the columns we want to show (hiding is_depleted used for styling)
+        display_order = ("Item Name", "Category", "Source Type", "Quantity", "Unit", "Reorder Threshold", "Storage Location", "Owner")
+        
         if categories:
             tabs = st.tabs(["All Items"] + categories)
             
             with tabs[0]:
-                st.dataframe(df_display.style.apply(highlight_low_stock, axis=1), width='stretch', hide_index=True)
+                st.dataframe(
+                    df_display.style.apply(highlight_low_stock, axis=1), 
+                    column_order=display_order,
+                    width='stretch', 
+                    hide_index=True
+                )
                 
             for i, cat in enumerate(categories):
                 with tabs[i+1]:
                     cat_df = df_display[df_display['Category'] == cat]
-                    st.dataframe(cat_df.style.apply(highlight_low_stock, axis=1), width='stretch', hide_index=True)
+                    st.dataframe(
+                        cat_df.style.apply(highlight_low_stock, axis=1), 
+                        column_order=display_order,
+                        width='stretch', 
+                        hide_index=True
+                    )
 
-        # --- Recently Depleted Items (Last 7 Days) ---
+        # --- Low Stock & Recently Depleted Management ---
         st.markdown("---")
-        st.subheader("Recently Depleted Items (Last 7 Days)")
-        # PostgreSQL syntax for current date minus 7 days: now() - interval '7 days'
-        # SQLite syntax: date('now', '-7 days')
-        if db.is_postgres:
-            depleted_query = "SELECT name, category, location, last_depleted FROM inventory WHERE is_depleted IS TRUE ORDER BY last_depleted DESC NULLS LAST LIMIT 10"
+        st.subheader("⚠️ Item Management: Low Stock & Depleted")
+        st.info("Quickly reorder items or dismiss them from this list if no longer needed.")
+
+        # Combined query to see items that need attention: either low stock or depleted, but NOT archived
+        # We join with purchase_requests to see if there's an active order
+        attention_query = """
+            SELECT i.item_id, i.name, i.quantity, i.unit, i.reorder_threshold, i.is_depleted, i.last_depleted, i.catalog_number, i.seller,
+                   (SELECT status FROM purchase_requests pr 
+                    WHERE (pr.item_name = i.name OR (i.catalog_number IS NOT NULL AND i.catalog_number != '' AND pr.catalog_number = i.catalog_number))
+                    AND pr.status NOT IN ('Received', 'Cancelled', 'LOST')
+                    ORDER BY pr.request_date DESC LIMIT 1) as pending_status
+            FROM inventory i
+            WHERE (i.quantity <= i.reorder_threshold OR i.is_depleted IS TRUE)
+            AND i.archived IS FALSE
+            ORDER BY i.is_depleted DESC, i.quantity ASC
+        """
+        df_attention = db.get_query_df(attention_query)
+
+        if not df_attention.empty:
+            for _, row in df_attention.iterrows():
+                with st.container(border=True):
+                    c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
+                    
+                    with c1:
+                        status_prefix = "🚫 DEPLETED" if row['is_depleted'] else "⚠️ LOW STOCK"
+                        st.markdown(f"**{status_prefix}: {row['name']}**")
+                        stock_info = f"Stock: {row['quantity']} {row['unit']} (Threshold: {row['reorder_threshold']})"
+                        if row['is_depleted'] and pd.notna(row['last_depleted']):
+                            depleted_str = pd.to_datetime(row['last_depleted']).strftime('%Y-%m-%d %H:%M')
+                            stock_info += f" | Depleted: {depleted_str}"
+                        st.caption(stock_info)
+                    
+                    with c2:
+                        if row['pending_status']:
+                            st.warning(f"On Order: {row['pending_status']}")
+                        else:
+                            st.write("No active orders")
+                    
+                    with c3:
+                        # Quick Reorder Button
+                        btn_label = "🔄 Quick Reorder"
+                        if st.button(btn_label, key=f"reorder_{row['item_id']}"):
+                            # Use a default requester name for quick reorder, or we could ask via session state
+                            success, msg = db.reorder_item(row['item_id'], "Quick Reorder System")
+                            if success:
+                                st.success(msg)
+                                time.sleep(2)
+                                st.rerun()
+                            else:
+                                st.error(msg)
+                    
+                    with c4:
+                        # Dismiss Button
+                        if st.button("🗑️ Dismiss/Archive", key=f"dismiss_{row['item_id']}"):
+                            db.dismiss_item(row['item_id'])
+                            st.toast(f"Archived {row['name']}")
+                            time.sleep(1)
+                            st.rerun()
         else:
-            depleted_query = "SELECT name, category, location, last_depleted FROM inventory WHERE is_depleted IS TRUE ORDER BY last_depleted DESC LIMIT 10"
-        
-        df_depleted = db.get_query_df(depleted_query)
-        if not df_depleted.empty:
-            df_depleted['last_depleted'] = pd.to_datetime(df_depleted['last_depleted']).dt.strftime('%Y-%m-%d %H:%M').replace('NaT', 'Prior to tracking')
-            st.dataframe(df_depleted.rename(columns={
-                "name": "Item Name", "category": "Category", "location": "Location", "last_depleted": "Depleted On"
-            }), hide_index=True, width='stretch')
-        else:
-            st.info("No items have been depleted in the last 7 days.")
+            st.success("No low stock or depleted items to manage!")
 
 elif choice == "Request a Purchase":
     st.header("Submit a Purchase Request")
@@ -165,25 +243,39 @@ elif choice == "Request a Purchase":
         search_input = st.text_input("Search inventory...", placeholder="e.g., Tris-HCl, pET28a, or Cat# T1234")
         
         if search_input:
-            inv_match, req_match = db.search_similar_items(search_input)
+            inv_match, req_match, arc_match = db.search_similar_items(search_input)
             
-            if not inv_match.empty or not req_match.empty:
+            if not inv_match.empty or not req_match.empty or not arc_match.empty:
+                # 1. Someone recently requested matching items (Active Only)
+                if not req_match.empty:
+                    st.error("🚨 Someone recently requested matching items:")
+                    clean_req = req_match[['item_name', 'catalog_number', 'requester_name', 'status']].rename(
+                        columns={"item_name": "Item Name", "catalog_number": "Cat #", "requester_name": "Requested By", "status": "Status"}
+                    ).fillna("")
+                    st.dataframe(clean_req.style.apply(color_status, axis=1), hide_index=True, width='stretch')
+
+                # 2. Matching items in the lab
                 if not inv_match.empty:
                     st.warning("⚠️ We currently have these matching items in the lab:")
-                    # Display a clean version of the results
-                    display_df = inv_match[['name', 'catalog_number', 'quantity', 'unit', 'location']].rename(
+                    # Display a clean version of the results with color coding
+                    display_df = inv_match[['name', 'catalog_number', 'quantity', 'unit', 'location', 'reorder_threshold', 'is_depleted']].rename(
                         columns={"name": "Item Name", "catalog_number": "Cat #", "quantity": "Qty", "unit": "Unit", "location": "Location"}
+                    ).fillna("")
+                    
+                    # Apply styling and hide the columns used only for calculation
+                    st.dataframe(
+                        display_df.style.apply(color_inventory_matches, axis=1),
+                        column_order=("Item Name", "Cat #", "Qty", "Unit", "Location"),
+                        hide_index=True, 
+                        width='stretch'
                     )
-                    # Fill NaN catalog numbers with empty strings so it looks clean
-                    display_df = display_df.fillna("") 
-                    st.dataframe(display_df, hide_index=True, width='stretch')
                     
                     st.markdown("#### 🔄 Need to top up an existing item?")
                     # Create a dropdown mapping formatted display strings to the raw row data
                     reorder_options = {f"{row['name']} (Cat: {row['catalog_number'] if pd.notna(row['catalog_number']) else 'N/A'})": row for _, row in inv_match.iterrows()}
-                    selected_reorder = st.selectbox("Select an item to reorder:", list(reorder_options.keys()))
+                    selected_reorder = st.selectbox("Select an item to reorder:", list(reorder_options.keys()), key="reorder_active")
                     
-                    if st.button("Order More of This Item"):
+                    if st.button("Order More of This Item", key="btn_reorder_active"):
                         row_data = reorder_options[selected_reorder]
                         # Save the historical data to session state to pre-fill Step 2
                         st.session_state.search_term = row_data['name']
@@ -193,14 +285,32 @@ elif choice == "Request a Purchase":
                         st.session_state.prefill_price = float(row_data['price']) if pd.notna(row_data['price']) else 0.0
                         
                         st.session_state.purchase_step = 2
+                        time.sleep(0.5)
                         st.rerun()
 
-                if not req_match.empty:
-                    st.error("🚨 Someone recently requested matching items:")
-                    clean_req = req_match[['item_name', 'catalog_number', 'requester_name', 'status']].rename(
-                        columns={"item_name": "Item Name", "catalog_number": "Cat #", "requester_name": "Requested By", "status": "Status"}
+                # 3. Archived / Legacy items
+                if not arc_match.empty:
+                    st.info("📦 Archived / Legacy Items (Previously in Lab):")
+                    arc_display = arc_match[['name', 'catalog_number', 'seller', 'location']].rename(
+                        columns={"name": "Item Name", "catalog_number": "Cat #", "seller": "Last Seller", "location": "Last Location"}
                     ).fillna("")
-                    st.dataframe(clean_req.style.apply(color_status, axis=1), hide_index=True, width='stretch')
+                    st.dataframe(arc_display, hide_index=True, width='stretch')
+                    
+                    st.markdown("#### ♻️ Re-request an archived item?")
+                    arc_options = {f"{row['name']} (Cat: {row['catalog_number'] if pd.notna(row['catalog_number']) else 'N/A'})": row for _, row in arc_match.iterrows()}
+                    selected_arc = st.selectbox("Select an archived item to reorder:", list(arc_options.keys()), key="reorder_archived")
+                    
+                    if st.button("Reorder This Legacy Item", key="btn_reorder_archived"):
+                        row_data = arc_options[selected_arc]
+                        st.session_state.search_term = row_data['name']
+                        st.session_state.prefill_cat = row_data['catalog_number'] if pd.notna(row_data['catalog_number']) else ""
+                        st.session_state.prefill_seller = row_data['seller'] if pd.notna(row_data['seller']) else ""
+                        st.session_state.prefill_link = row_data['link'] if pd.notna(row_data['link']) else ""
+                        st.session_state.prefill_price = float(row_data['price']) if pd.notna(row_data['price']) else 0.0
+                        
+                        st.session_state.purchase_step = 2
+                        time.sleep(0.5)
+                        st.rerun()
                 
                 st.markdown("#### 🆕 Ordering something completely new?")
             else:
@@ -244,18 +354,15 @@ elif choice == "Request a Purchase":
                 if not req_name or not item_name:
                     st.error("Your Name and Item Name are required.")
                 else:
-                    db.submit_purchase_request({
-                        "requester_name": req_name, "item_name": item_name, "specs": specs,
-                        "catalog_number": catalog, "seller": seller, "link": link,
-                        "price": price, "request_date": datetime.now()
-                    })
-                    st.success(f"Request for {item_name} submitted successfully!")
+                    success_msg = f"Request for {item_name} submitted successfully!"
+                    st.success(success_msg)
+                    st.toast(f"✅ {success_msg}")
                     
                     # Reset the app state for the next user
                     st.session_state.purchase_step = 1
                     st.session_state.search_term = ""
-                    if st.form_submit_button("Start a New Request"):
-                        st.rerun()
+                    time.sleep(2)
+                    st.rerun()
 
 elif choice == "Process Orders":
     st.header("Order Management Pipeline")
@@ -322,6 +429,7 @@ elif choice == "Process Orders":
                     db.commit()
                     
                     st.success(f"{order_data['item_name']} successfully added to inventory!")
+                    time.sleep(2)
                     st.rerun()
     else:
         st.info("No pending orders.")
@@ -330,7 +438,7 @@ elif choice == "Log Usage":
     st.header("Log Material Usage")
     
     # Fetch inventory, including quantity for the display
-    df_inv = db.get_query_df("SELECT item_id, name, quantity, unit FROM inventory WHERE is_depleted IS FALSE")
+    df_inv = db.get_query_df("SELECT item_id, name, quantity, unit FROM inventory WHERE is_depleted IS FALSE AND archived IS FALSE")
     
     if not df_inv.empty:
         # Create a dictionary mapping display names to IDs
@@ -364,9 +472,8 @@ elif choice == "Log Usage":
                     success, msg = db.log_usage(selected_id, amount, user)
                     if success:
                         st.toast(f"✅ {msg}")
-                        # Short delay to allow toast to be seen before rerun
-                        import time
-                        time.sleep(1)
+                        st.success(msg)
+                        time.sleep(2)
                         st.rerun() 
                     else:
                         st.error(msg)

@@ -28,6 +28,11 @@ def send_friday_digest(include_all_pending=False):
         pending_query = f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses} AND request_date >= ?"
         df_orders = db.get_query_df(pending_query, params=(last_week,))
     
+    # --- PART 1.5: Recently Depleted Items ---
+    # Fetch items that were marked as depleted in the last 7 days
+    depleted_query = "SELECT name, category, location, last_depleted FROM inventory WHERE is_depleted IS TRUE AND last_depleted >= ?"
+    df_depleted = db.get_query_df(depleted_query, params=(last_week,))
+    
     # --- PART 2: Predictive Reordering (Burn Rate Analysis) ---
     thirty_days_ago = datetime.now() - timedelta(days=30)
     usage_query = """
@@ -67,8 +72,8 @@ def send_friday_digest(include_all_pending=False):
             )
     
     # --- PART 3: Format the Email Body ---
-    if df_orders.empty and not predictive_alerts:
-        msg = "No new orders and no predictive alerts this week. Exiting."
+    if df_orders.empty and not predictive_alerts and df_depleted.empty:
+        msg = "No new orders, predictive alerts, or depleted items this week. Exiting."
         print(msg)
         return False, msg, ""
         
@@ -80,6 +85,15 @@ def send_friday_digest(include_all_pending=False):
         body += "Based on recent usage, these items will run out soon:\n"
         for alert in predictive_alerts:
             body += f"{alert}\n\n"
+        body += "-" * 40 + "\n\n"
+        
+    # Add Recently Depleted Items
+    if not df_depleted.empty:
+        body += "⚠️ RECENTLY DEPLETED ITEMS (Last 7 Days):\n"
+        body += "The following items were used up this week:\n"
+        for _, row in df_depleted.iterrows():
+            depleted_on = pd.to_datetime(row['last_depleted']).strftime('%Y-%m-%d %H:%M') if pd.notna(row['last_depleted']) else "N/A"
+            body += f"❌ {row['name']} ({row['category']}) - Depleted on {depleted_on}\n"
         body += "-" * 40 + "\n\n"
         
     # Add Standard Pending Orders

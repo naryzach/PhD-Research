@@ -5,6 +5,7 @@ from db_manager import AdvancedLabInventory
 from friday_mailer import send_friday_digest
 from datetime import datetime
 import os
+import time
 
 # --- Authentication Setup ---
 def check_password():
@@ -68,7 +69,7 @@ db = get_db()
 # The core tables in your database
 TABLES = ["inventory", "purchase_requests", "usage_log"]
 
-menu = ["🔄 Manage Order Status", "✏️ Edit Tables Directly", "📥 Export Data (CSV)", "💻 Advanced: Raw SQL"]
+menu = ["🔄 Manage Order Status", "✏️ Edit Tables Directly", "📥 Export Data (CSV)", "💻 Advanced: Raw SQL", "🛠️ Database Maintenance"]
 choice = st.sidebar.radio("Admin Tools", menu)
 
 # --- 0. Manage Order Status ---
@@ -80,7 +81,10 @@ if choice == "🔄 Manage Order Status":
         with st.spinner("Preparing digest..."):
             success, message, body = send_friday_digest(include_all_pending=False)
             if success:
+                st.toast(f"✅ {message}")
                 st.success(message)
+                time.sleep(2)
+                st.rerun()
             else:
                 st.error(message)
                 if body:
@@ -128,7 +132,9 @@ if choice == "🔄 Manage Order Status":
                 req_id = int(selected_order.split("]")[0].replace("[", ""))
                 db.cursor.execute("UPDATE purchase_requests SET status = ? WHERE request_id = ?", (new_status, req_id))
                 db.commit()
+                st.toast(f"✅ Status updated!")
                 st.success(f"Updated order #{req_id} to '{new_status}'!")
+                time.sleep(2)
                 st.rerun()
         
         # --- Deactivated Orders (History) ---
@@ -269,6 +275,40 @@ elif choice == "💻 Advanced: Raw SQL":
                 st.error(f"SQL Error: {e}")
         else:
             st.warning("Please enter a query first.")
+
+# --- 4. Database Maintenance ---
+elif choice == "🛠️ Database Maintenance":
+    st.header("Database Maintenance & Cleanup")
+    st.info("Tools to keep your inventory data clean and accurate.")
+    
+    with st.expander("Merge Duplicate Inventory Items", expanded=True):
+        st.write("This tool will consolidate inventory items that have the **same name and catalog number**. It will sum their quantities and archive the duplicate entries.")
+        st.warning("⚠️ This action is irreversible. It's recommended to download a CSV backup first.")
+        
+        if st.button("🚀 Merge Duplicate Received Items"):
+            with st.spinner("Consolidating data..."):
+                success, message = db.merge_duplicate_inventory()
+                if success:
+                    st.success(message)
+                    time.sleep(2)
+                    st.rerun()
+                else:
+                    st.error(message)
+
+    with st.expander("Cancel Stale Purchase Requests", expanded=False):
+        st.write("This tool will find all open purchase requests that are **NOT** marked as 'Ordered' or 'Need to order' and mark them as **Cancelled**.")
+        st.info("This is useful for clearing out old drafts or 'Do not order yet' items that are no longer needed.")
+        
+        if st.button("🧹 Clear Stale/Inactive Requests"):
+            with st.spinner("Cleaning up orders..."):
+                success, message = db.cleanup_stale_requests()
+                if success:
+                    st.toast(f"✅ {message}")
+                    st.success(message)
+                    time.sleep(2)
+                    st.rerun()
+                else:
+                    st.error(message)
 
 # --- Database Status Flag ---
 st.sidebar.markdown("---")
