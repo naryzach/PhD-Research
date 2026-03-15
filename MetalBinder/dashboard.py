@@ -8,6 +8,39 @@ from stmol import showmol
 import py3Dmol
 import math
 
+# Set page config - MUST be first streamlit command
+st.set_page_config(page_title="Lanm Output Dashboard", layout="wide")
+
+# --- Authentication ---
+def check_password():
+    """Returns True if the user has entered the correct password."""
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if st.session_state["password"] == st.secrets["admin"]["password"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # don't store password
+        else:
+            st.session_state["password_correct"] = False
+
+    if st.session_state.get("password_correct", False):
+        return True
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.title("🔒 Password Protected")
+        st.text_input(
+            "Enter password to access the Lanm Output Dashboard", 
+            type="password", 
+            on_change=password_entered, 
+            key="password"
+        )
+        if "password_correct" in st.session_state and not st.session_state["password_correct"]:
+            st.error("😕 Password incorrect")
+    return False
+
+if not check_password():
+    st.stop()
+
 # --- Constants & Heuristics ---
 def calculate_binding_probability(row):
     """
@@ -41,9 +74,6 @@ def calculate_binding_probability(row):
     # Weighted average
     total = (r_score * 0.4) + (cn_score * 0.2) + (bid_score * 0.1) + (p_score * 0.3)
     return round(total, 3)
-
-# Set page config
-st.set_page_config(page_title="Lanm Output Dashboard", layout="wide")
 
 st.title("🧬 Lanm Output Dashboard")
 st.markdown("Explore metal-binding protein designs with advanced structural and sequence analysis.")
