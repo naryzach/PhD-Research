@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import smtplib
 from email.message import EmailMessage
 import toml
+import os
 from db_manager import AdvancedLabInventory
 
 def send_friday_digest(include_all_pending=False):
@@ -33,8 +34,8 @@ def send_friday_digest(include_all_pending=False):
         SELECT u.item_id, i.name, i.quantity, i.unit, i.reorder_threshold, SUM(u.amount_used) as total_used_30d
         FROM usage_log u
         JOIN inventory i ON u.item_id = i.item_id
-        WHERE u.date_used >= ? AND i.is_depleted = 0
-        GROUP BY u.item_id
+        WHERE u.date_used >= ? AND i.is_depleted IS FALSE
+        GROUP BY u.item_id, i.name, i.quantity, i.unit, i.reorder_threshold
     """
     df_usage = db.get_query_df(usage_query, params=(thirty_days_ago,))
     
@@ -104,23 +105,42 @@ def send_friday_digest(include_all_pending=False):
             
     # --- PART 4: Load Credentials & Send ---
     try:
-        # Try Loading from Streamlit secrets first (if running within app)
-        import streamlit as st
-        try:
-            email_secrets = st.secrets["email"]
-            sender = email_secrets["sender"]
-            password = email_secrets["password"]
-            manager = email_secrets["manager_email"]
-            server_url = email_secrets["server"]
-            port = email_secrets["port"]
-        except (KeyError, AttributeError, RuntimeError):
-            # Fallback to local toml if st.secrets is unavailable
-            secrets = toml.load(".streamlit/secrets.toml")
-            sender = secrets["email"]["sender"]
-            password = secrets["email"]["password"]
-            manager = secrets["email"]["manager_email"]
-            server_url = secrets["email"]["server"]
-            port = secrets["email"]["port"]
+        # 1. Try Environment Variables first (for GitHub Actions / Automation)
+        sender = os.environ.get("EMAIL_SENDER")
+        password = os.environ.get("EMAIL_PASSWORD")
+        manager = os.environ.get("MANAGER_EMAIL")
+        server_url = os.environ.get("EMAIL_SERVER")
+        port = os.environ.get("EMAIL_PORT")
+        
+        # If any are missing, fall back to Streamlit/TOML
+        if not all([sender, password, manager, server_url, port]):
+            # 2. Try Loading from Streamlit secrets
+            import streamlit as st
+            try:
+                email_secrets = st.secrets["email"]
+                sender = email_secrets.get("sender", sender)
+                password = email_secrets.get("password", password)
+                manager = email_secrets.get("manager_email", manager)
+                server_url = email_secrets.get("server", server_url)
+                port = email_secrets.get("port", port)
+            except (KeyError, AttributeError, RuntimeError):
+                # 3. Fallback to local toml
+                try:
+                    secrets = toml.load(".streamlit/secrets.toml")
+                    sender = secrets["email"]["sender"]
+                    password = secrets["email"]["password"]
+                    manager = secrets["email"]["manager_email"]
+                    server_url = secrets["email"]["server"]
+                    port = secrets["email"]["port"]
+                except Exception:
+                    pass # We'll catch the error below if still missing
+                    
+        if not all([sender, password, manager, server_url, port]):
+            raise ValueError("Incomplete credentials. Please set environment variables or secrets.toml.")
+        
+        # Ensure port is an integer
+        port = int(port)
+        
     except Exception as e:
         msg = f"Error loading credentials: {e}"
         print(msg)

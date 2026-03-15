@@ -47,6 +47,16 @@ def highlight_low_stock(row):
         return ['background-color: #ffcccc; color: #900000'] * len(row)
     return [''] * len(row)
 
+def color_status(row):
+    status = str(row.get('status', '')).lower()
+    if 'need to order' in status:
+        return ['background-color: rgba(255, 0, 0, 0.2)'] * len(row) # Red
+    elif 'ordered' in status:
+        return ['background-color: rgba(255, 255, 0, 0.2)'] * len(row) # Yellow
+    elif 'do not order' in status:
+        return ['background-color: rgba(128, 0, 128, 0.2)'] * len(row) # Purple
+    return ['background-color: rgba(0, 0, 255, 0.1)'] * len(row) # Blue
+
 # --- Streamlit UI ---
 st.set_page_config(page_title="Lab Manager", layout="wide", page_icon="🔬")
 st.title("Lab Manager")
@@ -58,7 +68,7 @@ if choice == "Inventory Dashboard":
     st.header("Inventory Dashboard")
     
     # Fetch active inventory
-    df_inv = db.get_query_df("SELECT name, category, source_type, quantity, unit, reorder_threshold, location, owner FROM inventory WHERE is_depleted = 0")
+    df_inv = db.get_query_df("SELECT name, category, source_type, quantity, unit, reorder_threshold, location, owner FROM inventory WHERE is_depleted IS FALSE")
     
     if df_inv.empty:
         st.info("Your inventory is currently empty.")
@@ -113,6 +123,25 @@ if choice == "Inventory Dashboard":
                 with tabs[i+1]:
                     cat_df = df_display[df_display['Category'] == cat]
                     st.dataframe(cat_df.style.apply(highlight_low_stock, axis=1), width='stretch', hide_index=True)
+
+        # --- Recently Depleted Items (Last 7 Days) ---
+        st.markdown("---")
+        st.subheader("Recently Depleted Items (Last 7 Days)")
+        # PostgreSQL syntax for current date minus 7 days: now() - interval '7 days'
+        # SQLite syntax: date('now', '-7 days')
+        if db.is_postgres:
+            depleted_query = "SELECT name, category, location, last_depleted FROM inventory WHERE is_depleted IS TRUE ORDER BY last_depleted DESC NULLS LAST LIMIT 10"
+        else:
+            depleted_query = "SELECT name, category, location, last_depleted FROM inventory WHERE is_depleted IS TRUE ORDER BY last_depleted DESC LIMIT 10"
+        
+        df_depleted = db.get_query_df(depleted_query)
+        if not df_depleted.empty:
+            df_depleted['last_depleted'] = pd.to_datetime(df_depleted['last_depleted']).dt.strftime('%Y-%m-%d %H:%M').replace('NaT', 'Prior to tracking')
+            st.dataframe(df_depleted.rename(columns={
+                "name": "Item Name", "category": "Category", "location": "Location", "last_depleted": "Depleted On"
+            }), hide_index=True, width='stretch')
+        else:
+            st.info("No items have been depleted in the last 7 days.")
 
 elif choice == "Request a Purchase":
     st.header("Submit a Purchase Request")
@@ -171,7 +200,7 @@ elif choice == "Request a Purchase":
                     clean_req = req_match[['item_name', 'catalog_number', 'requester_name', 'status']].rename(
                         columns={"item_name": "Item Name", "catalog_number": "Cat #", "requester_name": "Requested By", "status": "Status"}
                     ).fillna("")
-                    st.dataframe(clean_req, hide_index=True, width='stretch')
+                    st.dataframe(clean_req.style.apply(color_status, axis=1), hide_index=True, width='stretch')
                 
                 st.markdown("#### 🆕 Ordering something completely new?")
             else:
@@ -235,7 +264,8 @@ elif choice == "Process Orders":
     df_pending = db.get_query_df("SELECT * FROM purchase_requests WHERE status NOT IN ('Received', 'Cancelled', 'LOST')")
     
     if not df_pending.empty:
-        st.dataframe(df_pending, width='stretch', hide_index=True)
+        # Style the dataframe by status
+        st.dataframe(df_pending.style.apply(color_status, axis=1), width='stretch', hide_index=True)
         
         st.markdown("---")
         st.subheader("Mark Order as Received & Add to Inventory")
@@ -289,7 +319,7 @@ elif choice == "Process Orders":
                     })
                     # Specifically set the status to "Received"
                     db.cursor.execute("UPDATE purchase_requests SET status = 'Received' WHERE request_id = ?", (req_id,))
-                    db.conn.commit()
+                    db.commit()
                     
                     st.success(f"{order_data['item_name']} successfully added to inventory!")
                     st.rerun()
@@ -300,7 +330,7 @@ elif choice == "Log Usage":
     st.header("Log Material Usage")
     
     # Fetch inventory, including quantity for the display
-    df_inv = db.get_query_df("SELECT item_id, name, quantity, unit FROM inventory WHERE is_depleted = 0")
+    df_inv = db.get_query_df("SELECT item_id, name, quantity, unit FROM inventory WHERE is_depleted IS FALSE")
     
     if not df_inv.empty:
         # Create a dictionary mapping display names to IDs
@@ -323,7 +353,9 @@ elif choice == "Log Usage":
             user = st.text_input("Your Name")
             
             # Set the max_value to the current_qty so they can't overdraw the account
-            amount = st.number_input(f"Amount Used ({unit})", min_value=0.01, max_value=float(current_qty), step=0.1)
+            # Safety check: ensure max_value is at least min_value to prevent Streamlit crashes
+            safe_max = max(0.01, float(current_qty))
+            amount = st.number_input(f"Amount Used ({unit})", min_value=0.01, max_value=safe_max, step=0.1)
             
             submit_usage = st.form_submit_button("Log Usage")
             
@@ -331,8 +363,10 @@ elif choice == "Log Usage":
                 if user.strip():
                     success, msg = db.log_usage(selected_id, amount, user)
                     if success:
-                        st.success(msg)
-                        # Refresh the app so the new stock level is immediately displayed
+                        st.toast(f"✅ {msg}")
+                        # Short delay to allow toast to be seen before rerun
+                        import time
+                        time.sleep(1)
                         st.rerun() 
                     else:
                         st.error(msg)
@@ -390,7 +424,7 @@ elif choice == "Metrics & History":
         SELECT i.name, u.user_name, COUNT(u.log_id) as times_used, SUM(u.amount_used) as total_amount, i.unit
         FROM usage_log u
         JOIN inventory i ON u.item_id = i.item_id
-        GROUP BY u.item_id, u.user_name
+        GROUP BY u.item_id, i.name, i.unit, u.user_name
     '''
     df_usage = db.get_query_df(usage_query)
     
@@ -423,3 +457,10 @@ elif choice == "Metrics & History":
         
     else:
         st.info("No usage logs have been recorded yet. Once lab members start logging materials, usage metrics will populate here.")
+
+# --- Database Status Flag ---
+st.sidebar.markdown("---")
+if db.is_postgres:
+    st.sidebar.success("📡 Connected to **Supabase Cloud**")
+else:
+    st.sidebar.info("🏠 Using **Local SQLite**")

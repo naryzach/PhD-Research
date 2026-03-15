@@ -3,6 +3,8 @@ import sqlite3
 import pandas as pd
 from db_manager import AdvancedLabInventory
 from friday_mailer import send_friday_digest
+from datetime import datetime
+import os
 
 # --- Authentication Setup ---
 def check_password():
@@ -33,6 +35,17 @@ def check_password():
         st.error("Incorrect password.")
         
     return False
+
+# --- Helper Functions ---
+def color_status(row):
+    status = str(row.get('status', '')).lower()
+    if 'need to order' in status:
+        return ['background-color: rgba(255, 0, 0, 0.2)'] * len(row) # Red
+    elif 'ordered' in status:
+        return ['background-color: rgba(255, 255, 0, 0.2)'] * len(row) # Yellow
+    elif 'do not order' in status:
+        return ['background-color: rgba(128, 0, 128, 0.2)'] * len(row) # Purple
+    return ['background-color: rgba(0, 0, 255, 0.1)'] * len(row) # Blue
 
 # --- Security Gate ---
 # If the password is wrong or not entered yet, stop the script entirely
@@ -74,7 +87,6 @@ if choice == "🔄 Manage Order Status":
                     st.warning("⚠️ **Network Restriction Detected**: The server blocked the direct email. You can copy the digest below and send it manually.")
                     
                     # Create a mailto link
-                    # Note: We hardcode the manager email or pull from secrets if available
                     manager_email = st.secrets["email"]["manager_email"]
                     subject = "🧪 Weekly Lab Orders Digest"
                     mailto_link = f"mailto:{manager_email}?subject={subject}&body={body.replace('\n', '%0D%0A')}"
@@ -91,7 +103,8 @@ if choice == "🔄 Manage Order Status":
     if df_active.empty:
         st.success("There are no active orders to manage!")
     else:
-        st.dataframe(df_active, hide_index=True, width='stretch')
+        # Style the dataframe by status
+        st.dataframe(df_active.style.apply(color_status, axis=1), hide_index=True, width='stretch')
         st.markdown("---")
         
         # Select an order to update
@@ -114,14 +127,21 @@ if choice == "🔄 Manage Order Status":
             if st.button("Update Status", width='stretch'):
                 req_id = int(selected_order.split("]")[0].replace("[", ""))
                 db.cursor.execute("UPDATE purchase_requests SET status = ? WHERE request_id = ?", (new_status, req_id))
-                db.conn.commit()
+                db.commit()
                 st.success(f"Updated order #{req_id} to '{new_status}'!")
                 st.rerun()
-                
-    # conn.close()
+        
+        # --- Deactivated Orders (History) ---
+        st.markdown("---")
+        with st.expander("🚫 View Deactivated Orders (Cancelled / LOST)"):
+            df_deactivated = db.get_query_df("SELECT request_id, item_name, requester_name, seller, status, request_date FROM purchase_requests WHERE status IN ('Cancelled', 'LOST')")
+            if df_deactivated.empty:
+                st.write("No deactivated orders found.")
+            else:
+                st.dataframe(df_deactivated.style.apply(color_status, axis=1), hide_index=True, width='stretch')
 
 # --- 1. Direct Table Editor ---
-if choice == "✏️ Edit Tables Directly":
+elif choice == "✏️ Edit Tables Directly":
     st.header("Direct Table Editor")
     st.warning("⚠️ **Warning:** You are editing the raw database. Changes made here will immediately affect the main app.")
     
@@ -144,7 +164,7 @@ if choice == "✏️ Edit Tables Directly":
             # ...and re-insert the perfectly edited dataframe. 
             # Because edited_df still contains the original IDs, relationships remain intact.
             edited_df.to_sql(selected_table, db.conn, if_exists='append', index=False)
-            db.conn.commit()
+            db.commit()
             st.success(f"Successfully updated the '{selected_table}' table!")
         except Exception as e:
             st.error(f"Error saving data: {e}")
@@ -173,23 +193,57 @@ elif choice == "📥 Export Data (CSV)":
             st.caption(f"Rows: {len(df_export)}")
             
     st.markdown("---")
-    st.subheader("🛠️ Full Database Backup")
-    st.info("Download the entire raw SQLite database file. This is useful for moving the data to another system or manual editing.")
+    st.subheader("🛠️ Full Database Backups")
+    st.info("Download a complete snapshot of your data.")
     
-    try:
-        with open(db.db_path, "rb") as f:
-            db_bytes = f.read()
-            st.download_button(
-                label="📁 Download lab_inventory.db",
-                data=db_bytes,
-                file_name="lab_inventory_backup.db",
-                mime="application/x-sqlite3",
-                width='stretch'
-            )
-    except Exception as e:
-        st.error(f"Error preparing database backup: {e}")
+    bcol1, bcol2 = st.columns(2)
+    
+    # --- Local SQLite Backup ---
+    with bcol1:
+        st.markdown("#### 📁 Local SQLite File")
+        if os.path.exists(db.db_path):
+            try:
+                with open(db.db_path, "rb") as f:
+                    db_bytes = f.read()
+                    st.download_button(
+                        label="📥 Download `lab_inventory.db`",
+                        data=db_bytes,
+                        file_name="lab_inventory_local_backup.db",
+                        mime="application/x-sqlite3",
+                        width='stretch'
+                    )
+                st.success("Local database file found and ready.")
+            except Exception as e:
+                st.error(f"Error reading local file: {e}")
+        else:
+            st.warning("No local `lab_inventory.db` file found on this server.")
 
-    # conn.close()
+    # --- Cloud (PostgreSQL) Backup ---
+    with bcol2:
+        st.markdown("#### ☁️ Cloud Database (Supabase)")
+        if db.is_postgres:
+            try:
+                # Generate a single JSON snapshot of ALL tables
+                import json
+                snapshot = {}
+                for table in TABLES:
+                    df_snap = db.get_query_df(f"SELECT * FROM {table}")
+                    snapshot[table] = df_snap.to_dict(orient='records')
+                
+                json_data = json.dumps(snapshot, indent=2, default=str).encode('utf-8')
+                
+                st.download_button(
+                    label="📥 Download Cloud Snapshot (JSON)",
+                    data=json_data,
+                    file_name=f"lab_inventory_cloud_snapshot_{datetime.now().strftime('%Y-%m-%d')}.json",
+                    mime="application/json",
+                    width='stretch'
+                )
+                st.success("Cloud data snapshot generated.")
+            except Exception as e:
+                st.error(f"Error preparing cloud backup: {e}")
+        else:
+            st.info("Cloud backup only available when connected to Supabase.")
 
 # --- 3. Raw SQL Execution ---
 elif choice == "💻 Advanced: Raw SQL":
@@ -200,22 +254,25 @@ elif choice == "💻 Advanced: Raw SQL":
     
     if st.button("▶ Execute Query"):
         if query.strip():
-            conn = get_conn()
             try:
                 # If it's a read query, show the results
                 if query.strip().upper().startswith("SELECT"):
-                    df_res = pd.read_sql_query(query, conn)
+                    df_res = db.get_query_df(query)
                     st.dataframe(df_res, width='stretch')
                     st.success(f"Query returned {len(df_res)} rows.")
                 # If it's a write query, execute and commit
                 else:
-                    cursor = conn.cursor()
-                    cursor.execute(query)
-                    conn.commit()
-                    st.success(f"Query executed successfully. {cursor.rowcount} rows affected.")
+                    db.cursor.execute(query)
+                    db.commit()
+                    st.success(f"Query executed successfully. {db.cursor.rowcount} rows affected.")
             except Exception as e:
                 st.error(f"SQL Error: {e}")
-            finally:
-                conn.close()
         else:
             st.warning("Please enter a query first.")
+
+# --- Database Status Flag ---
+st.sidebar.markdown("---")
+if db.is_postgres:
+    st.sidebar.success("📡 Connected to **Supabase Cloud**")
+else:
+    st.sidebar.info("🏠 Using **Local SQLite**")
