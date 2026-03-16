@@ -243,7 +243,13 @@ elif choice == "Request a Purchase":
         search_input = st.text_input("Search inventory...", placeholder="e.g., Tris-HCl, pET28a, or Cat# T1234")
         
         if search_input:
-            inv_match, req_match, arc_match = db.search_similar_items(search_input)
+            # Robust unpacking to handle stale versions in Streamlit Cloud
+            results = db.search_similar_items(search_input)
+            if len(results) == 3:
+                inv_match, req_match, arc_match = results
+            else:
+                inv_match, req_match = results
+                arc_match = pd.DataFrame() # Fallback if db_manager is stale
             
             if not inv_match.empty or not req_match.empty or not arc_match.empty:
                 # 1. Someone recently requested matching items (Active Only)
@@ -354,6 +360,19 @@ elif choice == "Request a Purchase":
                 if not req_name or not item_name:
                     st.error("Your Name and Item Name are required.")
                 else:
+                    # Actually submit to database
+                    db.submit_purchase_request({
+                        "requester_name": req_name,
+                        "item_name": item_name,
+                        "specs": specs,
+                        "seller": seller,
+                        "catalog_number": catalog,
+                        "link": link,
+                        "price": price,
+                        "status": "Need to order",
+                        "request_date": datetime.now()
+                    })
+
                     success_msg = f"Request for {item_name} submitted successfully!"
                     st.success(success_msg)
                     st.toast(f"✅ {success_msg}")

@@ -69,7 +69,7 @@ db = get_db()
 # The core tables in your database
 TABLES = ["inventory", "purchase_requests", "usage_log"]
 
-menu = ["🔄 Manage Order Status", "✏️ Edit Tables Directly", "📥 Export Data (CSV)", "💻 Advanced: Raw SQL", "🛠️ Database Maintenance", "🧹 Clear System Cache"]
+menu = ["🔄 Manage Order Status", "✏️ Edit Tables Directly", "📥 Export Data (CSV)", "💻 Advanced: Raw SQL", "🛠️ Database Maintenance", "🧹 Clear System Cache", "⚙️ System Settings"]
 choice = st.sidebar.radio("Admin Tools", menu)
 
 if choice == "🧹 Clear System Cache":
@@ -86,20 +86,29 @@ if choice == "🔄 Manage Order Status":
     st.header("Order Pipeline Manager")
     
     # Action for Manager: Generate Digest
-    if st.button("📨 Send Weekly Email Digest (Beta)"):
-        with st.spinner("Preparing digest..."):
-            success, message, body = send_friday_digest(include_all_pending=False)
-            if success:
-                st.toast(f"✅ {message}")
-                st.success(message)
-                time.sleep(2)
-                st.rerun()
-            else:
-                st.error(message)
-                if body:
-                    st.warning("⚠️ **Network Restriction Detected**: The server blocked the direct email. You can copy the digest below and send it manually.")
-                    
-                    # Create a mailto link
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("📨 Send Weekly Email Digest (Beta)"):
+            with st.spinner("Preparing digest..."):
+                success, message, body = send_friday_digest(include_all_pending=False)
+                if success:
+                    st.toast(f"✅ {message}")
+                    st.success(message)
+                else:
+                    st.error(message)
+                    if body:
+                        st.warning("⚠️ **Network Restriction**: Server blocked the email. Send manually below.")
+    
+    with col2:
+        if st.button("👁️ Preview Weekly Digest (Text Only)"):
+            from friday_mailer import generate_digest_body
+            body = generate_digest_body(db, include_all_pending=False)
+            if body:
+                st.info("Digest Preview:")
+                st.code(body, language="text")
+                
+                # Create a mailto link
+                try:
                     manager_email = st.secrets["email"]["manager_email"]
                     subject = "🧪 Weekly Lab Orders Digest"
                     mailto_link = f"mailto:{manager_email}?subject={subject}&body={body.replace('\n', '%0D%0A')}"
@@ -107,6 +116,10 @@ if choice == "🔄 Manage Order Status":
                     
                     with st.expander("📋 View Digest Content to Copy"):
                         st.code(body, language="text")
+                except Exception:
+                    pass
+            else:
+                st.warning("No new orders or depleted items to report.")
     
     st.info("Update the status of pending lab requests.")
     
@@ -321,6 +334,38 @@ elif choice == "🛠️ Database Maintenance":
                     st.rerun()
                 else:
                     st.error(message)
+
+# --- 6. System Settings ---
+elif choice == "⚙️ System Settings":
+    st.header("⚙️ Application Settings")
+    st.write("Configure how the lab manager receives notifications and how the app behaves.")
+    
+    # Instant Notifications Toggle
+    instant_notify_val = db.get_setting("instant_notifications_enabled", "False") == "True"
+    new_notify_val = st.toggle("🚀 Instant Email Notifications", value=instant_notify_val, 
+                               help="If enabled, the lab manager will receive an email IMMEDIATELY whenever a researcher submits a new purchase request.")
+    
+    if new_notify_val != instant_notify_val:
+        db.set_setting("instant_notifications_enabled", str(new_notify_val))
+        st.success(f"Instant notifications {'enabled' if new_notify_val else 'disabled'}.")
+        time.sleep(1)
+        st.rerun()
+
+    st.divider()
+    
+    # Email Digest Layout Setting
+    current_layout = db.get_setting("email_digest_layout", "Abbreviated")
+    new_layout = st.radio("📧 Weekly Digest Layout", options=["Abbreviated", "Detailed"], index=0 if current_layout == "Abbreviated" else 1,
+                          help="Abbreviated: One line per item. Detailed: Shows all specs, catalog #s, and links.")
+    
+    if new_layout != current_layout:
+        db.set_setting("email_digest_layout", new_layout)
+        st.success(f"Digest layout updated to {new_layout}.")
+        time.sleep(1)
+        st.rerun()
+
+    st.divider()
+    st.info("💡 Note: These settings are stored in the database and apply to all users.")
 
 # --- Database Status Flag ---
 st.sidebar.markdown("---")

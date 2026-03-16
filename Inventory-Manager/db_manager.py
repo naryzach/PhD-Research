@@ -88,6 +88,12 @@ class AdvancedLabInventory:
                 date_used TIMESTAMP DEFAULT {ts_default},
                 FOREIGN KEY (item_id) REFERENCES inventory (item_id)
             )
+            """,
+            f"""
+            CREATE TABLE IF NOT EXISTS app_settings (
+                setting_key TEXT PRIMARY KEY,
+                setting_value TEXT
+            )
             """
         ]
         
@@ -103,6 +109,7 @@ class AdvancedLabInventory:
         # --- Manual Migration: Add last_depleted column if missing ---
         try:
             if self.is_postgres:
+                self.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS is_depleted BOOLEAN DEFAULT FALSE")
                 self.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS last_depleted TIMESTAMP")
                 self.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT FALSE")
                 
@@ -124,11 +131,16 @@ class AdvancedLabInventory:
                             continue
                     s.commit()
             else:
-                self.execute("ALTER TABLE inventory ADD COLUMN last_depleted TIMESTAMP")
-                self.execute("ALTER TABLE inventory ADD COLUMN archived BOOLEAN DEFAULT 0")
+                # SQLite migration: separate calls to handle columns already existing
+                for col, col_type in [("is_depleted", "BOOLEAN DEFAULT 0"), 
+                                      ("last_depleted", "TIMESTAMP"), 
+                                      ("archived", "BOOLEAN DEFAULT 0")]:
+                    try:
+                        self.execute(f"ALTER TABLE inventory ADD COLUMN {col} {col_type}")
+                    except Exception:
+                        pass
             self.commit()
         except Exception:
-            # Column likely already exists or other non-critical error
             pass
 
     def get_query_df(self, query, params=None, ttl=0):
@@ -215,8 +227,25 @@ class AdvancedLabInventory:
     def conn(self):
         if self.is_postgres:
             return self._conn.engine
+        return self.conn_sqlite
+
+    # --- Settings Management ---
+    def get_setting(self, key, default=None):
+        """Retrieves a setting from the app_settings table."""
+        res = self.get_query_df("SELECT setting_value FROM app_settings WHERE setting_key = :k" if self.is_postgres else "SELECT setting_value FROM app_settings WHERE setting_key = ?", 
+                               params={"k": key} if self.is_postgres else (key,))
+        if res.empty:
+            return default
+        return res.iloc[0]['setting_value']
+
+    def set_setting(self, key, value):
+        """Updates or inserts a setting into the app_settings table."""
+        if self.is_postgres:
+            self.execute("INSERT INTO app_settings (setting_key, setting_value) VALUES (:k, :v) ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value", 
+                         {"k": key, "v": str(value)})
         else:
-            return self.conn_sqlite
+            self.execute("INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES (?, ?)", (key, str(value)))
+        self.commit()
 
     # --- Missing Helper Methods from app.py ---
 
@@ -233,6 +262,14 @@ class AdvancedLabInventory:
         query = f"INSERT INTO purchase_requests ({cols}) VALUES ({placeholders})"
         self.execute(query, tuple(request_data.values()) if not self.is_postgres else request_data)
         self.commit()
+
+        # Check for instant notification setting
+        if self.get_setting("instant_notifications_enabled", "False") == "True":
+            try:
+                from friday_mailer import send_instant_notification
+                send_instant_notification(request_data)
+            except Exception as e:
+                print(f"Failed to send instant notification: {e}")
 
     def search_similar_items(self, search_term):
         term = f"%{search_term}%"
