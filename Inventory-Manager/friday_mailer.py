@@ -93,6 +93,35 @@ def generate_digest_body(db, include_all_pending=False):
         
     return body
 
+def generate_received_body(db):
+    """Generates the text body for items recently added to the lab."""
+    last_week = datetime.now() - timedelta(days=7)
+    
+    # Query for items added in the last 7 days
+    # We explicitly exclude archived items
+    query = "SELECT name, category, quantity, unit, price, source_type, date_added FROM inventory WHERE date_added >= ? AND archived IS FALSE"
+    df_received = db.get_query_df(query, params=(last_week,))
+    
+    if df_received.empty:
+        return None
+        
+    body = "🧪 RECENTLY RECEIVED LAB ITEMS (Last 7 Days):\n\n"
+    total_spent = 0.0
+    
+    for _, row in df_received.iterrows():
+        added_on = pd.to_datetime(row['date_added']).strftime('%Y-%m-%d') if pd.notna(row['date_added']) else "N/A"
+        price = float(row['price']) if pd.notna(row['price']) else 0.0
+        # Since we don't have a 'received_quantity' in inventory (it's updated inline), 
+        # we show the current quantity as a proxy for what was added.
+        body += f"✅ {row['name']} ({row['category']})\n"
+        body += f"   Quantity: {row['quantity']} {row['unit']} | Source: {row['source_type']}\n"
+        body += f"   Price: ${price:,.2f} | Added on: {added_on}\n"
+        body += "-" * 40 + "\n"
+        total_spent += price
+        
+    body += f"\n💰 TOTAL SPENT THIS WEEK: ${total_spent:,.2f}\n"
+    return body
+
 def send_friday_digest(include_all_pending=False):
     db = AdvancedLabInventory()
     body = generate_digest_body(db, include_all_pending)
@@ -102,6 +131,17 @@ def send_friday_digest(include_all_pending=False):
         return False, "No data to report.", ""
     
     return _send_email("🧪 Friday Lab Orders & Inventory Digest", body)
+
+def send_received_digest():
+    """Generates and sends the digest of recently received items."""
+    db = AdvancedLabInventory()
+    body = generate_received_body(db)
+    db.close()
+    
+    if not body:
+        return False, "No items were added to the inventory this week.", ""
+        
+    return _send_email("📦 Lab Received Items Digest", body)
 
 def send_instant_notification(order_data):
     """Sends an immediate email for a new purchase request."""

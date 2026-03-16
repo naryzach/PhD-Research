@@ -69,17 +69,9 @@ db = get_db()
 # The core tables in your database
 TABLES = ["inventory", "purchase_requests", "usage_log"]
 
-menu = ["🔄 Manage Order Status", "✏️ Edit Tables Directly", "📥 Export Data (CSV)", "💻 Advanced: Raw SQL", "🛠️ Database Maintenance", "🧹 Clear System Cache", "⚙️ System Settings"]
+menu = ["🔄 Manage Order Status", "✏️ Edit Tables Directly", "📥 Export Data (CSV)", "💻 Advanced: Raw SQL", "🛠️ Database Maintenance", "⚙️ System Settings"]
 choice = st.sidebar.radio("Admin Tools", menu)
 
-if choice == "🧹 Clear System Cache":
-    st.header("System Maintenance")
-    st.write("If you are seeing errors about missing methods or old data after an update, clearing the cache will force the app to reload the latest code and database connection.")
-    if st.button("🧼 Clear Class & Connection Cache"):
-        st.cache_resource.clear()
-        st.success("Cache cleared! Reloading...")
-        time.sleep(1)
-        st.rerun()
 
 # --- 0. Manage Order Status ---
 if choice == "🔄 Manage Order Status":
@@ -88,38 +80,77 @@ if choice == "🔄 Manage Order Status":
     # Action for Manager: Generate Digest
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("📨 Send Weekly Email Digest (Beta)"):
-            with st.spinner("Preparing digest..."):
-                success, message, body = send_friday_digest(include_all_pending=False)
-                if success:
-                    st.toast(f"✅ {message}")
-                    st.success(message)
+        st.write("**📦 Order Requests Digest**")
+        digest_btn_col1, digest_btn_col2 = st.columns(2)
+        with digest_btn_col1:
+            if st.button("📨 Send Weekly Digest", help="Emails pending orders from the last 7 days"):
+                with st.spinner("Preparing digest..."):
+                    success, message, body = send_friday_digest(include_all_pending=False)
+                    if success:
+                        st.toast(f"✅ {message}")
+                        st.success(message)
+                    else:
+                        st.error(message)
+                        if body:
+                            st.warning("⚠️ **Network Restriction**: Server blocked the email. Send manually below.")
+        with digest_btn_col2:
+            if st.button("👁️ Preview Text", key="preview_pending"):
+                from friday_mailer import generate_digest_body
+                body = generate_digest_body(db, include_all_pending=False)
+                if body:
+                    st.info("Pending Orders Preview:")
+                    st.code(body, language="text")
+                    
+                    # Create a mailto link
+                    try:
+                        manager_email = st.secrets["email"]["manager_email"]
+                        subject = "🧪 Weekly Lab Orders Digest"
+                        mailto_link = f"mailto:{manager_email}?subject={subject}&body={body.replace('\n', '%0D%0A')}"
+                        st.link_button("✉️ Open in Mail Client", mailto_link)
+                        
+                        with st.expander("📋 View Digest Content to Copy"):
+                            st.code(body, language="text")
+                    except Exception:
+                        pass
                 else:
-                    st.error(message)
-                    if body:
-                        st.warning("⚠️ **Network Restriction**: Server blocked the email. Send manually below.")
+                    st.warning("No new orders or depleted items to report.")
     
     with col2:
-        if st.button("👁️ Preview Weekly Digest (Text Only)"):
-            from friday_mailer import generate_digest_body
-            body = generate_digest_body(db, include_all_pending=False)
-            if body:
-                st.info("Digest Preview:")
-                st.code(body, language="text")
-                
-                # Create a mailto link
-                try:
-                    manager_email = st.secrets["email"]["manager_email"]
-                    subject = "🧪 Weekly Lab Orders Digest"
-                    mailto_link = f"mailto:{manager_email}?subject={subject}&body={body.replace('\n', '%0D%0A')}"
-                    st.link_button("✉️ Open in Mail Client", mailto_link)
+        st.write("**✅ Recently Received Items**")
+        received_btn_col1, received_btn_col2 = st.columns(2)
+        with received_btn_col1:
+            if st.button("📨 Email Received Digest", help="Emails items added to inventory in the last 7 days"):
+                from friday_mailer import send_received_digest
+                with st.spinner("Sending received digest..."):
+                    success, message, body = send_received_digest()
+                    if success:
+                        st.toast(f"✅ {message}")
+                        st.success(message)
+                    else:
+                        st.error(message)
+                        if body:
+                            st.warning("⚠️ **Network Restriction**: Server blocked the email. Send manually below.")
+        with received_btn_col2:
+            if st.button("👁️ Preview Text", key="preview_received"):
+                from friday_mailer import generate_received_body
+                body = generate_received_body(db)
+                if body:
+                    st.info("Received Items Preview:")
+                    st.code(body, language="text")
                     
-                    with st.expander("📋 View Digest Content to Copy"):
-                        st.code(body, language="text")
-                except Exception:
-                    pass
-            else:
-                st.warning("No new orders or depleted items to report.")
+                    # Create a mailto link
+                    try:
+                        manager_email = st.secrets["email"]["manager_email"]
+                        subject = "📦 Lab Received Items Digest"
+                        mailto_link = f"mailto:{manager_email}?subject={subject}&body={body.replace('\n', '%0D%0A')}"
+                        st.link_button("✉️ Open in Mail Client", mailto_link)
+                        
+                        with st.expander("📋 View Digest Content to Copy"):
+                            st.code(body, language="text")
+                    except Exception:
+                        pass
+                else:
+                    st.warning("No items were added to the inventory in the last 7 days.")
     
     st.info("Update the status of pending lab requests.")
     
@@ -369,7 +400,16 @@ elif choice == "⚙️ System Settings":
         st.rerun()
 
     st.divider()
-    st.info("💡 Note: These settings are stored in the database and apply to all users.")
+    st.subheader("🧹 System Maintenance")
+    st.write("If you are seeing errors about missing methods or old data after an update, clearing the cache will force the app to reload the latest code and database connection.")
+    if st.button("🧼 Clear Class & Connection Cache"):
+        st.cache_resource.clear()
+        st.success("Cache cleared! Reloading...")
+        time.sleep(1)
+        st.rerun()
+
+    st.divider()
+    #st.info("💡 Note: These settings are stored in the database and apply to all users.")
 
 # --- Database Status Flag ---
 st.sidebar.markdown("---")
