@@ -70,19 +70,24 @@ def generate_digest_body(db, include_all_pending=False):
         total_cost = 0.0
         
         for _, row in df_orders.iterrows():
-            price = float(row['price']) if pd.notna(row['price']) else 0.0
-            total_cost += price
+            unit_price = float(row['price']) if pd.notna(row['price']) else 0.0
+            qty = float(row['quantity']) if pd.notna(row['quantity']) else 1.0
+            line_total = unit_price * qty
+            total_cost += line_total
+            
+            ice_flag = "❄️ [KEEP ON ICE]" if row.get('keep_on_ice') else ""
             
             if layout == "Detailed":
-                body += f"📦 {row['item_name']}\n"
+                body += f"📦 {row['item_name']} {ice_flag}\n"
                 body += f"   Requested by: {row['requester_name']}\n"
+                body += f"   Quantity: {qty:.1f}\n"
                 body += f"   Specs: {row['specs'] if pd.notna(row['specs']) else 'N/A'}\n"
                 body += f"   Catalog #: {row['catalog_number'] if pd.notna(row['catalog_number']) else 'N/A'} | Seller: {row['seller'] if pd.notna(row['seller']) else 'N/A'}\n"
-                body += f"   Price: ${price:,.2f}\n"
+                body += f"   Price: ${unit_price:,.2f} (Total: ${line_total:,.2f})\n"
                 body += f"   Link: {row['link'] if pd.notna(row['link']) else 'N/A'}\n"
                 body += "-"*40 + "\n"
             else:
-                body += f"📦 {row['item_name']} - ${price:,.2f} (Req by: {row['requester_name']})\n"
+                body += f"📦 {row['item_name']} - {qty:.1f}x @ ${unit_price:,.2f} = ${line_total:,.2f} (Req by: {row['requester_name']}) {ice_flag}\n"
                 
         body += f"\n💰 TOTAL ESTIMATED COST: ${total_cost:,.2f}\n"
         
@@ -103,11 +108,17 @@ def send_instant_notification(order_data):
     item_name = order_data.get('item_name', 'Unknown')
     requester = order_data.get('requester_name', 'Unknown')
     price = float(order_data.get('price', 0.0))
+    qty = float(order_data.get('quantity', 1.0))
+    on_ice = order_data.get('keep_on_ice', False)
     
     body = f"🚀 NEW PURCHASE REQUEST SUBMITTED\n\n"
+    if on_ice:
+        body += "❄️⚠️ STORAGE WARNING: KEEP ON ICE ⚠️❄️\n\n"
+        
     body += f"Item: {item_name}\n"
     body += f"Requested by: {requester}\n"
-    body += f"Price: ${price:,.2f}\n"
+    body += f"Quantity: {qty:.1f}\n"
+    body += f"Price: ${price:,.2f} (Est. Total: ${price*qty:,.2f})\n"
     body += f"Catalog #: {order_data.get('catalog_number', 'N/A')}\n"
     body += f"Seller: {order_data.get('seller', 'N/A')}\n"
     body += f"Link: {order_data.get('link', 'N/A')}\n"

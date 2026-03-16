@@ -354,6 +354,14 @@ elif choice == "Request a Purchase":
                 link = st.text_input("URL Link", value=st.session_state.prefill_link)
                 price = st.number_input("Estimated Price ($)", min_value=0.0, step=0.01, value=st.session_state.prefill_price)
                 
+                c1, c2 = st.columns(2)
+                with c1:
+                    order_qty = st.number_input("Quantity to Order", min_value=1.0, value=1.0, step=1.0)
+                with c2:
+                    st.write("") # Spacer
+                    st.write("") 
+                    on_ice = st.checkbox("❄️ Keep on Ice", value=False)
+                
             submitted = st.form_submit_button("Submit Request")
             
             if submitted:
@@ -369,6 +377,8 @@ elif choice == "Request a Purchase":
                         "catalog_number": catalog,
                         "link": link,
                         "price": price,
+                        "quantity": order_qty,
+                        "keep_on_ice": on_ice,
                         "status": "Need to order",
                         "request_date": datetime.now()
                     })
@@ -391,13 +401,16 @@ elif choice == "Process Orders":
     
     if not df_pending.empty:
         # Style the dataframe by status
-        st.dataframe(df_pending.style.apply(color_status, axis=1), width='stretch', hide_index=True)
+        display_df = df_pending[['request_id', 'item_name', 'requester_name', 'quantity', 'keep_on_ice', 'status', 'request_date']].copy()
+        # Add a visual indicator for Ice
+        display_df['keep_on_ice'] = display_df['keep_on_ice'].apply(lambda x: "❄️ YES" if x else "No")
+        st.dataframe(display_df.style.apply(color_status, axis=1), width='stretch', hide_index=True)
         
         st.markdown("---")
         st.subheader("Mark Order as Received & Add to Inventory")
         
         # Select an order to process
-        order_list = df_pending.apply(lambda x: f"[{x['request_id']}] {x['item_name']} from {x['seller']}", axis=1).tolist()
+        order_list = df_pending.apply(lambda x: f"[{x['request_id']}] {x['item_name']} (Qty: {x['quantity']}) {'❄️' if x['keep_on_ice'] else ''}", axis=1).tolist()
         selected_order_str = st.selectbox("Select Order to Receive", order_list)
         
         if selected_order_str:
@@ -405,6 +418,8 @@ elif choice == "Process Orders":
             order_data = df_pending[df_pending['request_id'] == req_id].iloc[0]
             
             st.write(f"### Integrating: {order_data['item_name']}")
+            if order_data['keep_on_ice']:
+                st.warning("️❄️ **STORAGE WARNING**: This item was flagged to be **kept on ice**.")
             
             # 1. Dynamic Selectors (Outside the form for instant updates)
             col_a, col_b = st.columns(2)
@@ -422,7 +437,7 @@ elif choice == "Process Orders":
             with st.form("receive_order_form"):
                 c1, c2, c3 = st.columns(3)
                 with c1:
-                    qty = st.number_input("Quantity Received", min_value=0.01, value=1.0)
+                    qty = st.number_input("Quantity Received", min_value=0.01, value=float(order_data.get('quantity', 1.0)))
                     # Pre-fills with the smart default, but allows manual overriding
                     unit = st.text_input("Unit", value=default_unit)
                 with c2:

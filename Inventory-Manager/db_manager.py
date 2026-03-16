@@ -75,6 +75,8 @@ class AdvancedLabInventory:
                 seller TEXT,
                 link TEXT,
                 price REAL,
+                quantity REAL DEFAULT 1.0,
+                keep_on_ice BOOLEAN DEFAULT {bool_default},
                 status TEXT DEFAULT 'Need to order',
                 request_date TIMESTAMP DEFAULT {ts_default}
             )
@@ -112,6 +114,8 @@ class AdvancedLabInventory:
                 self.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS is_depleted BOOLEAN DEFAULT FALSE")
                 self.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS last_depleted TIMESTAMP")
                 self.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT FALSE")
+                self.execute("ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS quantity REAL DEFAULT 1.0")
+                self.execute("ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS keep_on_ice BOOLEAN DEFAULT FALSE")
                 
                 # Sync ALL sequences to prevent UniqueViolation
                 with self._conn.session as s:
@@ -137,6 +141,14 @@ class AdvancedLabInventory:
                                       ("archived", "BOOLEAN DEFAULT 0")]:
                     try:
                         self.execute(f"ALTER TABLE inventory ADD COLUMN {col} {col_type}")
+                    except Exception:
+                        pass
+                
+                # Purchase requests migration
+                for col, col_type in [("quantity", "REAL DEFAULT 1.0"), 
+                                      ("keep_on_ice", "BOOLEAN DEFAULT 0")]:
+                    try:
+                        self.execute(f"ALTER TABLE purchase_requests ADD COLUMN {col} {col_type}")
                     except Exception:
                         pass
             self.commit()

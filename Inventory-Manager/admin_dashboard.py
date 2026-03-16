@@ -124,17 +124,19 @@ if choice == "🔄 Manage Order Status":
     st.info("Update the status of pending lab requests.")
     
     # Fetch all active orders
-    df_active = db.get_query_df("SELECT request_id, item_name, requester_name, seller, status, request_date FROM purchase_requests WHERE status NOT IN ('Received', 'Cancelled', 'LOST')")
+    df_active = db.get_query_df("SELECT request_id, item_name, requester_name, quantity, keep_on_ice, seller, status, request_date FROM purchase_requests WHERE status NOT IN ('Received', 'Cancelled', 'LOST')")
     
     if df_active.empty:
         st.success("There are no active orders to manage!")
     else:
         # Style the dataframe by status
-        st.dataframe(df_active.style.apply(color_status, axis=1), hide_index=True, width='stretch')
+        display_active = df_active.copy()
+        display_active['keep_on_ice'] = display_active['keep_on_ice'].apply(lambda x: "❄️ YES" if x else "No")
+        st.dataframe(display_active.style.apply(color_status, axis=1), hide_index=True, width='stretch')
         st.markdown("---")
         
         # Select an order to update
-        order_list = df_active.apply(lambda x: f"[{x['request_id']}] {x['item_name']} (Current: {x['status']})", axis=1).tolist()
+        order_list = df_active.apply(lambda x: f"[{x['request_id']}] {x['item_name']} (Qty: {x['quantity']}) {'❄️' if x['keep_on_ice'] else ''}", axis=1).tolist()
         selected_order = st.selectbox("Select Order to Update", order_list)
         
         # The full list of your lab's specific statuses
@@ -162,11 +164,13 @@ if choice == "🔄 Manage Order Status":
         # --- Deactivated Orders (History) ---
         st.markdown("---")
         with st.expander("🚫 View Deactivated Orders (Cancelled / LOST)"):
-            df_deactivated = db.get_query_df("SELECT request_id, item_name, requester_name, seller, status, request_date FROM purchase_requests WHERE status IN ('Cancelled', 'LOST')")
+            df_deactivated = db.get_query_df("SELECT request_id, item_name, requester_name, quantity, keep_on_ice, seller, status, request_date FROM purchase_requests WHERE status IN ('Cancelled', 'LOST')")
             if df_deactivated.empty:
                 st.write("No deactivated orders found.")
             else:
-                st.dataframe(df_deactivated.style.apply(color_status, axis=1), hide_index=True, width='stretch')
+                display_deactivated = df_deactivated.copy()
+                display_deactivated['keep_on_ice'] = display_deactivated['keep_on_ice'].apply(lambda x: "❄️ YES" if x else "No")
+                st.dataframe(display_deactivated.style.apply(color_status, axis=1), hide_index=True, width='stretch')
 
 # --- 1. Direct Table Editor ---
 elif choice == "✏️ Edit Tables Directly":
