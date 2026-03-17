@@ -6,6 +6,7 @@ from friday_mailer import send_friday_digest
 from datetime import datetime
 import os
 import time
+from utils import display_tracking_button
 
 # --- Authentication Setup ---
 def check_password():
@@ -194,6 +195,10 @@ if choice == "🔄 Manage Order Status":
         order_list = df_active.apply(lambda x: f"[{x['request_id']}] {x['item_name']} (Qty: {x['quantity']}) {'❄️' if x['keep_on_ice'] else ''}", axis=1).tolist()
         selected_order = st.selectbox("Select Order to Update", order_list)
         
+        # --- Tracking Integration (Directly under dropdown) ---
+        selected_row = df_active.iloc[order_list.index(selected_order)]
+        display_tracking_button(selected_row.get('courier'), selected_row.get('shipping_number'))
+        
         # The full list of your lab's specific statuses
         status_options = [
             "Need to order", "Ordered", "Shipped", "Pending", "Waiting for Shipment", 
@@ -218,6 +223,7 @@ if choice == "🔄 Manage Order Status":
         with col2:
             st.write("") # Spacing
             st.write("")
+            
             if st.button("Update Status", width='stretch'):
                 req_id = int(selected_order.split("]")[0].replace("[", ""))
                 # Use standard timestamp for both SQLite and Postgres

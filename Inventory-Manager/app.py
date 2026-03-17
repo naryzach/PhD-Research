@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import smtplib
 from email.message import EmailMessage
 import time
+from utils import display_tracking_button
 
 # --- Smart Defaults Configuration ---
 CATEGORY_DEFAULTS = {
@@ -439,6 +440,9 @@ elif choice == "Process Orders":
         if selected_order_str:
             req_id = int(selected_order_str.split("]")[0].replace("[", ""))
             order_data = df_pending[df_pending['request_id'] == req_id].iloc[0]
+            
+            # --- Tracking Integration (Directly under dropdown) ---
+            display_tracking_button(order_data.get('courier'), order_data.get('shipping_number'))
             
             st.write(f"### Integrating: {order_data['item_name']}")
             if order_data['keep_on_ice']:
