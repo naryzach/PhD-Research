@@ -19,7 +19,16 @@ class AdvancedLabInventory:
         # Check if Supabase/PostgreSQL secrets are available
         if "connections" in st.secrets and "postgresql" in st.secrets.connections:
             try:
-                self._conn = st.connection("postgresql", type="sql")
+                # Add aggressive pooling to avoid client limits in Supabase Session Mode
+                self._conn = st.connection(
+                    "postgresql", 
+                    type="sql", 
+                    pool_size=1, # One stable connection per session
+                    max_overflow=0, # No extra connections
+                    pool_timeout=10, # Fail fast if pool is full
+                    pool_pre_ping=True,
+                    pool_recycle=3600
+                )
                 self.is_postgres = True
             except Exception as e:
                 st.warning(f"Failed to connect to Supabase: {e}. Falling back to SQLite.")
@@ -78,7 +87,8 @@ class AdvancedLabInventory:
                 quantity REAL DEFAULT 1.0,
                 keep_on_ice BOOLEAN DEFAULT {bool_default},
                 status TEXT DEFAULT 'Need to order',
-                request_date TIMESTAMP DEFAULT {ts_default}
+                request_date TIMESTAMP DEFAULT {ts_default},
+                status_updated_at TIMESTAMP DEFAULT {ts_default}
             )
             """,
             f"""
@@ -116,6 +126,9 @@ class AdvancedLabInventory:
                 self.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT FALSE")
                 self.execute("ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS quantity REAL DEFAULT 1.0")
                 self.execute("ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS keep_on_ice BOOLEAN DEFAULT FALSE")
+                self.execute("ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS status_updated_at TIMESTAMP")
+                # Initialize status_updated_at if it's null
+                self.execute("UPDATE purchase_requests SET status_updated_at = request_date WHERE status_updated_at IS NULL")
                 
                 # Sync ALL sequences to prevent UniqueViolation
                 with self._conn.session as s:
@@ -146,9 +159,12 @@ class AdvancedLabInventory:
                 
                 # Purchase requests migration
                 for col, col_type in [("quantity", "REAL DEFAULT 1.0"), 
-                                      ("keep_on_ice", "BOOLEAN DEFAULT 0")]:
+                                      ("keep_on_ice", "BOOLEAN DEFAULT 0"),
+                                      ("status_updated_at", "TIMESTAMP")]:
                     try:
                         self.execute(f"ALTER TABLE purchase_requests ADD COLUMN {col} {col_type}")
+                        if col == "status_updated_at":
+                            self.execute("UPDATE purchase_requests SET status_updated_at = request_date WHERE status_updated_at IS NULL")
                     except Exception:
                         pass
             self.commit()
@@ -159,7 +175,9 @@ class AdvancedLabInventory:
         """Helper to run a query and return a pandas DataFrame."""
         if self.is_postgres:
             query, params = self._convert_query(query, params)
-            return self._conn.query(query, params=params, ttl=ttl)
+            # Use explicit session to ensure connection is released immediately
+            with self._conn.session as s:
+                return pd.read_sql(text(query), s.bind, params=params)
         else:
             return pd.read_sql_query(query, self.conn_sqlite, params=params)
 
@@ -201,16 +219,17 @@ class AdvancedLabInventory:
     def execute(self, query, params=None):
         """Execute a raw SQL command."""
         if self.is_postgres:
-            # If it's a SELECT, we use .query() to store result for fetchone()
+            query, params = self._convert_query(query, params)
             if query.strip().upper().startswith("SELECT"):
-                query, params = self._convert_query(query, params)
-                self._last_result = self._conn.query(query, params=params)
-                self._row_index = 0
-            else:
-                # For non-SELECT, use session
-                query, params = self._convert_query(query, params)
+                # For SELECT used via fetchone(), we use a session but store the result
                 with self._conn.session as s:
-                    res = s.execute(text(query), params)
+                    res = s.execute(text(query), params or {})
+                    self._last_result = pd.DataFrame(res.fetchall(), columns=res.keys())
+                    self._row_index = 0
+            else:
+                # For non-SELECT, use session and commit
+                with self._conn.session as s:
+                    res = s.execute(text(query), params or {})
                     self.rowcount = res.rowcount
                     s.commit()
         else:
@@ -232,7 +251,13 @@ class AdvancedLabInventory:
 
     def close(self):
         """Closes the connection."""
-        if not self.is_postgres:
+        if self.is_postgres:
+            # Dispose the engine to release all pooled connections
+            try:
+                self._conn.engine.dispose()
+            except Exception:
+                pass
+        else:
             self.conn_sqlite.close()
 
     @property

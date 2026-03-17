@@ -39,7 +39,9 @@ def check_password():
 
 # --- Helper Functions ---
 def color_status(row):
-    status = str(row.get('status', '')).lower()
+    # Support both internal 'status' and user-facing 'Status'
+    status_val = row.get('Status') if 'Status' in row else row.get('status')
+    status = str(status_val or '').lower()
     if 'need to order' in status:
         return ['background-color: rgba(255, 0, 0, 0.2)'] * len(row) # Red
     elif 'ordered' in status:
@@ -96,33 +98,18 @@ if choice == "🔄 Manage Order Status":
         with digest_btn_col2:
             if st.button("👁️ Preview Text", key="preview_pending"):
                 from friday_mailer import generate_digest_body
-                body = generate_digest_body(db, include_all_pending=False)
-                if body:
-                    st.info("Pending Orders Preview:")
-                    st.code(body, language="text")
-                    
-                    # Create a mailto link
-                    try:
-                        manager_email = st.secrets["email"]["manager_email"]
-                        subject = "🧪 Weekly Lab Orders Digest"
-                        mailto_link = f"mailto:{manager_email}?subject={subject}&body={body.replace('\n', '%0D%0A')}"
-                        st.link_button("✉️ Open in Mail Client", mailto_link)
-                        
-                        with st.expander("📋 View Digest Content to Copy"):
-                            st.code(body, language="text")
-                    except Exception:
-                        pass
-                else:
-                    st.warning("No new orders or depleted items to report.")
+                st.session_state.preview_content = generate_digest_body(db, include_all_pending=False)
+                st.session_state.preview_type = "Pending Orders"
+                st.session_state.preview_subject = "🧪 Weekly Lab Orders Digest"
     
     with col2:
-        st.write("**✅ Recently Received Items**")
-        received_btn_col1, received_btn_col2 = st.columns(2)
-        with received_btn_col1:
-            if st.button("📨 Email Received Digest", help="Emails items added to inventory in the last 7 days"):
-                from friday_mailer import send_received_digest
-                with st.spinner("Sending received digest..."):
-                    success, message, body = send_received_digest()
+        st.write("**🧪 Recent Status Updates**")
+        updates_btn_col1, updates_btn_col2 = st.columns(2)
+        with updates_btn_col1:
+            if st.button("📨 Email Update Digest", help="Emails all status changes from the last 7 days"):
+                from friday_mailer import send_status_updates_digest
+                with st.spinner("Sending updates digest..."):
+                    success, message, body = send_status_updates_digest()
                     if success:
                         st.toast(f"✅ {message}")
                         st.success(message)
@@ -130,39 +117,70 @@ if choice == "🔄 Manage Order Status":
                         st.error(message)
                         if body:
                             st.warning("⚠️ **Network Restriction**: Server blocked the email. Send manually below.")
-        with received_btn_col2:
-            if st.button("👁️ Preview Text", key="preview_received"):
-                from friday_mailer import generate_received_body
-                body = generate_received_body(db)
-                if body:
-                    st.info("Received Items Preview:")
-                    st.code(body, language="text")
-                    
-                    # Create a mailto link
-                    try:
-                        manager_email = st.secrets["email"]["manager_email"]
-                        subject = "📦 Lab Received Items Digest"
-                        mailto_link = f"mailto:{manager_email}?subject={subject}&body={body.replace('\n', '%0D%0A')}"
-                        st.link_button("✉️ Open in Mail Client", mailto_link)
-                        
-                        with st.expander("📋 View Digest Content to Copy"):
-                            st.code(body, language="text")
-                    except Exception:
-                        pass
-                else:
-                    st.warning("No items were added to the inventory in the last 7 days.")
+        with updates_btn_col2:
+            if st.button("👁️ Preview Text", key="preview_updates"):
+                from friday_mailer import generate_status_updates_body
+                st.session_state.preview_content = generate_status_updates_body(db)
+                st.session_state.preview_type = "Recent Updates"
+                st.session_state.preview_subject = "🧪 Lab Order Status Updates Digest"
+    
+    # --- Full Width Preview Display ---
+    if "preview_content" in st.session_state and st.session_state.preview_content:
+        st.markdown("---")
+        st.info(f"🔍 {st.session_state.preview_type} Preview:")
+        st.code(st.session_state.preview_content, language="text")
+        
+        # Action Buttons for the preview
+        btn_col1, btn_col2, _ = st.columns([1, 1, 2])
+        with btn_col1:
+            try:
+                manager_email = st.secrets["email"]["manager_email"]
+                subject = st.session_state.preview_subject
+                body = st.session_state.preview_content
+                mailto_link = f"mailto:{manager_email}?subject={subject}&body={body.replace('\n', '%0D%0A')}"
+                st.link_button("✉️ Open in Mail Client", mailto_link, width='stretch')
+            except Exception:
+                pass
+        with btn_col2:
+            if st.button("❌ Close Preview", width='stretch'):
+                del st.session_state.preview_content
+                st.rerun()
+                
+        with st.expander("📋 View Digest Content to Copy"):
+            st.code(st.session_state.preview_content, language="text")
+    elif "preview_content" in st.session_state:
+        st.warning("No data found for the requested preview.")
+        if st.button("Clear Notification"):
+            del st.session_state.preview_content
+            st.rerun()
     
     st.info("Update the status of pending lab requests.")
     
     # Fetch all active orders
-    df_active = db.get_query_df("SELECT request_id, item_name, requester_name, quantity, keep_on_ice, seller, status, request_date FROM purchase_requests WHERE status NOT IN ('Received', 'Cancelled', 'LOST')")
-    
+    df_active = db.get_query_df("SELECT request_id, item_name, requester_name, quantity, keep_on_ice, seller, status, request_date, status_updated_at FROM purchase_requests WHERE status NOT IN ('Received', 'Cancelled', 'LOST')")
     if df_active.empty:
         st.success("There are no active orders to manage!")
     else:
         # Style the dataframe by status
-        display_active = df_active.copy()
+        display_active = df_active[['item_name', 'requester_name', 'quantity', 'keep_on_ice', 'seller', 'status', 'request_date', 'status_updated_at']].copy()
         display_active['keep_on_ice'] = display_active['keep_on_ice'].apply(lambda x: "❄️ YES" if x else "No")
+        
+        # Format dates for readability
+        display_active['request_date'] = pd.to_datetime(display_active['request_date']).dt.strftime('%Y-%m-%d')
+        display_active['status_updated_at'] = pd.to_datetime(display_active['status_updated_at']).dt.strftime('%Y-%m-%d')
+        
+        # Friendly headers
+        display_active = display_active.rename(columns={
+            "item_name": "Item Name",
+            "requester_name": "Requested By",
+            "quantity": "Qty",
+            "keep_on_ice": "Keep on Ice",
+            "seller": "Seller",
+            "status": "Status",
+            "request_date": "Requested On",
+            "status_updated_at": "Last Update"
+        })
+        
         st.dataframe(display_active.style.apply(color_status, axis=1), hide_index=True, width='stretch')
         st.markdown("---")
         
@@ -180,12 +198,16 @@ if choice == "🔄 Manage Order Status":
         col1, col2 = st.columns([2, 1])
         with col1:
             new_status = st.selectbox("New Status", status_options)
+            if new_status == "Received":
+                st.info("💡 **Tip**: If you want to integrate this item into the **Live Inventory** (location, lot #, etc), use the 'Process Orders' tab in the User Dashboard instead!")
         with col2:
             st.write("") # Spacing
             st.write("")
             if st.button("Update Status", width='stretch'):
                 req_id = int(selected_order.split("]")[0].replace("[", ""))
-                db.cursor.execute("UPDATE purchase_requests SET status = ? WHERE request_id = ?", (new_status, req_id))
+                # Use standard timestamp for both SQLite and Postgres
+                ts = datetime.now()
+                db.cursor.execute("UPDATE purchase_requests SET status = ?, status_updated_at = ? WHERE request_id = ?", (new_status, ts, req_id))
                 db.commit()
                 st.toast(f"✅ Status updated!")
                 st.success(f"Updated order #{req_id} to '{new_status}'!")
@@ -195,12 +217,29 @@ if choice == "🔄 Manage Order Status":
         # --- Deactivated Orders (History) ---
         st.markdown("---")
         with st.expander("🚫 View Deactivated Orders (Cancelled / LOST)"):
-            df_deactivated = db.get_query_df("SELECT request_id, item_name, requester_name, quantity, keep_on_ice, seller, status, request_date FROM purchase_requests WHERE status IN ('Cancelled', 'LOST')")
+            df_deactivated = db.get_query_df("SELECT item_name, requester_name, quantity, keep_on_ice, seller, status, request_date, status_updated_at FROM purchase_requests WHERE status IN ('Cancelled', 'LOST')")
             if df_deactivated.empty:
                 st.write("No deactivated orders found.")
             else:
                 display_deactivated = df_deactivated.copy()
                 display_deactivated['keep_on_ice'] = display_deactivated['keep_on_ice'].apply(lambda x: "❄️ YES" if x else "No")
+                
+                # Format dates
+                display_deactivated['request_date'] = pd.to_datetime(display_deactivated['request_date']).dt.strftime('%Y-%m-%d')
+                display_deactivated['status_updated_at'] = pd.to_datetime(display_deactivated['status_updated_at']).dt.strftime('%Y-%m-%d')
+
+                # Friendly headers
+                display_deactivated = display_deactivated.rename(columns={
+                    "item_name": "Item Name",
+                    "requester_name": "Requested By",
+                    "quantity": "Qty",
+                    "keep_on_ice": "Keep on Ice",
+                    "seller": "Seller",
+                    "status": "Status",
+                    "request_date": "Requested On",
+                    "status_updated_at": "Archived On"
+                })
+                
                 st.dataframe(display_deactivated.style.apply(color_status, axis=1), hide_index=True, width='stretch')
 
 # --- 1. Direct Table Editor ---

@@ -93,34 +93,54 @@ def generate_digest_body(db, include_all_pending=False):
         
     return body
 
-def generate_received_body(db):
-    """Generates the text body for items recently added to the lab."""
+def generate_status_updates_body(db):
+    """Generates the text body for all orders with recent status changes."""
     last_week = datetime.now() - timedelta(days=7)
     
-    # Query for items added in the last 7 days
-    # We explicitly exclude archived items
-    query = "SELECT name, category, quantity, unit, price, source_type, date_added FROM inventory WHERE date_added >= ? AND archived IS FALSE"
-    df_received = db.get_query_df(query, params=(last_week,))
+    # Query for all purchase requests updated in the last 7 days
+    # We sort by status FIRST (for grouping), then by date (most recent first)
+    query = """
+        SELECT item_name, requester_name, status, status_updated_at, quantity 
+        FROM purchase_requests 
+        WHERE status_updated_at >= ? 
+        ORDER BY status ASC, status_updated_at DESC
+    """
+    df_updates = db.get_query_df(query, params=(last_week,))
     
-    if df_received.empty:
+    if df_updates.empty:
         return None
         
-    body = "🧪 RECENTLY RECEIVED LAB ITEMS (Last 7 Days):\n\n"
-    total_spent = 0.0
+    body = "🧪 RECENT LAB ORDER STATUS UPDATES (Last 7 Days):\n"
+    body += "Items are grouped by their current status.\n\n"
     
-    for _, row in df_received.iterrows():
-        added_on = pd.to_datetime(row['date_added']).strftime('%Y-%m-%d') if pd.notna(row['date_added']) else "N/A"
-        price = float(row['price']) if pd.notna(row['price']) else 0.0
-        # Since we don't have a 'received_quantity' in inventory (it's updated inline), 
-        # we show the current quantity as a proxy for what was added.
-        body += f"✅ {row['name']} ({row['category']})\n"
-        body += f"   Quantity: {row['quantity']} {row['unit']} | Source: {row['source_type']}\n"
-        body += f"   Price: ${price:,.2f} | Added on: {added_on}\n"
-        body += "-" * 40 + "\n"
-        total_spent += price
+    current_group = None
+    for _, row in df_updates.iterrows():
+        status = row['status']
+        updated_at = pd.to_datetime(row['status_updated_at']).strftime('%Y-%m-%d %H:%M')
         
-    body += f"\n💰 TOTAL SPENT THIS WEEK: ${total_spent:,.2f}\n"
+        # Add a header for each status group
+        if status != current_group:
+            current_group = status
+            body += f"\n📌 STATUS: {status.upper()}\n"
+            body += "=" * 30 + "\n"
+            
+        body += f"✅ {row['item_name']} (Qty: {row['quantity']})\n"
+        body += f"   Requested by: {row['requester_name']}\n"
+        body += f"   Updated on: {updated_at}\n"
+        body += "-" * 20 + "\n"
+        
     return body
+
+def send_status_updates_digest():
+    """Generates and sends the digest of recent status updates."""
+    db = AdvancedLabInventory()
+    body = generate_status_updates_body(db)
+    db.close()
+    
+    if not body:
+        return False, "No status updates were recorded this week.", ""
+        
+    return _send_email("🧪 Lab Order Status Updates Digest", body)
 
 def send_friday_digest(include_all_pending=False):
     db = AdvancedLabInventory()
@@ -132,16 +152,16 @@ def send_friday_digest(include_all_pending=False):
     
     return _send_email("🧪 Friday Lab Orders & Inventory Digest", body)
 
-def send_received_digest():
-    """Generates and sends the digest of recently received items."""
+def send_status_updates_digest():
+    """Generates and sends the digest of recent status updates."""
     db = AdvancedLabInventory()
-    body = generate_received_body(db)
+    body = generate_status_updates_body(db)
     db.close()
     
     if not body:
-        return False, "No items were added to the inventory this week.", ""
+        return False, "No status updates were recorded this week.", ""
         
-    return _send_email("📦 Lab Received Items Digest", body)
+    return _send_email("🧪 Lab Order Status Updates Digest", body)
 
 def send_instant_notification(order_data):
     """Sends an immediate email for a new purchase request."""

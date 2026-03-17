@@ -54,7 +54,9 @@ def highlight_low_stock(row):
     return [''] * len(row)
 
 def color_status(row):
-    status = str(row.get('status', '')).lower()
+    # Support both internal 'status' and user-facing 'Status'
+    status_val = row.get('Status') if 'Status' in row else row.get('status')
+    status = str(status_val or '').lower()
     if 'need to order' in status:
         return ['background-color: rgba(255, 0, 0, 0.2)'] * len(row) # Red
     elif 'ordered' in status:
@@ -401,9 +403,27 @@ elif choice == "Process Orders":
     
     if not df_pending.empty:
         # Style the dataframe by status
-        display_df = df_pending[['request_id', 'item_name', 'requester_name', 'quantity', 'keep_on_ice', 'status', 'request_date']].copy()
-        # Add a visual indicator for Ice
+        # Hide request_id from user view and use friendly headers
+        display_df = df_pending[['item_name', 'requester_name', 'quantity', 'keep_on_ice', 'status', 'request_date', 'status_updated_at']].copy()
+        
+        # Format dates for readability
+        display_df['request_date'] = pd.to_datetime(display_df['request_date']).dt.strftime('%Y-%m-%d')
+        display_df['status_updated_at'] = pd.to_datetime(display_df['status_updated_at']).dt.strftime('%Y-%m-%d')
+        
+        # Add visual indicator for ice BEFORE renaming
         display_df['keep_on_ice'] = display_df['keep_on_ice'].apply(lambda x: "❄️ YES" if x else "No")
+        
+        # Rename to friendly headers
+        display_df = display_df.rename(columns={
+            "item_name": "Item Name",
+            "requester_name": "Requested By",
+            "quantity": "Qty",
+            "keep_on_ice": "Keep on Ice",
+            "status": "Status",
+            "request_date": "Date Requested",
+            "status_updated_at": "Last Update"
+        })
+        
         st.dataframe(display_df.style.apply(color_status, axis=1), width='stretch', hide_index=True)
         
         st.markdown("---")
