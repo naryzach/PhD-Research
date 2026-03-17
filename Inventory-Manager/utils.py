@@ -22,11 +22,14 @@ def get_tracking_url(courier, tracking_number):
         # Fallback to Google Search which often recognizes tracking numbers
         return f"https://www.google.com/search?q=track+package+{t}"
 
-def display_tracking_button(courier, tracking_number):
+def display_tracking_button(courier, tracking_number, status=None):
     """
     Displays a Streamlit link button for tracking a package if tracking data is available.
+    Shows a warning if the status is 'Shipped' but info is missing.
     """
     if tracking_number:
         url = get_tracking_url(courier, tracking_number)
         if url:
             st.link_button(f"🚚 Track Package ({courier if courier else 'Detect'})", url, use_container_width=True)
+    elif status and str(status).lower() == "shipped":
+        st.warning("⚠️ No tracking information provided for this shipment.")

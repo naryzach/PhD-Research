@@ -197,7 +197,7 @@ if choice == "🔄 Manage Order Status":
         
         # --- Tracking Integration (Directly under dropdown) ---
         selected_row = df_active.iloc[order_list.index(selected_order)]
-        display_tracking_button(selected_row.get('courier'), selected_row.get('shipping_number'))
+        display_tracking_button(selected_row.get('courier'), selected_row.get('shipping_number'), selected_row.get('status'))
         
         # The full list of your lab's specific statuses
         status_options = [

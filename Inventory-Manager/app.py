@@ -409,7 +409,7 @@ elif choice == "Process Orders":
     if not df_pending.empty:
         # Style the dataframe by status
         # Hide request_id from user view and use friendly headers
-        display_df = df_pending[['item_name', 'requester_name', 'keep_on_ice', 'status', 'status_updated_at', 'shipping_number', 'courier']].copy()
+        display_df = df_pending[['item_name', 'requester_name', 'keep_on_ice', 'status', 'status_updated_at']].copy()
         
         # Format dates for readability
         display_df['status_updated_at'] = pd.to_datetime(display_df['status_updated_at']).dt.strftime('%Y-%m-%d')
@@ -423,9 +423,7 @@ elif choice == "Process Orders":
             "requester_name": "Requested By",
             "keep_on_ice": "Keep on Ice",
             "status": "Status",
-            "status_updated_at": "Last Update",
-            "shipping_number": "Shipping #",
-            "courier": "Courier"
+            "status_updated_at": "Last Update"
         })
         
         st.dataframe(display_df.style.apply(color_status, axis=1), width='stretch', hide_index=True)
@@ -442,7 +440,7 @@ elif choice == "Process Orders":
             order_data = df_pending[df_pending['request_id'] == req_id].iloc[0]
             
             # --- Tracking Integration (Directly under dropdown) ---
-            display_tracking_button(order_data.get('courier'), order_data.get('shipping_number'))
+            display_tracking_button(order_data.get('courier'), order_data.get('shipping_number'), order_data.get('status'))
             
             st.write(f"### Integrating: {order_data['item_name']}")
             if order_data['keep_on_ice']:
