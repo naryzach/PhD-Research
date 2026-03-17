@@ -48,7 +48,11 @@ def color_status(row):
         return ['background-color: rgba(255, 255, 0, 0.2)'] * len(row) # Yellow
     elif 'do not order' in status:
         return ['background-color: rgba(128, 0, 128, 0.2)'] * len(row) # Purple
-    return ['background-color: rgba(0, 0, 255, 0.1)'] * len(row) # Blue
+    elif 'shipped' in status:
+        return ['background-color: rgba(0, 0, 255, 0.2)'] * len(row) # Blue
+    elif 'received' in status:
+        return ['background-color: rgba(0, 255, 0, 0.2)'] * len(row) # Green
+    return ['background-color: rgba(255, 85, 0, 0.25)'] * len(row) # Distinct Orange
 
 # --- Security Gate ---
 # If the password is wrong or not entered yet, stop the script entirely
@@ -157,12 +161,12 @@ if choice == "🔄 Manage Order Status":
     st.info("Update the status of pending lab requests.")
     
     # Fetch all active orders
-    df_active = db.get_query_df("SELECT request_id, item_name, requester_name, quantity, keep_on_ice, seller, status, request_date, status_updated_at FROM purchase_requests WHERE status NOT IN ('Received', 'Cancelled', 'LOST')")
+    df_active = db.get_query_df("SELECT request_id, item_name, requester_name, quantity, keep_on_ice, seller, status, request_date, status_updated_at, shipping_number, courier FROM purchase_requests WHERE status NOT IN ('Received', 'Cancelled', 'Lost')")
     if df_active.empty:
         st.success("There are no active orders to manage!")
     else:
         # Style the dataframe by status
-        display_active = df_active[['item_name', 'requester_name', 'quantity', 'keep_on_ice', 'seller', 'status', 'request_date', 'status_updated_at']].copy()
+        display_active = df_active[['item_name', 'requester_name', 'quantity', 'keep_on_ice', 'seller', 'status', 'request_date', 'status_updated_at', 'shipping_number', 'courier']].copy()
         display_active['keep_on_ice'] = display_active['keep_on_ice'].apply(lambda x: "❄️ YES" if x else "No")
         
         # Format dates for readability
@@ -178,7 +182,9 @@ if choice == "🔄 Manage Order Status":
             "seller": "Seller",
             "status": "Status",
             "request_date": "Requested On",
-            "status_updated_at": "Last Update"
+            "status_updated_at": "Last Update",
+            "shipping_number": "Shipping #",
+            "courier": "Courier"
         })
         
         st.dataframe(display_active.style.apply(color_status, axis=1), hide_index=True, width='stretch')
@@ -190,14 +196,23 @@ if choice == "🔄 Manage Order Status":
         
         # The full list of your lab's specific statuses
         status_options = [
-            "Need to order", "Ordered", "Pending", "Waiting for Shipment", 
-            "Sent to Dr. MRS", "Delayed", "Back order", "Needs to be fixed!", 
-            "Misc.", "Do not order yet", "Cancelled", "LOST", "Received"
+            "Need to order", "Ordered", "Shipped", "Pending", "Waiting for Shipment", 
+            "Sent to Dr. MRS", "Delayed", "Back order", "Needs Fixing", 
+            "Misc.", "Do not order yet", "Cancelled", "Lost", "Received"
         ]
         
         col1, col2 = st.columns([2, 1])
         with col1:
             new_status = st.selectbox("New Status", status_options)
+            shipping_number = ""
+            courier = ""
+            if new_status == "Shipped":
+                scol1, scol2 = st.columns(2)
+                with scol1:
+                    shipping_number = st.text_input("📦 Shipping Number", placeholder="Tracking #")
+                with scol2:
+                    courier = st.text_input("🚚 Courier", placeholder="e.g. FedEx, UPS")
+            
             if new_status == "Received":
                 st.info("💡 **Tip**: If you want to integrate this item into the **Live Inventory** (location, lot #, etc), use the 'Process Orders' tab in the User Dashboard instead!")
         with col2:
@@ -207,7 +222,10 @@ if choice == "🔄 Manage Order Status":
                 req_id = int(selected_order.split("]")[0].replace("[", ""))
                 # Use standard timestamp for both SQLite and Postgres
                 ts = datetime.now()
-                db.cursor.execute("UPDATE purchase_requests SET status = ?, status_updated_at = ? WHERE request_id = ?", (new_status, ts, req_id))
+                if new_status == "Shipped":
+                    db.cursor.execute("UPDATE purchase_requests SET status = ?, status_updated_at = ?, shipping_number = ?, courier = ? WHERE request_id = ?", (new_status, ts, shipping_number, courier, req_id))
+                else:
+                    db.cursor.execute("UPDATE purchase_requests SET status = ?, status_updated_at = ? WHERE request_id = ?", (new_status, ts, req_id))
                 db.commit()
                 st.toast(f"✅ Status updated!")
                 st.success(f"Updated order #{req_id} to '{new_status}'!")
@@ -216,8 +234,8 @@ if choice == "🔄 Manage Order Status":
         
         # --- Deactivated Orders (History) ---
         st.markdown("---")
-        with st.expander("🚫 View Deactivated Orders (Cancelled / LOST)"):
-            df_deactivated = db.get_query_df("SELECT item_name, requester_name, quantity, keep_on_ice, seller, status, request_date, status_updated_at FROM purchase_requests WHERE status IN ('Cancelled', 'LOST')")
+        with st.expander("🚫 View Deactivated Orders (Cancelled / Lost)"):
+            df_deactivated = db.get_query_df("SELECT item_name, requester_name, quantity, keep_on_ice, seller, status, request_date, status_updated_at FROM purchase_requests WHERE status IN ('Cancelled', 'Lost')")
             if df_deactivated.empty:
                 st.write("No deactivated orders found.")
             else:

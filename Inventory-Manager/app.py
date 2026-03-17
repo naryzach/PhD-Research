@@ -63,7 +63,11 @@ def color_status(row):
         return ['background-color: rgba(255, 255, 0, 0.2)'] * len(row) # Yellow
     elif 'do not order' in status:
         return ['background-color: rgba(128, 0, 128, 0.2)'] * len(row) # Purple
-    return ['background-color: rgba(0, 0, 255, 0.1)'] * len(row) # Blue
+    elif 'shipped' in status:
+        return ['background-color: rgba(0, 0, 255, 0.2)'] * len(row) # Blue
+    elif 'received' in status:
+        return ['background-color: rgba(0, 255, 0, 0.2)'] * len(row) # Green
+    return ['background-color: rgba(255, 85, 0, 0.25)'] * len(row) # Distinct Orange
 
 def color_inventory_matches(row):
     """Highlights inventory search results based on stock level."""
@@ -399,15 +403,14 @@ elif choice == "Process Orders":
     st.header("Order Management Pipeline")
     
     st.subheader("Pending Orders")
-    df_pending = db.get_query_df("SELECT * FROM purchase_requests WHERE status NOT IN ('Received', 'Cancelled', 'LOST')")
+    df_pending = db.get_query_df("SELECT * FROM purchase_requests WHERE status NOT IN ('Received', 'Cancelled', 'Lost')")
     
     if not df_pending.empty:
         # Style the dataframe by status
         # Hide request_id from user view and use friendly headers
-        display_df = df_pending[['item_name', 'requester_name', 'quantity', 'keep_on_ice', 'status', 'request_date', 'status_updated_at']].copy()
+        display_df = df_pending[['item_name', 'requester_name', 'keep_on_ice', 'status', 'status_updated_at', 'shipping_number', 'courier']].copy()
         
         # Format dates for readability
-        display_df['request_date'] = pd.to_datetime(display_df['request_date']).dt.strftime('%Y-%m-%d')
         display_df['status_updated_at'] = pd.to_datetime(display_df['status_updated_at']).dt.strftime('%Y-%m-%d')
         
         # Add visual indicator for ice BEFORE renaming
@@ -417,11 +420,11 @@ elif choice == "Process Orders":
         display_df = display_df.rename(columns={
             "item_name": "Item Name",
             "requester_name": "Requested By",
-            "quantity": "Qty",
             "keep_on_ice": "Keep on Ice",
             "status": "Status",
-            "request_date": "Date Requested",
-            "status_updated_at": "Last Update"
+            "status_updated_at": "Last Update",
+            "shipping_number": "Shipping #",
+            "courier": "Courier"
         })
         
         st.dataframe(display_df.style.apply(color_status, axis=1), width='stretch', hide_index=True)

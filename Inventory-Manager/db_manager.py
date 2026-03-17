@@ -87,6 +87,8 @@ class AdvancedLabInventory:
                 quantity REAL DEFAULT 1.0,
                 keep_on_ice BOOLEAN DEFAULT {bool_default},
                 status TEXT DEFAULT 'Need to order',
+                shipping_number TEXT,
+                courier TEXT,
                 request_date TIMESTAMP DEFAULT {ts_default},
                 status_updated_at TIMESTAMP DEFAULT {ts_default}
             )
@@ -126,9 +128,9 @@ class AdvancedLabInventory:
                 self.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT FALSE")
                 self.execute("ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS quantity REAL DEFAULT 1.0")
                 self.execute("ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS keep_on_ice BOOLEAN DEFAULT FALSE")
-                self.execute("ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS status_updated_at TIMESTAMP")
-                # Initialize status_updated_at if it's null
                 self.execute("UPDATE purchase_requests SET status_updated_at = request_date WHERE status_updated_at IS NULL")
+                self.execute("ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS shipping_number TEXT")
+                self.execute("ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS courier TEXT")
                 
                 # Sync ALL sequences to prevent UniqueViolation
                 with self._conn.session as s:
@@ -160,7 +162,9 @@ class AdvancedLabInventory:
                 # Purchase requests migration
                 for col, col_type in [("quantity", "REAL DEFAULT 1.0"), 
                                       ("keep_on_ice", "BOOLEAN DEFAULT 0"),
-                                      ("status_updated_at", "TIMESTAMP")]:
+                                      ("status_updated_at", "TIMESTAMP"),
+                                      ("shipping_number", "TEXT"),
+                                      ("courier", "TEXT")]:
                     try:
                         self.execute(f"ALTER TABLE purchase_requests ADD COLUMN {col} {col_type}")
                         if col == "status_updated_at":
@@ -313,11 +317,11 @@ class AdvancedLabInventory:
         if self.is_postgres:
             inv = self.get_query_df("SELECT * FROM inventory WHERE (name ILIKE :term OR catalog_number ILIKE :term) AND archived IS FALSE", {"term": term})
             archived = self.get_query_df("SELECT * FROM inventory WHERE (name ILIKE :term OR catalog_number ILIKE :term) AND archived IS TRUE", {"term": term})
-            req = self.get_query_df("SELECT * FROM purchase_requests WHERE (item_name ILIKE :term OR catalog_number ILIKE :term) AND status NOT IN ('Received', 'Cancelled', 'LOST')", {"term": term})
+            req = self.get_query_df("SELECT * FROM purchase_requests WHERE (item_name ILIKE :term OR catalog_number ILIKE :term) AND status NOT IN ('Received', 'Cancelled', 'Lost')", {"term": term})
         else:
             inv = self.get_query_df("SELECT * FROM inventory WHERE (name LIKE ? OR catalog_number LIKE ?) AND archived = 0", (term, term))
             archived = self.get_query_df("SELECT * FROM inventory WHERE (name LIKE ? OR catalog_number LIKE ?) AND archived = 1", (term, term))
-            req = self.get_query_df("SELECT * FROM purchase_requests WHERE (item_name LIKE ? OR catalog_number LIKE ?) AND status NOT IN ('Received', 'Cancelled', 'LOST')", (term, term))
+            req = self.get_query_df("SELECT * FROM purchase_requests WHERE (item_name LIKE ? OR catalog_number LIKE ?) AND status NOT IN ('Received', 'Cancelled', 'Lost')", (term, term))
         return inv, req, archived
 
     def log_usage(self, item_id, amount, user):
@@ -433,9 +437,9 @@ class AdvancedLabInventory:
             # Active statuses that we want to keep
             active_statuses = "('Need to order', 'Ordered')"
             
-            # Any request NOT in active_statuses and NOT already terminal (Received, Cancelled, LOST)
+            # Any request NOT in active_statuses and NOT already terminal (Received, Cancelled, Lost)
             # is considered stale/draft and should be cleaned up.
-            terminal_statuses = "('Received', 'Cancelled', 'LOST', 'Completed')"
+            terminal_statuses = "('Received', 'Cancelled', 'Lost', 'Completed')"
             
             query = f"""
                 UPDATE purchase_requests 

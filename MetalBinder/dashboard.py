@@ -7,6 +7,8 @@ import numpy as np
 from stmol import showmol
 import py3Dmol
 import math
+import requests
+import io
 
 # Set page config - MUST be first streamlit command
 st.set_page_config(page_title="Lanm Output Dashboard", layout="wide")
@@ -106,6 +108,16 @@ def get_category(ion):
 # --- Data Loading ---
 @st.cache_data
 def get_cif_data(cif_path):
+    if cif_path.startswith("http"):
+        try:
+            response = requests.get(cif_path, timeout=5)
+            if response.status_code == 200:
+                return response.text
+            return None
+        except Exception as e:
+            st.error(f"Error fetching remote structural data: {e}")
+            return None
+            
     if not os.path.exists(cif_path):
         return None
     with open(cif_path, "r") as f:
@@ -116,33 +128,54 @@ def load_data():
     # Get the directory where dashboard.py is located
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # Potential data directories (constructed relative to this script)
+    # Check for remote data override in secrets
+    remote_base = st.secrets.get("REMOTE_DATA_BASE_URL", None)
+    
+    # Potential local data directories
     potential_paths = [
         os.path.join(script_dir, "..", "Local", "lanm_output"),
         os.path.join(script_dir, "lanm_data")
     ]
     base_path = None
+    is_remote = False
     
-    # Try to find a valid base path
+    # 1. Try to find a valid local base path
     for path in potential_paths:
         if os.path.exists(os.path.join(path, "global_sequence_catalog.csv")):
             base_path = path
             break
             
-    # Fallback to the first path if none found (to avoid base_path being None)
+    # 2. If no local path exists but a remote base is provided, use remote
+    if base_path is None and remote_base:
+        base_path = remote_base.rstrip("/")
+        is_remote = True
+        
+    # Fallback to the first path if none found (locally) or if no remote base
     if base_path is None:
         base_path = potential_paths[0]
         
-    catalog_path = os.path.join(base_path, "global_sequence_catalog.csv")
-    full_seq_path = os.path.join(base_path, "full_sequences_log.csv")
+    catalog_path = f"{base_path}/global_sequence_catalog.csv"
+    full_seq_path = f"{base_path}/full_sequences_log.csv"
     
-    df = pd.read_csv(catalog_path) if os.path.exists(catalog_path) else pd.DataFrame()
-    full_seq_df = pd.read_csv(full_seq_path) if os.path.exists(full_seq_path) else pd.DataFrame()
-    
-    # Check for ions presence even if not in catalog
-    ions = []
-    if os.path.exists(base_path):
-        ions = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d)) and d.isupper() and len(d) <= 2]
+    if is_remote:
+        try:
+            df = pd.read_csv(catalog_path)
+            full_seq_df = pd.read_csv(full_seq_path)
+            # Available ions need to be inferred from the catalog if remote
+            ions = sorted(df['metal_ion'].unique().tolist()) if not df.empty else []
+        except Exception as e:
+            st.error(f"Failed to load remote data from {base_path}: {e}")
+            df, full_seq_df, ions = pd.DataFrame(), pd.DataFrame(), []
+    else:
+        # Local Loading Logic (Existing)
+        catalog_path = os.path.join(base_path, "global_sequence_catalog.csv")
+        full_seq_path = os.path.join(base_path, "full_sequences_log.csv")
+        df = pd.read_csv(catalog_path) if os.path.exists(catalog_path) else pd.DataFrame()
+        full_seq_df = pd.read_csv(full_seq_path) if os.path.exists(full_seq_path) else pd.DataFrame()
+        
+        ions = []
+        if os.path.exists(base_path):
+            ions = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d)) and d.isupper() and len(d) <= 2]
     
     if not df.empty:
         # Update Metal Category
@@ -150,7 +183,7 @@ def load_data():
         # Add Binding Probability
         df['binding_probability'] = df.apply(calculate_binding_probability, axis=1)
     
-    return df, full_seq_df, ions, base_path
+    return df, full_seq_df, ions, base_path, is_remote
 
 @st.cache_data
 def get_b_metrics(cif_path):
@@ -209,7 +242,7 @@ def load_cross_docking_data(base_path):
         return pd.read_csv(cross_dock_path)
     return pd.DataFrame()
 
-df, full_seq_df, available_ions, base_path = load_data()
+df, full_seq_df, available_ions, base_path, is_remote_mode = load_data()
 
 if df.empty:
     st.warning("⚠️ No data found in global_sequence_catalog.csv. Please ensure the pipeline has generated results.")
@@ -840,7 +873,11 @@ with tab8:
             
         with col_r:
             st.subheader("3D Preview")
-            cif_file = f"{base_path}/{design_info['metal_ion']}/rf3/{selected_design}_refolded.cif"
+            if is_remote_mode:
+                cif_file = f"{base_path}/{design_info['metal_ion']}/rf3/{selected_design}_refolded.cif"
+            else:
+                cif_file = os.path.join(base_path, design_info['metal_ion'], "rf3", f"{selected_design}_refolded.cif")
+            
             cif_data = get_cif_data(cif_file)
             
             if cif_data:
