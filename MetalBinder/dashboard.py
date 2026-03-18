@@ -133,8 +133,8 @@ def load_data():
     
     # Potential local data directories
     potential_paths = [
-        os.path.join(script_dir, "..", "Local", "lanm_output"),
-        os.path.join(script_dir, "lanm_data")
+        os.path.join(script_dir, "..", "Local", "lanm_output")#,
+        #os.path.join(script_dir, "lanm_data")
     ]
     base_path = None
     is_remote = False
