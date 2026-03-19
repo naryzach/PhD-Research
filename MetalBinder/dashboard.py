@@ -13,6 +13,9 @@ import io
 # Set page config - MUST be first streamlit command
 st.set_page_config(page_title="Lanm Output Dashboard", layout="wide")
 
+# Standard Browser Headers for Cloudflare R2 compatibility
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
+
 # --- Authentication ---
 def check_password():
     """Returns True if the user has entered the correct password."""
@@ -110,7 +113,7 @@ def get_category(ion):
 def get_cif_data(cif_path):
     if cif_path.startswith("http"):
         try:
-            response = requests.get(cif_path, timeout=5)
+            response = requests.get(cif_path, headers=HEADERS, timeout=5)
             if response.status_code == 200:
                 return response.text
             return None
@@ -128,54 +131,64 @@ def load_data():
     # Get the directory where dashboard.py is located
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # Check for remote data override in secrets
+    # Check for remote data override in secrets (root or admin section)
     remote_base = st.secrets.get("REMOTE_DATA_BASE_URL", None)
+    if not remote_base and "admin" in st.secrets:
+        remote_base = st.secrets["admin"].get("REMOTE_DATA_BASE_URL", None)
     
     # Potential local data directories
     potential_paths = [
-        os.path.join(script_dir, "..", "Local", "lanm_output")#,
-        #os.path.join(script_dir, "lanm_data")
+        os.path.join(script_dir, "..", "Local", "lanm_output"),
+        os.path.join(script_dir, "lanm_data")
     ]
     base_path = None
     is_remote = False
     
-    # 1. Try to find a valid local base path
-    for path in potential_paths:
-        if os.path.exists(os.path.join(path, "global_sequence_catalog.csv")):
-            base_path = path
-            break
-            
-    # 2. If no local path exists but a remote base is provided, use remote
-    if base_path is None and remote_base:
+    # 1. Try remote base IF PROVIDED (Priority)
+    if remote_base:
         base_path = remote_base.rstrip("/")
         is_remote = True
-        
+        catalog_path = f"{base_path}/global_sequence_catalog.csv"
+        full_seq_path = f"{base_path}/full_sequences_log.csv"
+        try:
+            # Use requests with headers for R2 compatibility
+            r1 = requests.get(catalog_path, headers=HEADERS, timeout=10)
+            r2 = requests.get(full_seq_path, headers=HEADERS, timeout=10)
+            if r1.status_code == 200 and r2.status_code == 200:
+                df = pd.read_csv(io.StringIO(r1.text))
+                full_seq_df = pd.read_csv(io.StringIO(r2.text))
+                ions = sorted(df['metal_ion'].unique().tolist()) if not df.empty else []
+                return df, full_seq_df, ions, base_path, is_remote
+            else:
+                st.warning(f"Remote data check failed (Status {r1.status_code}/{r2.status_code}). Falling back to local...")
+                is_remote = False
+                base_path = None
+        except Exception as e:
+            st.warning(f"Could not load remote data: {e}. Falling back to local...")
+            # If remote fails, unset is_remote so we can try local
+            is_remote = False
+            base_path = None
+
+    # 2. Try local paths if remote not provided or failed
+    if base_path is None:
+        for path in potential_paths:
+            if os.path.exists(os.path.join(path, "global_sequence_catalog.csv")):
+                base_path = path
+                break
+                
     # Fallback to the first path if none found (locally) or if no remote base
     if base_path is None:
         base_path = potential_paths[0]
         
-    catalog_path = f"{base_path}/global_sequence_catalog.csv"
-    full_seq_path = f"{base_path}/full_sequences_log.csv"
+    # Local Loading Logic
+    catalog_path = os.path.join(base_path, "global_sequence_catalog.csv")
+    full_seq_path = os.path.join(base_path, "full_sequences_log.csv")
+    df = pd.read_csv(catalog_path) if os.path.exists(catalog_path) else pd.DataFrame()
+    full_seq_df = pd.read_csv(full_seq_path) if os.path.exists(full_seq_path) else pd.DataFrame()
     
-    if is_remote:
-        try:
-            df = pd.read_csv(catalog_path)
-            full_seq_df = pd.read_csv(full_seq_path)
-            # Available ions need to be inferred from the catalog if remote
-            ions = sorted(df['metal_ion'].unique().tolist()) if not df.empty else []
-        except Exception as e:
-            st.error(f"Failed to load remote data from {base_path}: {e}")
-            df, full_seq_df, ions = pd.DataFrame(), pd.DataFrame(), []
-    else:
-        # Local Loading Logic (Existing)
-        catalog_path = os.path.join(base_path, "global_sequence_catalog.csv")
-        full_seq_path = os.path.join(base_path, "full_sequences_log.csv")
-        df = pd.read_csv(catalog_path) if os.path.exists(catalog_path) else pd.DataFrame()
-        full_seq_df = pd.read_csv(full_seq_path) if os.path.exists(full_seq_path) else pd.DataFrame()
-        
-        ions = []
-        if os.path.exists(base_path):
-            ions = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d)) and d.isupper() and len(d) <= 2]
+    ions = []
+    if os.path.exists(base_path):
+        ions = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d)) and d.isupper() and len(d) <= 2]
     
     if not df.empty:
         # Update Metal Category
@@ -237,6 +250,16 @@ def get_b_metrics(cif_path):
 
 @st.cache_data
 def load_cross_docking_data(base_path):
+    if base_path.startswith("http"):
+        cross_dock_path = f"{base_path.rstrip('/')}/cross_docking_catalog.csv"
+        try:
+            r = requests.get(cross_dock_path, headers=HEADERS, timeout=10)
+            if r.status_code == 200:
+                return pd.read_csv(io.StringIO(r.text))
+        except Exception:
+            pass
+        return pd.DataFrame()
+        
     cross_dock_path = os.path.join(base_path, "cross_docking_catalog.csv")
     if os.path.exists(cross_dock_path):
         return pd.read_csv(cross_dock_path)
@@ -285,10 +308,9 @@ def get_residue_heatmap_fig(data, title, color_scale="YlOrRd"):
 def get_eval_plot(df, selected_shape, selected_color, rad_range_vals, rmsd_range_vals):
     shape_options = {
         "Loop Index": "loop_index",
-        "Bidentate Count": "bidentate_count",
-        "Metal Ion": "metal_ion",
         "Configuration": "config_index",
-        "Motif Match": "motif_match"
+        "Motif Match": "motif_match",
+        "Bidentate Count": "bidentate_count"
     }
     color_options = {
         "Metal Ion": "metal_ion",
@@ -304,6 +326,16 @@ def get_eval_plot(df, selected_shape, selected_color, rad_range_vals, rmsd_range
     active_color_options = {k: v for k, v in color_options.items() if v in df.columns}
     color_col = active_color_options.get(selected_color, "metal_ion")
     
+    # Dynamically build hover data based on available columns
+    hover_cols = ['design_id', 'loop_index', 'loop_sequence']
+    output_labels = {'loop_rmsd': 'Individual Loop RMSD (Å)', 'binding_radius_A': 'Binding Radius (Å)'}
+    
+    for opt_col in ['binding_probability', 'coordination_number', 'net_charge', 'plddt', 'bidentate_count']:
+        if opt_col in df.columns:
+            hover_cols.append(opt_col)
+            if opt_col == 'binding_probability':
+                output_labels[opt_col] = 'Probability'
+    
     fig = px.scatter(
         df, 
         x='loop_rmsd', 
@@ -311,10 +343,10 @@ def get_eval_plot(df, selected_shape, selected_color, rad_range_vals, rmsd_range
         color=color_col, 
         size='plddt' if 'plddt' in df.columns else None,
         symbol=symbol_col,
-        hover_data=['design_id', 'loop_index', 'loop_sequence', 'binding_probability', 'coordination_number', 'net_charge'] if 'coordination_number' in df.columns else ['design_id', 'loop_index', 'loop_sequence', 'binding_probability'],
+        hover_data=hover_cols,
         color_continuous_scale="Viridis" if color_col != "metal_ion" else None,
-        size_max=8, # Reduced from default 20
-        labels={'loop_rmsd': 'Individual Loop RMSD (Å)', 'binding_radius_A': 'Binding Radius (Å)', 'binding_probability': 'Probability'},
+        size_max=8,
+        labels=output_labels,
         title="Candidate Evaluation (Thresholds: RMSD < 1.5, Radius 2.3-2.6)"
     )
     
@@ -460,6 +492,13 @@ def get_res_stability_plot(df, ion):
     return fig
 
 # --- Sidebar Filters ---
+st.sidebar.header("Connectivity")
+if is_remote_mode:
+    st.sidebar.success("☁️ Using Cloudflare R2 Data")
+else:
+    st.sidebar.info("📂 Using Local Data")
+
+st.sidebar.divider()
 st.sidebar.header("Filters")
 
 # Session State for Optimal Presets
@@ -586,7 +625,10 @@ if 'coordination_number' in filtered_df.columns:
     metrics_cols[3].metric("Mean CN", f"{filtered_df['coordination_number'].mean():.1f}")
 if 'net_charge' in filtered_df.columns:
     metrics_cols[4].metric("Mean Net Charge", f"{filtered_df['net_charge'].mean():.1f}")
-metrics_cols[5].metric("Mean Probability", f"{filtered_df['binding_probability'].mean():.2f}")
+if 'binding_probability' in filtered_df.columns:
+    metrics_cols[5].metric("Mean Probability", f"{filtered_df['binding_probability'].mean():.2f}")
+else:
+    metrics_cols[5].metric("Status", "Remote Mode" if is_remote_mode else "Local Mode")
 
 # --- Plots ---
 st.header("📈 Comparative Analysis")
@@ -617,7 +659,14 @@ with tab1:
         shape_options = {k: v for k, v in shape_options.items() if v in filtered_df.columns}
         selected_shape = st.selectbox("Point Shape Mapping", options=list(shape_options.keys()))
         
-        selected_color = st.selectbox("Color By", options=["Metal Ion", "Binding Probability", "pLDDT", "Loop Index"])
+        color_options = {
+            "Metal Ion": "metal_ion",
+            "Binding Probability": "binding_probability",
+            "pLDDT": "plddt",
+            "Loop Index": "loop_index"
+        }
+        active_color_options = [k for k, v in color_options.items() if v in filtered_df.columns]
+        selected_color = st.selectbox("Color By", options=active_color_options if active_color_options else ["Metal Ion"])
         
     with col_eval_2:
         fig_eval = get_eval_plot(filtered_df, selected_shape, selected_color, rad_range, rmsd_range)
@@ -717,7 +766,12 @@ with tab5:
         df_b = df_b_all[df_b_all['loop_index'] == loop_b].iloc[0]
         
         comparison_df = pd.DataFrame([df_a, df_b])
-        st.table(comparison_df[["design_id", "loop_index", "metal_ion", "binding_probability", "plddt", "overall_rmsd", "loop_rmsd", "binding_radius_A", "loop_sequence"]])
+        # Only show existing columns
+        show_cols = ["design_id", "loop_index", "metal_ion", "plddt", "overall_rmsd", "loop_rmsd", "binding_radius_A", "loop_sequence"]
+        for extra in ["binding_probability", "coordination_number", "net_charge", "bidentate_count"]:
+            if extra in filtered_df.columns:
+                show_cols.insert(3, extra)
+        st.table(comparison_df[show_cols])
 
         # Radar Chart for Comparison
         st.subheader("Radar Chart Comparison")
@@ -849,8 +903,11 @@ with tab8:
         met3.write(f"**Overall RMSD:** {design_info['overall_rmsd']:.4f}")
         
         st.subheader("Loop Summary")
-        loop_table = design_loops[["loop_index", "binding_probability", "loop_rmsd", "binding_radius_A", "loop_length", "loop_sequence"]]
-        st.dataframe(loop_table, width='stretch')
+        loop_cols = ["loop_index", "loop_rmsd", "binding_radius_A", "loop_length", "loop_sequence"]
+        for extra in ["binding_probability", "coordination_number", "net_charge", "plddt"]:
+            if extra in filtered_df.columns:
+                loop_cols.insert(1, extra)
+        st.dataframe(design_loops[loop_cols], width='stretch')
         
         st.divider()
         
@@ -861,7 +918,8 @@ with tab8:
             selected_loop_idx = st.selectbox("Select Loop to Inspect", options=sorted(design_loops['loop_index'].unique()))
             loop_info = design_loops[design_loops['loop_index'] == selected_loop_idx].iloc[0]
             
-            st.write(f"**Binding Probability:** {loop_info['binding_probability']:.3f}")
+            if 'binding_probability' in loop_info:
+                st.write(f"**Binding Probability:** {loop_info['binding_probability']:.3f}")
             if 'coordination_number' in loop_info:
                 st.write(f"**Coordination Number:** {loop_info['coordination_number']}")
             if 'net_charge' in loop_info:
@@ -881,7 +939,7 @@ with tab8:
             cif_data = get_cif_data(cif_file)
             
             if cif_data:
-                st.info(f"Structure: `{os.path.basename(cif_file)}`")
+                st.info(f"Structure: `{selected_design}_refolded.cif`")
                 st.download_button(
                     label="Download Structure (.cif)",
                     data=cif_data,
@@ -915,7 +973,7 @@ with tab8:
                 view.zoomTo()
                 showmol(view, height=500, width=800)
             else:
-                st.warning(f"Structure file not found at {cif_file}")
+                st.warning("Structure file not found.")
 
 # --- Cross-Docking Analysis Tab ---
 with tab9:
