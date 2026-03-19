@@ -492,13 +492,6 @@ def get_res_stability_plot(df, ion):
     return fig
 
 # --- Sidebar Filters ---
-st.sidebar.header("Connectivity")
-if is_remote_mode:
-    st.sidebar.success("☁️ Using Cloudflare R2 Data")
-else:
-    st.sidebar.info("📂 Using Local Data")
-
-st.sidebar.divider()
 st.sidebar.header("Filters")
 
 # Session State for Optimal Presets
@@ -616,6 +609,12 @@ st.sidebar.download_button(
     width='stretch'
 )
 
+st.sidebar.divider()
+if is_remote_mode:
+    st.sidebar.success("☁️ Using Cloudflare R2 Data")
+else:
+    st.sidebar.info("📂 Using Local Data")
+
 # --- Main Dashboard ---
 metrics_cols = st.columns(6)
 metrics_cols[0].metric("Total Designs", len(filtered_df['design_id'].unique()))
@@ -627,8 +626,6 @@ if 'net_charge' in filtered_df.columns:
     metrics_cols[4].metric("Mean Net Charge", f"{filtered_df['net_charge'].mean():.1f}")
 if 'binding_probability' in filtered_df.columns:
     metrics_cols[5].metric("Mean Probability", f"{filtered_df['binding_probability'].mean():.2f}")
-else:
-    metrics_cols[5].metric("Status", "Remote Mode" if is_remote_mode else "Local Mode")
 
 # --- Plots ---
 st.header("📈 Comparative Analysis")
