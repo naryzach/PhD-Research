@@ -515,7 +515,7 @@ def set_optimal():
         st.session_state.binding_radius_A_slider = (max(float(df['binding_radius_A'].min()), 2.1), min(float(df['binding_radius_A'].max()), 2.8))
         
     if 'coordination_number' in df.columns:
-        st.session_state.coordination_number_slider = (max(float(df['coordination_number'].min()), 7.0), min(float(df['coordination_number'].max()), 9.0))
+        st.session_state.coordination_number_slider = (max(float(df['coordination_number'].min()), 5.0), min(float(df['coordination_number'].max()), 9.0))
         
     if 'net_charge' in df.columns:
         st.session_state.net_charge_slider = (max(float(df['net_charge'].min()), -5.0), min(float(df['net_charge'].max()), -3.0))
