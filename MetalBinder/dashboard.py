@@ -199,13 +199,12 @@ def load_data():
     return df, full_seq_df, ions, base_path, is_remote
 
 @st.cache_data
-def get_b_metrics(cif_path):
+def get_b_metrics(cif_data):
     """Parses B-factors from CIF file and determines if they represent pLDDT or Error."""
-    if not os.path.exists(cif_path):
+    if not cif_data:
         return 0.0, 1.0, False
         
-    with open(cif_path, "r") as f:
-        lines = f.readlines()
+    lines = cif_data.splitlines()
         
     col_b = -1
     col_atom = -1
@@ -948,7 +947,7 @@ with tab8:
                 view.addModel(cif_data, "cif")
                 
                 # Adaptive Coloring (Blue=Good, Red=Bad)
-                b_min, b_max, invert = get_b_metrics(cif_file)
+                b_min, b_max, invert = get_b_metrics(cif_data)
                 
                 # If the range is tiny, fall back to a standard 0-1 scale to avoid flickering
                 if b_max - b_min < 0.0001:
