@@ -91,7 +91,7 @@ def main():
     os.environ["DGLBACKEND"] = "pytorch"
 
     original_directory = os.getcwd()
-    data_path = "../Data"
+    data_path = "../Data/TIMP_Complexes/HADDOCK_PDB"
 
     output_prefix = "design"
 
