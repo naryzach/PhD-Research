@@ -30,14 +30,16 @@ from rfd3.inference.input_parsing import DesignInputSpecification
 torch.set_float32_matmul_precision('medium')
 
 import logging
+import warnings
 logging.getLogger("transforms").setLevel(logging.ERROR)
 logging.getLogger("atomworks.io").setLevel(logging.ERROR)
 logging.getLogger("atomworks.ml").setLevel(logging.ERROR)
 logging.getLogger("foundry").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", module="biotite")
 
 # --- USER CONFIGURABLE VARIABLES ---
-NUM_RFD3_DESIGNS = 3
-NUM_LMPNN_STRUCTURES = 10
+NUM_RFD3_DESIGNS = 2
+NUM_LMPNN_STRUCTURES = 1
 LMPNN_SAMPLING_TEMP = 0.1
 
 TARGET_PDBS = [
@@ -52,9 +54,9 @@ TARGET_PDBS = [
 LOOP_DEFINITIONS = {
     "AB": {"normal": 6, "max": 15, "pos": 30, "left": "LVK", "right": "LVY"},
     "C": {"normal": 6, "max": 15, "pos": 62, "left": "HTE", "right": "GLK"},
-    "EF": {"normal": 4, "max": 10, "pos": 92, "left": "MYT", "right": "FVE"},
-    "GH": {"normal": 10, "max": 20, "pos": 127, "left": "KSC", "right": "NEC"},
-    "Multi": {"normal": 10, "max": 20, "pos": 143, "left": "LWT", "right": "YQS"}
+    #"EF": {"normal": 4, "max": 10, "pos": 92, "left": "MYT", "right": "FVE"},
+    #"GH": {"normal": 10, "max": 20, "pos": 127, "left": "KSC", "right": "NEC"},
+    #"Multi": {"normal": 10, "max": 20, "pos": 143, "left": "LWT", "right": "YQS"}
 }
 
 DATA_DIR = "../Data/TIMP_Complexes/AlphaFold_CIF"
@@ -62,6 +64,11 @@ OUT_BASE_DIR = "../Local/TIMP-Dashboard_output"
 
 CHAIN_TO_DESIGN = "A" # TIMP3 chain
 FIXED_CHAINS = ["B"]  # Target chain
+
+VARY_LOOP_LENGTHS = False
+if not VARY_LOOP_LENGTHS:
+    for loop_combo in LOOP_DEFINITIONS.keys():
+        LOOP_DEFINITIONS[loop_combo]["max"] = LOOP_DEFINITIONS[loop_combo]["normal"]
 
 # --- HELPER FUNCTIONS ---
 def get_sequence_from_array(atom_array, chain_id="A"):
@@ -154,7 +161,7 @@ def calc_protein_protein_metrics(atom_array, chain_A, chain_B):
         
     return metrics
 
-def calculate_heuristic_score(contacts, interface_area, clashes, centroid_distance, plddt_mean):
+def calculate_heuristic_score(contacts, interface_area, clashes, centroid_distance, plddt_mean, iptm=0.0):
     interface_area = 0.0 if np.isnan(interface_area) else interface_area
     score = (contacts * 0.4 
              + interface_area * 0.002 
@@ -162,6 +169,8 @@ def calculate_heuristic_score(contacts, interface_area, clashes, centroid_distan
              - centroid_distance * 0.2)
     if not np.isnan(plddt_mean):
         score += plddt_mean * 0.5
+    if iptm:
+        score += iptm * 100.0
     return score
 
 # --- GENERATION PIPELINE ---
@@ -384,6 +393,14 @@ def main():
                         rf3_atom_array = renumber_atom_array_residues(rf3_output.atom_array)
                         to_cif_file(rf3_atom_array, f"{combo_rf3_out_dir}/{design_id}_refolded.cif", file_type="cif")
 
+                        import json
+                        summary = rf3_output.summary_confidences
+                        with open(f"{combo_rf3_out_dir}/{design_id}_summary_confidences.json", "w") as f:
+                            json.dump(summary, f)
+                        if getattr(rf3_output, "confidences", None):
+                            with open(f"{combo_rf3_out_dir}/{design_id}_confidences.json", "w") as f:
+                                json.dump(rf3_output.confidences, f)
+
                         bb_mask_rfd3 = np.isin(rfd3_array.atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
                         bb_mask_rf3 = np.isin(rf3_atom_array.atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
                         bb_generated = rfd3_array[bb_mask_rfd3]
@@ -399,9 +416,10 @@ def main():
                         bb_refolded_fitted, _ = superimpose(bb_generated, bb_refolded)
                         overall_rmsd = rmsd(bb_generated, bb_refolded_fitted)
                         
-                        summary = rf3_output.summary_confidences
                         plddt = summary.get('overall_plddt', 0.0)
                         ptm = summary.get('ptm', 0.0)
+                        iptm = summary.get('iptm', 0.0)
+                        if iptm is None: iptm = 0.0
                         
                         metrics = calc_protein_protein_metrics(rf3_atom_array, CHAIN_TO_DESIGN, FIXED_CHAINS[0])
                         heur_score = calculate_heuristic_score(
@@ -409,7 +427,8 @@ def main():
                             interface_area=metrics["interface_area"], 
                             clashes=metrics["clashes"], 
                             centroid_distance=metrics["centroid_distance"], 
-                            plddt_mean=plddt
+                            plddt_mean=plddt,
+                            iptm=iptm
                         )
 
                         loop_kwargs = {k: v for k, v in job.items() if k.startswith("loop_")}
@@ -422,6 +441,7 @@ def main():
                             "overall_rmsd": overall_rmsd,
                             "plddt": plddt,
                             "ptm": ptm,
+                            "iptm": iptm,
                             "contacts": metrics["contacts"],
                             "clashes": metrics["clashes"],
                             "interface_area": metrics["interface_area"],
