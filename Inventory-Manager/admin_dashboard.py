@@ -162,12 +162,12 @@ if choice == "🔄 Manage Order Status":
     st.info("Update the status of pending lab requests.")
     
     # Fetch all active orders
-    df_active = db.get_query_df("SELECT request_id, item_name, requester_name, quantity, keep_on_ice, seller, status, request_date, status_updated_at, shipping_number, courier FROM purchase_requests WHERE status NOT IN ('Received', 'Cancelled', 'Lost')")
+    df_active = db.get_query_df("SELECT request_id, item_name, requester_name, quantity, keep_on_ice, seller, status, request_date, status_updated_at, shipping_number, courier, order_number FROM purchase_requests WHERE status NOT IN ('Received', 'Cancelled', 'Lost')")
     if df_active.empty:
         st.success("There are no active orders to manage!")
     else:
         # Style the dataframe by status
-        display_active = df_active[['item_name', 'requester_name', 'quantity', 'keep_on_ice', 'seller', 'status', 'request_date', 'status_updated_at', 'shipping_number', 'courier']].copy()
+        display_active = df_active[['item_name', 'requester_name', 'quantity', 'keep_on_ice', 'seller', 'status', 'request_date', 'status_updated_at', 'shipping_number', 'courier', 'order_number']].copy()
         display_active['keep_on_ice'] = display_active['keep_on_ice'].apply(lambda x: "❄️ YES" if x else "No")
         
         # Format dates for readability
@@ -185,15 +185,33 @@ if choice == "🔄 Manage Order Status":
             "request_date": "Requested On",
             "status_updated_at": "Last Update",
             "shipping_number": "Shipping #",
-            "courier": "Courier"
+            "courier": "Courier",
+            "order_number": "Order #"
         })
         
-        st.dataframe(display_active.style.apply(color_status, axis=1), hide_index=True, width='stretch')
+        event = st.dataframe(
+            display_active.style.apply(color_status, axis=1), 
+            hide_index=True, 
+            width='stretch',
+            on_select="rerun",
+            selection_mode="single-row"
+        )
+        
+        # Handle row selection
+        selected_idx = 0
+        if event.selection.rows:
+            selected_idx = event.selection.rows[0]
+            
         st.markdown("---")
         
         # Select an order to update
         order_list = df_active.apply(lambda x: f"[{x['request_id']}] {x['item_name']} (Qty: {x['quantity']}) {'❄️' if x['keep_on_ice'] else ''}", axis=1).tolist()
-        selected_order = st.selectbox("Select Order to Update", order_list)
+        
+        # Ensure index is within bounds (in case list changed)
+        if selected_idx >= len(order_list):
+            selected_idx = 0
+            
+        selected_order = st.selectbox("Select Order to Update", order_list, index=selected_idx)
         
         # --- Tracking Integration (Directly under dropdown) ---
         selected_row = df_active.iloc[order_list.index(selected_order)]
@@ -211,6 +229,11 @@ if choice == "🔄 Manage Order Status":
             new_status = st.selectbox("New Status", status_options)
             shipping_number = ""
             courier = ""
+            order_num = ""
+            
+            if new_status == "Ordered":
+                order_num = st.text_input("📝 Order Number", placeholder="Order #")
+                
             if new_status == "Shipped":
                 scol1, scol2 = st.columns(2)
                 with scol1:
@@ -230,6 +253,8 @@ if choice == "🔄 Manage Order Status":
                 ts = datetime.now()
                 if new_status == "Shipped":
                     db.cursor.execute("UPDATE purchase_requests SET status = ?, status_updated_at = ?, shipping_number = ?, courier = ? WHERE request_id = ?", (new_status, ts, shipping_number, courier, req_id))
+                elif new_status == "Ordered":
+                    db.cursor.execute("UPDATE purchase_requests SET status = ?, status_updated_at = ?, order_number = ? WHERE request_id = ?", (new_status, ts, order_num, req_id))
                 else:
                     db.cursor.execute("UPDATE purchase_requests SET status = ?, status_updated_at = ? WHERE request_id = ?", (new_status, ts, req_id))
                 db.commit()

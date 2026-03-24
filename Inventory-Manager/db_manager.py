@@ -89,6 +89,7 @@ class AdvancedLabInventory:
                 status TEXT DEFAULT 'Need to order',
                 shipping_number TEXT,
                 courier TEXT,
+                order_number TEXT,
                 request_date TIMESTAMP DEFAULT {ts_default},
                 status_updated_at TIMESTAMP DEFAULT {ts_default}
             )
@@ -131,6 +132,7 @@ class AdvancedLabInventory:
                 self.execute("UPDATE purchase_requests SET status_updated_at = request_date WHERE status_updated_at IS NULL")
                 self.execute("ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS shipping_number TEXT")
                 self.execute("ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS courier TEXT")
+                self.execute("ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS order_number TEXT")
                 
                 # Sync ALL sequences to prevent UniqueViolation
                 with self._conn.session as s:
@@ -164,7 +166,8 @@ class AdvancedLabInventory:
                                       ("keep_on_ice", "BOOLEAN DEFAULT 0"),
                                       ("status_updated_at", "TIMESTAMP"),
                                       ("shipping_number", "TEXT"),
-                                      ("courier", "TEXT")]:
+                                      ("courier", "TEXT"),
+                                      ("order_number", "TEXT")]:
                     try:
                         self.execute(f"ALTER TABLE purchase_requests ADD COLUMN {col} {col_type}")
                         if col == "status_updated_at":

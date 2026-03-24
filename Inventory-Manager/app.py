@@ -409,7 +409,7 @@ elif choice == "Process Orders":
     if not df_pending.empty:
         # Style the dataframe by status
         # Hide request_id from user view and use friendly headers
-        display_df = df_pending[['item_name', 'requester_name', 'keep_on_ice', 'status', 'status_updated_at']].copy()
+        display_df = df_pending[['item_name', 'requester_name', 'keep_on_ice', 'status', 'status_updated_at', 'order_number']].copy()
         
         # Format dates for readability
         display_df['status_updated_at'] = pd.to_datetime(display_df['status_updated_at']).dt.strftime('%Y-%m-%d')
@@ -423,17 +423,34 @@ elif choice == "Process Orders":
             "requester_name": "Requested By",
             "keep_on_ice": "Keep on Ice",
             "status": "Status",
-            "status_updated_at": "Last Update"
+            "status_updated_at": "Last Update",
+            "order_number": "Order #"
         })
         
-        st.dataframe(display_df.style.apply(color_status, axis=1), width='stretch', hide_index=True)
+        event = st.dataframe(
+            display_df.style.apply(color_status, axis=1), 
+            width='stretch', 
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row"
+        )
         
+        # Handle row selection
+        selected_idx = 0
+        if event.selection.rows:
+            selected_idx = event.selection.rows[0]
+            
         st.markdown("---")
         st.subheader("Mark Order as Received & Add to Inventory")
         
         # Select an order to process
         order_list = df_pending.apply(lambda x: f"[{x['request_id']}] {x['item_name']} (Qty: {x['quantity']}) {'❄️' if x['keep_on_ice'] else ''}", axis=1).tolist()
-        selected_order_str = st.selectbox("Select Order to Receive", order_list)
+        
+        # Ensure index is within bounds
+        if selected_idx >= len(order_list):
+            selected_idx = 0
+            
+        selected_order_str = st.selectbox("Select Order to Receive", order_list, index=selected_idx)
         
         if selected_order_str:
             req_id = int(selected_order_str.split("]")[0].replace("[", ""))
