@@ -455,3 +455,15 @@ class AdvancedLabInventory:
             return True, "Successfully cleared stale/inactive purchase requests."
         except Exception as e:
             return False, f"Cleanup error: {e}"
+
+    def get_unique_vendors(self):
+        """Fetches a unique, sorted list of vendors from both inventory and purchase requests."""
+        q1 = "SELECT DISTINCT seller FROM inventory WHERE seller IS NOT NULL AND seller != ''"
+        q2 = "SELECT DISTINCT seller FROM purchase_requests WHERE seller IS NOT NULL AND seller != ''"
+        
+        df1 = self.get_query_df(q1)
+        df2 = self.get_query_df(q2)
+        
+        # Combine and deduplicate
+        all_sellers = pd.concat([df1, df2])['seller'].unique().tolist()
+        return sorted([str(s) for s in all_sellers if s])

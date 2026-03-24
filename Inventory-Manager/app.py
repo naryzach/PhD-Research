@@ -347,58 +347,79 @@ elif choice == "Request a Purchase":
             st.session_state.purchase_step = 1
             st.rerun()
             
-        with st.form("purchase_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                req_name = st.text_input("Your Name")
-                # Pulls the name from the search bar or the reorder selection
-                item_name = st.text_input("Exact Item Name", value=st.session_state.search_term)
-                specs = st.text_area("Specifications (e.g., volume, purity, variant wt)")
-            with col2:
-                # Pre-fills with historical data if "Order More" was clicked, otherwise blank
-                seller = st.text_input("Vendor / Seller", value=st.session_state.prefill_seller)
-                catalog = st.text_input("Catalog Number", value=st.session_state.prefill_cat)
-                link = st.text_input("URL Link", value=st.session_state.prefill_link)
-                price = st.number_input("Estimated Price ($)", min_value=0.0, step=0.01, value=st.session_state.prefill_price)
-                
-                c1, c2 = st.columns(2)
-                with c1:
-                    order_qty = st.number_input("Quantity to Order", min_value=1.0, value=1.0, step=1.0)
-                with c2:
-                    st.write("") # Spacer
-                    st.write("") 
-                    on_ice = st.checkbox("❄️ Keep on Ice", value=False)
-                
-            submitted = st.form_submit_button("Submit Request")
+        # Removed st.form to allow the "New Vendor" field to appear dynamically
+        col1, col2 = st.columns(2)
+        with col1:
+            req_name = st.text_input("Your Name")
+            # Pulls the name from the search bar or the reorder selection
+            item_name = st.text_input("Exact Item Name", value=st.session_state.search_term)
+            specs = st.text_area("Specifications (e.g., volume, purity, variant wt)")
+        with col2:
+            # --- Vendor Suggestion Logic ---
+            existing_vendors = db.get_unique_vendors()
+            prefill = st.session_state.prefill_seller
             
-            if submitted:
-                if not req_name or not item_name:
-                    st.error("Your Name and Item Name are required.")
-                else:
-                    # Actually submit to database
-                    db.submit_purchase_request({
-                        "requester_name": req_name,
-                        "item_name": item_name,
-                        "specs": specs,
-                        "seller": seller,
-                        "catalog_number": catalog,
-                        "link": link,
-                        "price": price,
-                        "quantity": order_qty,
-                        "keep_on_ice": on_ice,
-                        "status": "Need to order",
-                        "request_date": datetime.now()
-                    })
+            # Determine initial index for selectbox
+            default_idx = 0 # "Select or Search..."
+            if prefill and prefill in existing_vendors:
+                default_idx = existing_vendors.index(prefill) + 2 # +2 for the two static options
+            elif prefill:
+                default_idx = 1 # "🆕 Add New Vendor..."
+            
+            vendor_options = ["🔍 Select or Search...", "🆕 Add New Vendor..."] + existing_vendors
+            selected_vendor = st.selectbox("Vendor / Seller", options=vendor_options, index=default_idx)
+            
+            # Final seller value
+            seller = ""
+            if selected_vendor == "🆕 Add New Vendor...":
+                seller = st.text_input("New Vendor Name", value=prefill if prefill not in existing_vendors else "")
+            elif selected_vendor == "🔍 Select or Search...":
+                seller = ""
+            else:
+                seller = selected_vendor
+                
+            catalog = st.text_input("Catalog Number", value=st.session_state.prefill_cat)
+            link = st.text_input("URL Link", value=st.session_state.prefill_link)
+            price = st.number_input("Estimated Price ($)", min_value=0.0, step=0.01, value=st.session_state.prefill_price)
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                order_qty = st.number_input("Quantity to Order", min_value=1.0, value=1.0, step=1.0)
+            with c2:
+                st.write("") # Spacer
+                st.write("") 
+                on_ice = st.checkbox("❄️ Keep on Ice", value=False)
+            
+        submitted = st.button("Submit Request", use_container_width=True)
+        
+        if submitted:
+            if not req_name or not item_name:
+                st.error("Your Name and Item Name are required.")
+            else:
+                # Actually submit to database
+                db.submit_purchase_request({
+                    "requester_name": req_name,
+                    "item_name": item_name,
+                    "specs": specs,
+                    "seller": seller,
+                    "catalog_number": catalog,
+                    "link": link,
+                    "price": price,
+                    "quantity": order_qty,
+                    "keep_on_ice": on_ice,
+                    "status": "Need to order",
+                    "request_date": datetime.now()
+                })
 
-                    success_msg = f"Request for {item_name} submitted successfully!"
-                    st.success(success_msg)
-                    st.toast(f"✅ {success_msg}")
-                    
-                    # Reset the app state for the next user
-                    st.session_state.purchase_step = 1
-                    st.session_state.search_term = ""
-                    time.sleep(2)
-                    st.rerun()
+                success_msg = f"Request for {item_name} submitted successfully!"
+                st.success(success_msg)
+                st.toast(f"✅ {success_msg}")
+                
+                # Reset the app state for the next user
+                st.session_state.purchase_step = 1
+                st.session_state.search_term = ""
+                time.sleep(2)
+                st.rerun()
 
 elif choice == "Process Orders":
     st.header("Order Management Pipeline")
@@ -409,7 +430,7 @@ elif choice == "Process Orders":
     if not df_pending.empty:
         # Style the dataframe by status
         # Hide request_id from user view and use friendly headers
-        display_df = df_pending[['item_name', 'requester_name', 'keep_on_ice', 'status', 'status_updated_at', 'order_number']].copy()
+        display_df = df_pending[['item_name', 'requester_name', 'keep_on_ice', 'status', 'status_updated_at']].copy()
         
         # Format dates for readability
         display_df['status_updated_at'] = pd.to_datetime(display_df['status_updated_at']).dt.strftime('%Y-%m-%d')
@@ -423,8 +444,7 @@ elif choice == "Process Orders":
             "requester_name": "Requested By",
             "keep_on_ice": "Keep on Ice",
             "status": "Status",
-            "status_updated_at": "Last Update",
-            "order_number": "Order #"
+            "status_updated_at": "Last Update"
         })
         
         event = st.dataframe(
