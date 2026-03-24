@@ -38,8 +38,8 @@ logging.getLogger("foundry").setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", module="biotite")
 
 # --- USER CONFIGURABLE VARIABLES ---
-NUM_RFD3_DESIGNS = 2
-NUM_LMPNN_STRUCTURES = 1
+NUM_RFD3_DESIGNS = 15
+NUM_LMPNN_STRUCTURES = 10
 LMPNN_SAMPLING_TEMP = 0.1
 
 TARGET_PDBS = [
@@ -54,9 +54,9 @@ TARGET_PDBS = [
 LOOP_DEFINITIONS = {
     "AB": {"normal": 6, "max": 15, "pos": 30, "left": "LVK", "right": "LVY"},
     "C": {"normal": 6, "max": 15, "pos": 62, "left": "HTE", "right": "GLK"},
-    #"EF": {"normal": 4, "max": 10, "pos": 92, "left": "MYT", "right": "FVE"},
-    #"GH": {"normal": 10, "max": 20, "pos": 127, "left": "KSC", "right": "NEC"},
-    #"Multi": {"normal": 10, "max": 20, "pos": 143, "left": "LWT", "right": "YQS"}
+    "EF": {"normal": 4, "max": 10, "pos": 92, "left": "MYT", "right": "FVE"},
+    "GH": {"normal": 10, "max": 20, "pos": 127, "left": "KSC", "right": "NEC"},
+    "Multi": {"normal": 10, "max": 20, "pos": 143, "left": "LWT", "right": "YQS"}
 }
 
 DATA_DIR = "../Data/TIMP_Complexes/AlphaFold_CIF"

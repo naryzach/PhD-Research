@@ -18,13 +18,13 @@ DATA_DIR = "../Data/TIMP_Complexes/AlphaFold_CIF"
 TARGET_PDBS = {
     "ADAM10": "TIMP3_vs_ADAM10_AF.cif",
     "ADAM17": "TIMP3_vs_ADAM17_AF.cif",
-    # "MMP2":   "TIMP3_vs_MMP2_AF.cif",
-    # "MMP3":   "TIMP3_vs_MMP3_AF.cif",
-    # "MMP9":   "TIMP3_vs_MMP9_AF.cif",
-    # "MMP10":  "TIMP3_vs_MMP10_AF.cif"
+    "MMP2":   "TIMP3_vs_MMP2_AF.cif",
+    "MMP3":   "TIMP3_vs_MMP3_AF.cif",
+    "MMP9":   "TIMP3_vs_MMP9_AF.cif",
+    "MMP10":  "TIMP3_vs_MMP10_AF.cif"
 }
 
-TOP_K = 1 # Number of top designs PER Target-Combo to cross-dock
+TOP_K = 10 # Number of top designs PER Target-Combo to cross-dock
 
 import biotite.structure.io.pdbx as pdbx
 
