@@ -41,12 +41,12 @@ NUM_LMPNN_STRUCTURES = 10
 LMPNN_SAMPLING_TEMP = 0.1
 
 TARGET_PDBS = [
-    "PDB_fold_timp3_v_adam10cd_wt_model_0.pdb",
-    "PDB_fold_timp3_v_mmp10cd_wt_model_0.pdb",
-    "PDB_fold_timp3_v_mmp3cd_wt_model_0.pdb",
-    "PDB_fold_timp3_variant_adam17cd_wt_model_0.pdb",
-    "PDB_fold_timp3_variant_mmp2cd_wt_model_0.pdb",
-    "PDB_fold_timp3_variant_mmp9cd_wt_model_0.pdb"
+    "TIMP3_vs_ADAM10_AF.cif",
+    "TIMP3_vs_MMP10_AF.cif",
+    "TIMP3_vs_MMP3_AF.cif",
+    "TIMP3_vs_ADAM17_AF.cif",
+    "TIMP3_vs_MMP2_AF.cif",
+    "TIMP3_vs_MMP9_AF.cif"
 ]
 
 LOOP_DEFINITIONS = {
@@ -57,7 +57,7 @@ LOOP_DEFINITIONS = {
     "Multi": {"normal": 10, "max": 20, "pos": 143, "left": "LWT", "right": "YQS"}
 }
 
-DATA_DIR = "../Data"
+DATA_DIR = "../Data/TIMP_Complexes/AlphaFold_CIF"
 OUT_BASE_DIR = "../Local/TIMP-Dashboard_output"
 
 CHAIN_TO_DESIGN = "A" # TIMP3 chain
