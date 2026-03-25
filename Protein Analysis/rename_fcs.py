@@ -1,16 +1,22 @@
 import os
 import shutil
 import glob
-
-# Paths relative to this script
-SOURCE_DIR = r"../Local/BD6_Flow"
-DEST_DIR = r"../Local/BD6_Flow_Renamed"
+import argparse
+from collections import defaultdict
 
 def main():
-    # Determine absolute paths
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    src_path = os.path.join(base_dir, SOURCE_DIR)
-    dest_path = os.path.normpath(os.path.join(base_dir, DEST_DIR))
+    parser = argparse.ArgumentParser(description="Rename FCS files by stripping well numbers and mapping 'NC' to 'Negative Control'.")
+    parser.add_argument("-i", "--input", required=True, help="Path to the source directory containing FCS files.")
+    parser.add_argument("-o", "--output", help="Path to the destination directory for renamed files. Defaults to input + '_Renamed'.")
+    
+    args = parser.parse_args()
+    
+    src_path = os.path.abspath(args.input)
+    if args.output:
+        dest_path = os.path.abspath(args.output)
+    else:
+        # Default: input directory + "_Renamed"
+        dest_path = os.path.abspath(src_path.rstrip(os.sep) + "_Renamed")
 
     # Clean destination if it exists
     if os.path.exists(dest_path):
@@ -30,7 +36,6 @@ def main():
     print(f"Found {len(fcs_files)} files. Analyzing names...")
     
     # Map: lowercase_target_name -> list of (source_path, original_target_name_without_ext, extension)
-    from collections import defaultdict
     name_map = defaultdict(list)
     
     for file_path in fcs_files:
