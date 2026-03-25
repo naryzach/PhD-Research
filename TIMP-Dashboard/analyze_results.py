@@ -3,6 +3,7 @@ import json
 import numpy as np
 import pandas as pd
 import re
+from tqdm import tqdm
 from scipy.spatial.distance import cdist
 from biotite.structure.io.pdbx import CIFFile, get_structure
 from biotite.structure import sasa, hbond
@@ -34,7 +35,8 @@ def compute_biotite_interactions(atom_array, chain_A="A", chain_B="B"):
         res["bsa"] = float((total_iso - total_complex) / 2.0)
         
         # Polar Contacts (H-bond approximations)
-        polar_res = ["N", "O", "S"]
+        # Notebook uses < 3.5A and N or O atoms
+        polar_res = ["N", "O"]
         polar_A = atom_array[(atom_array.chain_id == chain_A) & np.isin(atom_array.element, polar_res)]
         polar_B = atom_array[(atom_array.chain_id == chain_B) & np.isin(atom_array.element, polar_res)]
         hbond_count = 0
@@ -57,12 +59,14 @@ def compute_biotite_interactions(atom_array, chain_A="A", chain_B="B"):
                     res["salt_bridges"] += int(np.sum(dists < 4.0))
 
         # Hydrophobic Contacts
-        hydro_res = ["VAL", "LEU", "ILE", "MET", "PHE", "TRP", "PRO"]
-        c_atoms_A = atom_array[(atom_array.chain_id == chain_A) & np.isin(atom_array.res_name, hydro_res) & (atom_array.element == "C")]
-        c_atoms_B = atom_array[(atom_array.chain_id == chain_B) & np.isin(atom_array.res_name, hydro_res) & (atom_array.element == "C")]
-        if len(c_atoms_A) > 0 and len(c_atoms_B) > 0:
-            dists = cdist(c_atoms_A.coord, c_atoms_B.coord)
-            res["hydrophobic_contacts"] += int(np.sum(dists < 5.0))
+        # Notebook defines hydrophobic as: ALA, VAL, ILE, LEU, MET, PHE, TYR, TRP
+        # And distance < 4.0A
+        hydro_res = ["ALA", "VAL", "ILE", "LEU", "MET", "PHE", "TYR", "TRP"]
+        atoms_A = atom_array[(atom_array.chain_id == chain_A) & np.isin(atom_array.res_name, hydro_res)]
+        atoms_B = atom_array[(atom_array.chain_id == chain_B) & np.isin(atom_array.res_name, hydro_res)]
+        if len(atoms_A) > 0 and len(atoms_B) > 0:
+            dists = cdist(atoms_A.coord, atoms_B.coord)
+            res["hydrophobic_contacts"] += int(np.sum(dists < 4.0))
 
     except Exception as e:
         print(f"Error computing detailed interactions: {e}")
@@ -77,7 +81,9 @@ def analyze_all_results():
     df = pd.read_csv(CATALOG_PATH)
     advanced_records = []
 
-    for idx, row in df.iterrows():
+    total = len(df)
+    print(f"Starting structural analysis of {total} variants...")
+    for idx, row in tqdm(df.iterrows(), total=total, desc="Analyzing Structures"):
         design_id = row['design_id']
         target_name = row['target']
         combo_name = row['loop_combo']
@@ -217,8 +223,21 @@ def analyze_all_results():
         advanced_records.append(rec)
 
     adv_df = pd.DataFrame(advanced_records)
+    
+    # 4. Explicitly order columns to group loop data together
+    cols = adv_df.columns.tolist()
+    loop_cols = [c for c in cols if c.startswith("loop_") and c != "loop_combo"]
+    # Sort loops alphabetically to keep AB, C, EF, GH, Multi in order
+    loop_cols.sort()
+    
+    base_cols = ["design_id", "target", "loop_combo"]
+    metric_cols = [c for c in cols if c not in base_cols and c not in loop_cols]
+    
+    new_order = base_cols + loop_cols + metric_cols
+    adv_df = adv_df[new_order]
+    
     adv_df.to_csv(os.path.join(OUT_BASE_DIR, "advanced_metrics.csv"), index=False)
-    print("Saved advanced_metrics.csv")
+    print("Saved advanced_metrics.csv with standardized column ordering.")
     
     # Generate Consensus Leaderboard
     # Group by loop combination and sequence to find the true winners
@@ -233,6 +252,72 @@ def analyze_all_results():
         lead_df = pd.DataFrame(leaderboard).sort_values("probability_of_binding_score", ascending=False)
         lead_df.to_csv(os.path.join(OUT_BASE_DIR, "consensus_ranking.csv"), index=False)
         print("Saved consensus_ranking.csv")
+    
+    # --- Advanced Summarization (Notebook Alignment) ---
+    summarize_best_binders(adv_df)
+
+def summarize_best_binders(df):
+    """Calculates Consensus Ranks and Specificity Gaps from the extracted metrics."""
+    # 1. Consensus Ranking (Mean Rank of ipTM, PAE, pLDDT)
+    # Filter for intended targets only for this step
+    df_primary = df.copy()
+    
+    # We want to identify the best variant for each target across metrics
+    # Metrics to rank: iptm (H), mean_loop_pae (L), mean_loop_plddt (H)
+    res_consensus = []
+    for (target, combo), group in df_primary.groupby(["target", "loop_combo"]):
+        temp = group.copy()
+        temp["rank_iptm"] = temp["iptm"].rank(ascending=False)
+        temp["rank_pae"] = temp["mean_loop_pae"].rank(ascending=True)
+        temp["rank_plddt"] = temp["mean_loop_plddt"].rank(ascending=False)
+        
+        temp["consensus_rank_avg"] = temp[["rank_iptm", "rank_pae", "rank_plddt"]].mean(axis=1)
+        res_consensus.append(temp)
+    
+    if res_consensus:
+        df_consensus = pd.concat(res_consensus)
+        df_consensus.to_csv(os.path.join(OUT_BASE_DIR, "best_binders_consensus.csv"), index=False)
+        print("Saved best_binders_consensus.csv")
+
+    # 2. Specificity Gaps (Intended vs Alien)
+    # Requires cross_docking_metrics.csv
+    xd_path = os.path.join(OUT_BASE_DIR, "cross_docking_metrics.csv")
+    if os.path.exists(xd_path):
+        df_xd = pd.read_csv(xd_path)
+        spec_results = []
+        
+        for d_id, group in df_xd.groupby("design_id"):
+            intended = group[group['intended_target'] == group['folded_target']]
+            alien = group[group['intended_target'] != group['folded_target']]
+            
+            if not intended.empty and not alien.empty:
+                i_iptm = intended['iptm'].values[0]
+                a_iptm_avg = alien['iptm'].mean()
+                spec_gap = i_iptm - a_iptm_avg
+                
+                spec_results.append({
+                    "design_id": d_id,
+                    "intended_target": intended['intended_target'].values[0],
+                    "intended_iptm": i_iptm,
+                    "alien_iptm_avg": a_iptm_avg,
+                    "specificity_gap_iptm": spec_gap
+                })
+        
+        if spec_results:
+            df_spec = pd.DataFrame(spec_results).sort_values("specificity_gap_iptm", ascending=False)
+            df_spec.to_csv(os.path.join(OUT_BASE_DIR, "specificity_rankings.csv"), index=False)
+            print("Saved specificity_rankings.csv")
+
+    # 3. Intersection Analysis (Top 20% in ALL key metrics)
+    metrics = ["iptm", "mean_loop_plddt", "bsa"]
+    intersection_variants = df_primary.copy()
+    for m in metrics:
+        threshold = intersection_variants[m].quantile(0.8)
+        intersection_variants = intersection_variants[intersection_variants[m] >= threshold]
+    
+    if not intersection_variants.empty:
+        intersection_variants.to_csv(os.path.join(OUT_BASE_DIR, "top_intersection_variants.csv"), index=False)
+        print(f"Saved top_intersection_variants.csv ({len(intersection_variants)} variants)")
 
 if __name__ == "__main__":
     analyze_all_results()

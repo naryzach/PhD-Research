@@ -1,3 +1,4 @@
+streamlit
 pandas
 numpy
 plotly
@@ -5,3 +6,4 @@ py3Dmol
 matplotlib
 biotite
 scipy
+requests

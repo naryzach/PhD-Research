@@ -7,8 +7,38 @@ import numpy as np
 import json
 import py3Dmol
 import streamlit.components.v1 as components
+import biotite.structure.io.pdbx as pdbx
+from scipy.spatial.distance import cdist
+import re
+import requests
+from io import StringIO
 
 st.set_page_config(page_title="TIMP3 PPI Dashboard", layout="wide")
+
+def check_password():
+    """Returns True if the user had the correct password."""
+    def password_entered():
+        if st.session_state["password"] == st.secrets["password"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # don't store password
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # First-time login attempt
+        st.text_input("Enter Dashboard Password", type="password", on_change=password_entered, key="password")
+        return False
+    elif not st.session_state["password_correct"]:
+        # Previous password was incorrect
+        st.text_input("Enter Dashboard Password", type="password", on_change=password_entered, key="password")
+        st.error("😕 Password incorrect")
+        return False
+    else:
+        # Password correct
+        return True
+
+if not check_password():
+    st.stop()
 
 st.title("🧬 TIMP3 Protein-Protein Interaction Dashboard")
 st.markdown("Explore generated TIMP3 variants and their RF3 prediction metrics against various MMP/ADAM targets.")
@@ -16,48 +46,81 @@ st.markdown("Explore generated TIMP3 variants and their RF3 prediction metrics a
 @st.cache_data
 def load_data():
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    out_dir = os.path.join(script_dir, "..", "Local", "TIMP-Dashboard_output")
+    r2_base_url = st.secrets.get("data_url", "")
     
-    df = pd.DataFrame()
-    lead_df = pd.DataFrame()
-    xd_df = pd.DataFrame()
-    
-    p_adv = os.path.join(out_dir, "advanced_metrics.csv")
-    p_cat = os.path.join(out_dir, "global_sequence_catalog.csv")
-    
-    if os.path.exists(p_adv):
-        df = pd.read_csv(p_adv)
-    elif os.path.exists(p_cat):
-        df = pd.read_csv(p_cat)
-    elif os.path.exists(os.path.join(script_dir, "global_sequence_catalog.csv")):
-        df = pd.read_csv(os.path.join(script_dir, "global_sequence_catalog.csv"))
+    # Check R2 first
+    try:
+        r2_check = requests.get(f"{r2_base_url}/global_sequence_catalog.csv", timeout=5)
+        if r2_check.status_code == 200:
+            out_dir = r2_base_url
+            source_label = "☁️ R2 Cloud Bucket"
+            is_remote = True
+        else:
+            raise Exception("R2 not reachable or file missing")
+    except Exception:
+        # Potential data locations: local output vs. repo-relative data/
+        potential_paths = [
+            os.path.join(script_dir, "..", "Local", "TIMP-Dashboard_output"),
+            os.path.join(script_dir, "data"),
+            script_dir # Fallback to current dir
+        ]
         
-    p_lead = os.path.join(out_dir, "consensus_ranking.csv")
-    if os.path.exists(p_lead):
-        lead_df = pd.read_csv(p_lead)
+        out_dir = None
+        source_label = "💻 Local Filesystem"
+        is_remote = False
+        for p in potential_paths:
+            if os.path.exists(os.path.join(p, "global_sequence_catalog.csv")):
+                out_dir = p
+                break
         
-    p_xd = os.path.join(out_dir, "cross_docking_metrics.csv")
-    if os.path.exists(p_xd):
-        xd_df = pd.read_csv(p_xd)
-        
-    return df, lead_df, xd_df
+        if out_dir is None:
+            out_dir = potential_paths[0] # Default to local output dir
 
-df, lead_df, xd_df = load_data()
+    def read_df(name):
+        if is_remote:
+            try:
+                url = f"{out_dir}/{name}"
+                resp = requests.get(url, timeout=10)
+                if resp.status_code == 200:
+                    return pd.read_csv(StringIO(resp.text))
+            except:
+                pass
+            return pd.DataFrame()
+        else:
+            p = os.path.join(out_dir, name)
+            if os.path.exists(p):
+                return pd.read_csv(p)
+            return pd.DataFrame()
+
+    df = read_df("advanced_metrics.csv")
+    if df.empty:
+        df = read_df("global_sequence_catalog.csv")
+        
+    lead_df = read_df("consensus_ranking.csv")
+    xd_df = read_df("cross_docking_metrics.csv")
+    
+    return df, lead_df, xd_df, out_dir, source_label, is_remote
+
+# Load data early to avoid NameError in filters
+df, lead_df, xd_df, data_dir, data_source, is_remote_data = load_data()
 
 if df.empty:
     st.warning("⚠️ No data found in global_sequence_catalog.csv. Please run the generation pipeline first.")
     st.stop()
 
+# 1. Base Column Formatting for df
 df['target_path'] = df['target']
 df['target'] = df['target'].astype(str).str.replace('TIMP3_vs_', '').str.replace('_AF', '')
 if 'heuristic_score' in df.columns and 'probability_of_binding_score' not in df.columns:
     df.rename(columns={'heuristic_score': 'probability_of_binding_score'}, inplace=True)
 
+# 2. Base Column Formatting for lead_df
 if not lead_df.empty:
     lead_df['target'] = lead_df['target'].astype(str).str.replace('TIMP3_vs_', '').str.replace('_AF', '')
     if 'heuristic_score' in lead_df.columns and 'probability_of_binding_score' not in lead_df.columns:
         lead_df.rename(columns={'heuristic_score': 'probability_of_binding_score'}, inplace=True)
 
+# 3. Sequence Mapping
 def get_seq_str(row):
     loops = str(row['loop_combo']).split('_')
     seqs = []
@@ -71,32 +134,88 @@ df['sequence'] = df.apply(get_seq_str, axis=1)
 if not lead_df.empty:
     lead_df['sequence'] = lead_df.apply(get_seq_str, axis=1)
 
+# 4. Cross-Docking Data Refinement
 if not xd_df.empty:
-    # Map sequence from main df to xd_df based on design_id
     seq_map = df.set_index('design_id')['sequence'].to_dict()
     xd_df['sequence'] = xd_df['design_id'].map(seq_map)
-    # Ensure all targets are cleaned up for consistency
     xd_df['intended_target'] = xd_df['intended_target'].astype(str).str.replace('TIMP3_vs_', '').str.replace('_AF', '')
     xd_df['folded_target'] = xd_df['folded_target'].astype(str).str.replace('TIMP3_vs_', '').str.replace('_AF', '')
-    # Add a 'target' column for compatibility with general heatmap logic (using folded_target as the effective target)
     if 'target' not in xd_df.columns:
         xd_df['target'] = xd_df['folded_target']
-    # Ensure loop_combo is available in xd_df by mapping from df
     if 'loop_combo' not in xd_df.columns:
         combo_map = df.set_index('design_id')['loop_combo'].to_dict()
         xd_df['loop_combo'] = xd_df['design_id'].map(combo_map)
 
-# --- Sidebar Filters ---
-st.sidebar.header("Filters")
-
-available_targets = sorted(df['target'].unique().tolist())
+# --- Global Filters Sidebar ---
+st.sidebar.header("🔍 Global Filters")
+st.sidebar.info(f"Data Source: {data_source}")
+available_targets = sorted(df['target'].unique().tolist()) if not df.empty else []
 selected_targets = st.sidebar.multiselect("Select Targets", options=available_targets, default=available_targets)
 
-available_combos = sorted(df['loop_combo'].unique().tolist())
+available_combos = sorted(df['loop_combo'].unique().tolist()) if not df.empty else []
 selected_combos = st.sidebar.multiselect("Select Loop Combinations", options=available_combos, default=available_combos)
+@st.cache_data
+def get_residue_interaction_matrix(cif_path, loop_seq):
+    try:
+        atom_array = pdbx.get_structure(pdbx.CIFFile.read(cif_path), model=1)
+        # Chain A is TIMP-3, Chain B is Target
+        timp = atom_array[atom_array.chain_id == "A"]
+        target = atom_array[atom_array.chain_id == "B"]
+        
+        # Find loop index
+        timp_ca = timp[timp.atom_name == "CA"]
+        from biotite.sequence import ProteinSequence
+        timp_seq = "".join([ProteinSequence.convert_letter_3to1(rn) if rn != "UNK" else "X" for rn in timp_ca.res_name])
+        
+        match = re.search(loop_seq, timp_seq)
+        if not match:
+            return None, None, None
+            
+        loop_res_ids = timp_ca.res_id[match.start():match.end()]
+        
+        # Slices
+        loop_atoms = timp[np.isin(timp.res_id, loop_res_ids)]
+        
+        # Find target residues within 8A of loop for matrix context
+        target_atoms = target # Entire target might be too big, but we'll prune below
+        
+        dists_all = cdist(loop_atoms.coord, target_atoms.coord)
+        nearby_target_mask = np.any(dists_all < 8.0, axis=0)
+        target_subset = target_atoms[nearby_target_mask]
+        target_res_ids = np.unique(target_subset.res_id)
+        
+        # Build min-distance matrix per residue pair
+        matrix = np.zeros((len(loop_res_ids), len(target_res_ids)))
+        y_labels = []
+        for i, r1 in enumerate(loop_res_ids):
+            a1 = timp[timp.res_id == r1]
+            y_labels.append(f"{ProteinSequence.convert_letter_3to1(a1.res_name[0])}{r1}")
+            for j, r2 in enumerate(target_res_ids):
+                a2 = target[target.res_id == r2]
+                if len(a1) > 0 and len(a2) > 0:
+                    matrix[i, j] = np.min(cdist(a1.coord, a2.coord))
+                else:
+                    matrix[i, j] = 100.0
+                    
+        x_labels = []
+        for r2 in target_res_ids:
+            a2 = target[target.res_id == r2]
+            x_labels.append(f"{ProteinSequence.convert_letter_3to1(a2.res_name[0])}{r2}")
+            
+        return matrix, x_labels, y_labels
+    except Exception as e:
+        st.error(f"Error computing interaction matrix: {e}")
+        return None, None, None
 
-filtered_df = df[df['target'].isin(selected_targets) & df['loop_combo'].isin(selected_combos)].copy()
+# 5. Global Filter Logic (Using already cleaned/defined filter selections)
+if not df.empty:
+    target_mask = df["target"].isin(selected_targets) if selected_targets else df["target"].notna()
+    combo_mask = df["loop_combo"].isin(selected_combos) if selected_combos else df["loop_combo"].notna()
+    filtered_df = df[target_mask & combo_mask]
+else:
+    filtered_df = df.copy()
 
+# --- Filters (Already defined globally above) ---
 st.sidebar.subheader("Quality Metrics")
 def get_range_filter(df, col, label, key):
     if col in df.columns:
@@ -109,7 +228,12 @@ def get_range_filter(df, col, label, key):
             st.session_state[key] = (max(m_min, min(m_max, float(curr_val[0]))), max(m_min, min(m_max, float(curr_val[1]))))
         return st.sidebar.slider(label, m_min, m_max, key=key)
     return None
-available_all_metrics = [c for c in ["probability_of_binding_score", "plddt", "TIMP_pLDDT", "Target_pLDDT", "TIMP_pTM", "Target_pTM", "mean_loop_plddt", "overall_rmsd", "contacts", "bsa", "mean_loop_pae", "iptm", "h_bonds", "interface_area"] if c in df.columns]
+available_all_metrics = [c for c in [
+    "probability_of_binding_score", "plddt", "TIMP_pLDDT", "Target_pLDDT", 
+    "TIMP_pTM", "Target_pTM", "mean_loop_plddt", "overall_rmsd", 
+    "contacts", "bsa", "mean_loop_pae", "iptm", "h_bonds", 
+    "salt_bridges", "hydrophobic_contacts", "interface_area"
+] if c in df.columns]
 
 score_range = get_range_filter(df, 'probability_of_binding_score', "Probability of Binding Score", "score_slider")
 plddt_range = get_range_filter(df, 'plddt', "Overall pLDDT", "plddt_slider")
@@ -118,6 +242,9 @@ rmsd_range = get_range_filter(df, 'overall_rmsd', "Overall RMSD", "rmsd_slider")
 contacts_range = get_range_filter(df, 'contacts', "Contacts", "contacts_slider")
 ia_range = get_range_filter(df, 'bsa', "BSA (Å²)", "bsa_slider") if 'bsa' in df.columns else get_range_filter(df, 'interface_area', "Interface Area (Å²)", "ia_slider")
 clashes_range = get_range_filter(df, 'clashes', "Clashes", "clash_slider")
+h_bonds_range = get_range_filter(df, 'h_bonds', "H-Bonds", "h_bonds_slider")
+salt_range = get_range_filter(df, 'salt_bridges', "Salt Bridges", "salt_slider")
+hydro_range = get_range_filter(df, 'hydrophobic_contacts', "Hydrophobic Contacts", "hydro_slider")
 
 if score_range: filtered_df = filtered_df[(filtered_df['probability_of_binding_score'] >= score_range[0]) & (filtered_df['probability_of_binding_score'] <= score_range[1])]
 if plddt_range: filtered_df = filtered_df[(filtered_df['plddt'] >= plddt_range[0]) & (filtered_df['plddt'] <= plddt_range[1])]
@@ -127,6 +254,9 @@ if contacts_range: filtered_df = filtered_df[(filtered_df['contacts'] >= contact
 if ia_range and 'bsa' in df.columns: filtered_df = filtered_df[(filtered_df['bsa'] >= ia_range[0]) & (filtered_df['bsa'] <= ia_range[1])]
 elif ia_range: filtered_df = filtered_df[(filtered_df['interface_area'] >= ia_range[0]) & (filtered_df['interface_area'] <= ia_range[1])]
 if clashes_range: filtered_df = filtered_df[(filtered_df['clashes'] >= clashes_range[0]) & (filtered_df['clashes'] <= clashes_range[1])]
+if h_bonds_range: filtered_df = filtered_df[(filtered_df['h_bonds'] >= h_bonds_range[0]) & (filtered_df['h_bonds'] <= h_bonds_range[1])]
+if salt_range: filtered_df = filtered_df[(filtered_df['salt_bridges'] >= salt_range[0]) & (filtered_df['salt_bridges'] <= salt_range[1])]
+if hydro_range: filtered_df = filtered_df[(filtered_df['hydrophobic_contacts'] >= hydro_range[0]) & (filtered_df['hydrophobic_contacts'] <= hydro_range[1])]
 
 # --- Top Metrics ---
 m1, m2, m3, m4, m5 = st.columns(5)
@@ -142,12 +272,13 @@ if 'probability_of_binding_score' in filtered_df.columns:
 
 st.header("📈 Comparative Analysis")
 
-tab1, tab_adv, tab_comp, tab_heat, tab_leader, tab_spec, tab_viewer, tab_data = st.tabs([
+tab1, tab_adv, tab_comp, tab_heat, tab_leader, tab_lead, tab_spec, tab_viewer, tab_data = st.tabs([
     "Candidate Evaluation", 
-    "Structural Metrics",
+    "Structural Metrics", 
     "Comparative Metrics",
     "Heatmaps",
     "Leaderboard",
+    "Best Binders",
     "Specificity Analysis",
     "Variant Viewer",
     "Data Explorer"
@@ -156,8 +287,8 @@ tab1, tab_adv, tab_comp, tab_heat, tab_leader, tab_spec, tab_viewer, tab_data = 
 with tab1:
     col1, col2 = st.columns([1, 4])
     with col1:
-        color_col = st.selectbox("Color By", options=["target", "loop_combo", "probability_of_binding_score", "plddt", "overall_rmsd"])
-        size_col = st.selectbox("Size By", options=["None", "contacts", "interface_area", "probability_of_binding_score"])
+        color_col = st.selectbox("Color By", options=available_all_metrics + ["target", "loop_combo"])
+        size_col = st.selectbox("Size By", options=["None"] + available_all_metrics)
     
     with col2:
         hover_data = ["design_id", "target", "loop_combo", "plddt", "contacts", "clashes", "interface_area"]
@@ -180,11 +311,11 @@ with tab_adv:
     else:
         c1, c2 = st.columns(2)
         with c1:
-            adv_m1 = st.selectbox("Heatmap Metric", ["iptm", "bsa", "mean_loop_plddt", "mean_loop_pae", "probability_of_binding_score", "contacts", "overall_rmsd"])
+            adv_m1 = st.selectbox("Heatmap Metric", available_all_metrics, index=available_all_metrics.index("iptm") if "iptm" in available_all_metrics else 0)
             fig_ip = px.density_heatmap(filtered_df, x="target", y="loop_combo", z=adv_m1, histfunc="avg", title=f"{adv_m1} Heatmap")
             st.plotly_chart(fig_ip, width='stretch', key='adv_heatmap')
         with c2:
-            adv_m2 = st.selectbox("Violin Metric", ["h_bonds", "salt_bridges", "contacts", "interface_area", "plddt", "iptm", "probability_of_binding_score"])
+            adv_m2 = st.selectbox("Violin Metric", available_all_metrics, index=available_all_metrics.index("h_bonds") if "h_bonds" in available_all_metrics else 0)
             fig_hbond = px.violin(filtered_df, x="target", y=adv_m2, color="target", points="all", title=f"{adv_m2} Distribution")
             st.plotly_chart(fig_hbond, width='stretch', key='adv_violin')
             
@@ -195,7 +326,7 @@ with tab_adv:
             fig_plddt = px.scatter(filtered_df, x=adv_m3_x, y=adv_m3_y, color="target", hover_data=["design_id"], title=f"{adv_m3_y} vs {adv_m3_x}")
             st.plotly_chart(fig_plddt, width='stretch', key='adv_scatter')
         with c4:
-            adv_m4 = st.selectbox("Boxplot Metric", ["mean_loop_pae", "plddt", "iptm", "bsa", "probability_of_binding_score", "overall_rmsd", "contacts"])
+            adv_m4 = st.selectbox("Boxplot Metric", available_all_metrics, index=available_all_metrics.index("mean_loop_pae") if "mean_loop_pae" in available_all_metrics else 0)
             fig_pae = px.box(filtered_df, x="target", y=adv_m4, color="loop_combo", title=f"{adv_m4} vs Target")
             if adv_m4 in ["mean_loop_pae", "overall_rmsd", "clashes"]:
                 fig_pae.update_layout(xaxis={'categoryorder':'total descending'}, yaxis={'autorange': 'reversed'}) # Lower is better
@@ -245,17 +376,17 @@ with tab_spec:
     st.header("🎯 Target-Specificity Analysis (Cross-Docking)")
     st.markdown("This analysis evaluates how well variants designed for one target bind to other 'alien' targets.")
     
-    xd_csv = os.path.join("../Local/TIMP-Dashboard_output", "cross_docking_metrics.csv")
+    xd_csv = os.path.join(data_dir, "cross_docking_metrics.csv")
     if not os.path.exists(xd_csv):
         st.info("Cross-docking analysis results not found. Please run `cross_docking_analysis.py` to generate this data.")
     else:
-        df_xd = pd.read_csv(xd_csv)
+        # df_xd is already loaded by load_data()
         
         # heatmap metric selection
         xd_metric = st.selectbox("Specificity Metric", ["plddt", "iptm", "ptm"], key="xd_metric_sel")
         
         # Pivot: Intended (Y) vs Folded (X)
-        xd_pivot = df_xd.pivot_table(index="intended_target", columns="folded_target", values=xd_metric, aggfunc="mean")
+        xd_pivot = xd_df.pivot_table(index="intended_target", columns="folded_target", values=xd_metric, aggfunc="mean")
         
         import plotly.express as px
         fig_xd = px.imshow(xd_pivot, 
@@ -268,7 +399,7 @@ with tab_spec:
         st.subheader("Binder Specificity Ranking")
         # Calculate specificity score: Score_intended - Mean(Score_alien)
         spec_results = []
-        for d_id, group in df_xd.groupby("design_id"):
+        for d_id, group in xd_df.groupby("design_id"):
             intended = group[group['intended_target'] == group['folded_target']]
             alien = group[group['intended_target'] != group['folded_target']]
             
@@ -290,7 +421,7 @@ with tab_spec:
             
 with tab_viewer:
     st.subheader("🔬 Variant Viewer")
-    st.markdown("Select a modeled variant to inspect its predicted 3D structure and PAE interaction matrix.")
+    st.markdown("Select a modeled variant to inspect its predicted 3D structure and interaction diagnostics.")
     
     if filtered_df.empty:
         st.info("No variants match the current filter.")
@@ -299,34 +430,73 @@ with tab_viewer:
         target_row = filtered_df[filtered_df["design_id"] == selected_design].iloc[0]
         
         cif_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", "Local", "TIMP-Dashboard_output", 
+            data_dir, 
             target_row.get("target_path", target_row["target"]), target_row["loop_combo"], "rf3", f"{selected_design}_refolded.cif"
         )
         conf_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", "Local", "TIMP-Dashboard_output", 
+            data_dir, 
             target_row.get("target_path", target_row["target"]), target_row["loop_combo"], "rf3", f"{selected_design}_confidences.json"
         )
         
-        c1, c2 = st.columns([1, 1])
+        def get_file_content(path_or_url):
+            if is_remote_data:
+                try:
+                    r = requests.get(path_or_url, timeout=10)
+                    if r.status_code == 200:
+                        return r.text
+                except:
+                    pass
+                return None
+            else:
+                if os.path.exists(path_or_url):
+                    with open(path_or_url, 'r') as f:
+                        return f.read()
+                return None
+
+        c1, c2 = st.columns([2, 1])
         with c1:
-            if os.path.exists(cif_path):
+            view_style = st.radio("3D View Style", ["Interaction Highlight (Manual)", "Confidence Flow (pLDDT)"], horizontal=True)
+            cif_content = get_file_content(cif_path)
+            if cif_content:
                 import json
                 import tempfile
                 import numpy as np
+                
+                conf_content = get_file_content(conf_path)
+                pae_matrix = None
+                if conf_content:
+                    try:
+                        conf_data = json.loads(conf_content)
+                        if "pae" in conf_data:
+                            pae_matrix = np.array(conf_data["pae"])
+                    except:
+                        pass
                 import biotite.structure.io as strucio
                 import biotite.structure as struc
                 
                 try:
-                    atom_array = strucio.load_structure(cif_path)
-                    if os.path.exists(conf_path):
-                        with open(conf_path, "r") as f: conf = json.load(f)
-                        if "plddt" in conf:
-                            plddts = np.array(conf["plddt"]).flatten()
-                            res_starts = struc.get_residue_starts(atom_array)
-                            for i, start_idx in enumerate(res_starts):
-                                end_idx = res_starts[i+1] if i+1 < len(res_starts) else len(atom_array)
-                                if i < len(plddts):
-                                    atom_array.b_factor[start_idx:end_idx] = plddts[i]
+                    # Write CIF content to temp file for Biotite loading if needed,
+                    # or use StringIO if Biotite supports it. Biotite's load_structure is usually best with files.
+                    with tempfile.NamedTemporaryFile(suffix=".cif", mode="w", delete=False) as tmp_cif:
+                        tmp_cif.write(cif_content)
+                        tmp_cif_name = tmp_cif.name
+                    
+                    try:
+                        atom_array = strucio.load_structure(tmp_cif_name)
+                    finally:
+                        if os.path.exists(tmp_cif_name): os.remove(tmp_cif_name)
+
+                    if conf_content:
+                        try:
+                            conf = json.loads(conf_content)
+                            if "plddt" in conf:
+                                plddts = np.array(conf["plddt"]).flatten()
+                                res_starts = struc.get_residue_starts(atom_array)
+                                for i, start_idx in enumerate(res_starts):
+                                    end_idx = res_starts[i+1] if i+1 < len(res_starts) else len(atom_array)
+                                    if i < len(plddts):
+                                        atom_array.b_factor[start_idx:end_idx] = plddts[i]
+                        except: pass
                                     
                     with tempfile.NamedTemporaryFile(suffix=".pdb", delete=False) as tmp:
                         strucio.save_structure(tmp.name, atom_array)
@@ -334,23 +504,66 @@ with tab_viewer:
                     os.remove(tmp.name)
                     fmt = "pdb"
                 except Exception as e:
-                    with open(cif_path, "r") as f: model_data = f.read()
+                    model_data = cif_content
                     fmt = "mmcif"
-                    
-                view = py3Dmol.view(width=600, height=600)
+                
+                view = py3Dmol.view(width=800, height=600)
                 view.addModel(model_data, fmt)
                 
-                # RF3 outputs pLDDT on a 0.0 to 1.0 logic scale, AlphaFold uses 0 to 100.
-                view.setStyle({'chain': 'A'}, {'cartoon': {'colorscheme': {'prop': 'b', 'gradient': 'roygb', 'min': 0.4, 'max': 1.0}}})
-                view.setStyle({'chain': 'B'}, {'sphere': {'color': '#cccccc'}})
+                if view_style == "Interaction Highlight (Manual)":
+                    # Chain A (TIMP-3) = Blue
+                    view.setStyle({'chain': 'A'}, {'cartoon': {'color': '#3333FF'}})
+                    # Chain B (Target) = Orange
+                    view.setStyle({'chain': 'B'}, {'cartoon': {'color': '#FFA500'}})
+                    
+                    # Highlight sidechains at the interface (within 5.0A of the other chain)
+                    view.addStyle({'within':{'distance': 5.0, 'sel':{'chain':'A'}}, 'sel':{'chain':'B'}}, 
+                                  {'stick':{'colorscheme':'orangeCarbon'}})
+                    view.addStyle({'within':{'distance': 5.0, 'sel':{'chain':'B'}}, 'sel':{'chain':'A'}}, 
+                                  {'stick':{'colorscheme':'blueCarbon'}})
+                else:
+                    # Confidence Flow (pLDDT)
+                    # pLDDT on a 0.0 to 1.0 logic scale, or 0 to 100. RF3 uses 0-1.
+                    view.setStyle({'chain': 'A'}, {'cartoon': {'colorscheme': {'prop': 'b', 'gradient': 'roygb', 'min': 0.5, 'max': 0.9}}})
+                    view.setStyle({'chain': 'B'}, {'sphere': {'color': '#CCCCCC', 'opacity': 0.8}})
+                
                 view.zoomTo()
-                components.html(view._make_html(), height=600)
-                st.caption(" TIMP3 (Chain A) as ribbons colored by pLDDT. Target (Chain B) as grey spheres.")
+                components.html(view._make_html(), height=630)
+                
+                # Add mini-stats table below structure
+                st.markdown("##### 📊 Quick Stats")
+                m_c1, m_c2, m_c3, m_c4 = st.columns(4)
+                m_c1.metric("Prob Score", f"{target_row.get('probability_of_binding_score', 0):.1f}")
+                m_c2.metric("ipTM", f"{target_row.get('iptm', 0):.3f}")
+                m_c3.metric("BSA", f"{target_row.get('bsa', 0):.0f} Å²")
+                m_c4.metric("H-Bonds", int(target_row.get('h_bonds', 0)))
             else:
-                st.error(f"Structure CIF file not found for {selected_design}")
+                st.error("Structure CIF file not found.")
                 
         with c2:
-            st.markdown(f"**ipTM**: {target_row.get('iptm', 'N/A')} | **Mean pLDDT**: {target_row.get('plddt', 'N/A')} | **Loop PAE**: {target_row.get('mean_loop_pae', 'N/A')}")
+            st.markdown("##### 🧬 Residue Interaction Matrix")
+            # Extract loop sequence
+            loop_key = f"loop_{target_row['loop_combo']}_seq"
+            loop_seq = target_row.get(loop_key, target_row.get("loop_AB_seq", ""))
+
+            if os.path.exists(cif_path) and loop_seq:
+                with st.spinner("Computing interaction distances..."):
+                    dist_mat, x_labs, y_labs = get_residue_interaction_matrix(cif_path, loop_seq)
+                
+                if dist_mat is not None:
+                    fig_mat = px.imshow(dist_mat,
+                                       x=x_labs, y=y_labs,
+                                       labels=dict(x="Target Residue", y="Loop Residue", color="Dist (Å)"),
+                                       color_continuous_scale="Blues_r", 
+                                       zmin=2.0, zmax=8.0,
+                                       text_auto=".1f",
+                                       title="Min Atomic Distance (Å)")
+                    st.plotly_chart(fig_mat, width='stretch', key="dist_heatmap")
+                else:
+                    st.warning("Interaction matrix requires loop sequence mapping.")
+            
+            st.markdown("---")
+            st.markdown("##### 📏 PAE Interaction Matrix")
             if os.path.exists(conf_path):
                 try:
                     with open(conf_path, "r") as f: conf = json.load(f)
@@ -362,14 +575,14 @@ with tab_viewer:
                 except Exception as e:
                     st.error(f"Error loading PAE matrix: {e}")
             else:
-                st.warning("Confidences JSON (PAE matrix) is not available for this legacy variant.")
+                st.warning("Confidences JSON (PAE matrix) not available.")
 
 with tab_comp:
     st.subheader("🔍 Comparative Diagnostics")
     st.markdown("Statistically normalize metrics via T-Scores across all combinations or dynamically within distinct targets.")
     
     comp_c1, comp_c2, comp_c3 = st.columns(3)
-    available_metrics = [c for c in ["probability_of_binding_score", "plddt", "mean_loop_plddt", "overall_rmsd", "contacts", "bsa", "mean_loop_pae", "iptm"] if c in df.columns]
+    # Metrics are now globally managed by available_all_metrics
     
     with comp_c1: chart_type = st.selectbox("Chart Format", [
         "Metric vs Loop Distributions (Boxplot)", 
@@ -397,11 +610,11 @@ with tab_comp:
 
     if chart_type == "Metric vs Loop Distributions (Boxplot)":
         fig_ts = px.box(df_comp, x="loop_combo", y="plot_val", color="target", points="all", title=f"{score_transformation} of {current_metric} across Loops")
-        fig_ts.update_layout(xaxis={'categoryorder':'total descending'}, yaxis_title=f"{current_transformation if 'current_transformation' in locals() else score_transformation} {current_metric}")
+        fig_ts.update_layout(xaxis={'categoryorder':'total descending'}, yaxis_title=f"{score_transformation} {current_metric}")
         st.plotly_chart(fig_ts, width='stretch')
         
     elif chart_type == "Metric vs Metric (Scatter)":
-        x_metric = st.selectbox("Secondary Metric (X-Axis)", [m for m in available_metrics if m != current_metric])
+        x_metric = st.selectbox("Secondary Metric (X-Axis)", [m for m in available_all_metrics if m != current_metric])
         fig_ts = px.scatter(df_comp, x=x_metric, y="plot_val", color="target", symbol="loop_combo", hover_data=["design_id"], title=f"{score_transformation} of {current_metric} vs {x_metric}")
         st.plotly_chart(fig_ts, width='stretch', key='comp_scatter')
 
@@ -556,3 +769,50 @@ with tab_heat:
 with tab_data:
     st.subheader("Raw Data Table")
     st.dataframe(filtered_df)
+
+with tab_lead:
+    st.header("🏆 Best Binders Analysis")
+    st.markdown("This tab summarizes the overall winners based on consensus across multiple structural metrics and cross-docking specificity.")
+    
+    l_c1, l_c2 = st.columns(2)
+    
+    with l_c1:
+        st.subheader("🔥 Consensus Winners (Multi-Metric)")
+        p_consensus = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Local", "TIMP-Dashboard_output", "best_binders_consensus.csv")
+        if os.path.exists(p_consensus):
+            df_con = pd.read_csv(p_consensus)
+            # Display best by consensus_rank_avg
+            top_con = df_con.sort_values("consensus_rank_avg").head(20)
+            st.dataframe(top_con[["design_id", "target", "loop_combo", "consensus_rank_avg", "iptm", "mean_loop_plddt", "mean_loop_pae"]], width='stretch')
+            
+            # Consistency Plot (Notebook style)
+            st.markdown("##### Consistency across Metrics")
+            # Count variants with consensus_rank_avg in top quartile
+            q_threshold = df_con["consensus_rank_avg"].quantile(0.25)
+            robust_df = df_con[df_con["consensus_rank_avg"] <= q_threshold]
+            target_counts = robust_df["target"].value_counts().reset_index()
+            target_counts.columns = ["Target", "Top Variant Count"]
+            fig_rob = px.bar(target_counts, x="Target", y="Top Variant Count", color="Target", title="Count of Top-Quartile Consensus Variants per Target")
+            st.plotly_chart(fig_rob, width='stretch')
+        else:
+            st.info("Consensus rankings not available. Run analyze_results.py to generate.")
+
+    with l_c2:
+        st.subheader("🎯 Top Specific Binders")
+        p_spec = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Local", "TIMP-Dashboard_output", "specificity_rankings.csv")
+        if os.path.exists(p_spec):
+            df_s = pd.read_csv(p_spec)
+            st.dataframe(df_s, width='stretch')
+            
+            fig_spec = px.scatter(df_s, x="intended_iptm", y="specificity_gap_iptm", color="intended_target", hover_data=["design_id"], title="ipTM vs Specificity Gap")
+            st.plotly_chart(fig_spec, width='stretch')
+        else:
+            st.info("Specificity rankings require cross-docking data. Run cross_docking_analysis.py then analyze_results.py.")
+            
+    st.subheader("⭐ Intersection Stars (Top 20% in All Metrics)")
+    p_inter = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Local", "TIMP-Dashboard_output", "top_intersection_variants.csv")
+    if os.path.exists(p_inter):
+        df_inter = pd.read_csv(p_inter)
+        st.dataframe(df_inter[["design_id", "target", "loop_combo", "iptm", "mean_loop_plddt", "bsa", "probability_of_binding_score"]], width='stretch')
+    else:
+        st.info("Intersection variants list not generated yet.")

@@ -81,7 +81,8 @@ def run_cross_docking():
         # TIMP3 ends at the last residue before Chain B starts.
         # In our pipeline, Chain A is TIMP, Chain B is Target.
         
-        for target_name in TARGET_PDBS.keys():
+        design_targets = list(TARGET_PDBS.keys())
+        for target_name in tqdm(design_targets, desc=f"Docking {orig_id}", leave=False):
             # If target_name == orig_target, we already have the result in advanced_metrics.csv
             # But for consistency, we could re-run or just copy.
             

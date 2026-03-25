@@ -8,6 +8,7 @@ import gc
 import torch
 import time
 import re
+import subprocess
 from itertools import combinations
 from tqdm import tqdm
 
@@ -192,7 +193,7 @@ def main():
 
     final_records = []
 
-    for target_pdb in TARGET_PDBS:
+    for target_pdb in tqdm(TARGET_PDBS, desc="Targets", unit="target"):
         pdb_path = os.path.join(DATA_DIR, target_pdb)
         if not os.path.exists(pdb_path):
             print(f"WARNING: Skipping {target_pdb}, file does not exist at {pdb_path}.")
@@ -213,7 +214,7 @@ def main():
             if valid:
                 valid_combos.append(combo)
 
-        for combo in valid_combos:
+        for combo in tqdm(valid_combos, desc=f" {target_name} loops", leave=False):
             combo_name = "_".join(combo)
             print(f"\n======================================")
             print(f"Processing Target: {target_name} | Loops: {combo_name}")
@@ -295,7 +296,7 @@ def main():
             try:
                 lmpnn_engine = MPNNInferenceEngine(model_type="ligand_mpnn", is_legacy_weights=True, write_structures=False, write_fasta=False)
                 
-                for design_id, rfd3_array in generated_arrays:
+                for design_id, rfd3_array in tqdm(generated_arrays, desc="Designing Seqs", leave=False):
                     aa_sequence = get_sequence_from_array(rfd3_array, CHAIN_TO_DESIGN)
                     fixed_positions_A = []
                     current_fixed_start = 1
@@ -341,8 +342,14 @@ def main():
                         full_seq_designed = get_sequence_from_array(lmpnn_array, CHAIN_TO_DESIGN)
                         to_cif_file(lmpnn_array, f"{combo_lmpnn_out_dir}/{design_id}_mpnn{seq_idx}.cif", file_type="cif")
                         
-                        # Compute loop sequences
-                        loop_data = {}
+                        # Initialize all possible loop columns for consistent schema
+                        loop_data = {
+                            "loop_AB_seq": "MISSING", "loop_AB_length": 0,
+                            "loop_C_seq": "MISSING", "loop_C_length": 0,
+                            "loop_EF_seq": "MISSING", "loop_EF_length": 0,
+                            "loop_GH_seq": "MISSING", "loop_GH_length": 0,
+                            "loop_Multi_seq": "MISSING", "loop_Multi_length": 0
+                        }
                         curr_idx = 0
                         for name_idx, loop in enumerate(selected_loops):
                             loop_name = combo[name_idx]
@@ -377,7 +384,7 @@ def main():
             print(f"--- Running RF3 Validations on {len(lmpnn_jobs)} sequences ---")
             try:
                 rf3_engine = RF3InferenceEngine(ckpt_path='rf3', verbose=False)
-                for job in lmpnn_jobs:
+                for job in tqdm(lmpnn_jobs, desc="Validating Structs", leave=False):
                     design_id = f"{job['design_id']}_mpnn{job['seq_idx']}"
                     lmpnn_array = job['lmpnn_array']
                     rfd3_array = job['rfd3_array']
@@ -463,5 +470,31 @@ def main():
     print("PIPELINE COMPLETED SUCCESSFULLY")
     print("===============================")
     
+def run_reflexive_updates():
+    """Run the analysis and cross-docking scripts to update the dashboard data."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    print("\n--- Running Reflexive Post-Processing Updates ---")
+    
+    # 1. Structural Analysis & Best Binder Ranking
+    print(f"Updating structural analysis via analyze_results.py...")
+    try:
+        subprocess.run([sys.executable, os.path.join(script_dir, "analyze_results.py")], check=True)
+    except Exception as e:
+        print(f"ERROR running analyze_results.py: {e}")
+        
+    # 2. Cross-Docking & Specificity Analysis
+    # We only run this if cross_docking_analysis.py exists (it might be in development)
+    xd_path = os.path.join(script_dir, "cross_docking_analysis.py")
+    if os.path.exists(xd_path):
+        print(f"Updating specificity analysis via cross_docking_analysis.py...")
+        try:
+            subprocess.run([sys.executable, xd_path], check=True)
+        except Exception as e:
+            print(f"ERROR running cross_docking_analysis.py: {e}")
+
+    print("--- Post-Processing Updates Complete ---")
+    
 if __name__ == "__main__":
     main()
+    run_reflexive_updates()
