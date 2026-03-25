@@ -228,6 +228,23 @@ def get_range_filter(df, col, label, key):
             st.session_state[key] = (max(m_min, min(m_max, float(curr_val[0]))), max(m_min, min(m_max, float(curr_val[1]))))
         return st.sidebar.slider(label, m_min, m_max, key=key)
     return None
+st.sidebar.markdown("---")
+if st.sidebar.button("✨ Apply Optimal Settings"):
+    # High confidence thresholds for PPI design
+    if 'probability_of_binding_score' in df.columns:
+        st.session_state["score_slider"] = (80.0, float(df['probability_of_binding_score'].max()))
+    if 'plddt' in df.columns:
+        st.session_state["plddt_slider"] = (0.75, float(df['plddt'].max()))
+    if 'mean_loop_plddt' in df.columns:
+        st.session_state["loop_plddt_slider"] = (0.70, float(df['mean_loop_plddt'].max()))
+    if 'contacts' in df.columns:
+        st.session_state["contacts_slider"] = (10.0, float(df['contacts'].max()))
+    if 'clashes' in df.columns:
+        st.session_state["clash_slider"] = (0.0, 5.0)
+    if 'h_bonds' in df.columns:
+        st.session_state["h_bonds_slider"] = (1.0, float(df['h_bonds'].max()))
+    st.rerun()
+
 available_all_metrics = [c for c in [
     "probability_of_binding_score", "plddt", "TIMP_pLDDT", "Target_pLDDT", 
     "TIMP_pTM", "Target_pTM", "mean_loop_plddt", "overall_rmsd", 
