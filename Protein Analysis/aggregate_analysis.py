@@ -80,6 +80,17 @@ def plot_stats(df, title, output_path, y_col='Binding Ratio', y_label='Binding E
 
     plt.figure(figsize=(14, 8))
     
+    # Global Font Sizes for Presentations/Journals
+    plt.rcParams.update({
+        'font.size': 12,
+        'axes.titlesize': 20,
+        'axes.labelsize': 18,
+        'xtick.labelsize': 14,
+        'ytick.labelsize': 14,
+        'legend.fontsize': 14,
+        'figure.titlesize': 24
+    })
+    
     if color_col:
         # Normalize colors for the colormap
         norm = plt.Normalize(min(colors) if colors else 0, max(colors) if colors else 100)
@@ -91,14 +102,14 @@ def plot_stats(df, title, output_path, y_col='Binding Ratio', y_label='Binding E
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
         cbar = plt.colorbar(sm, ax=plt.gca())
-        cbar.set_label(color_label if color_label else color_col, fontsize=12)
+        cbar.set_label(color_label if color_label else color_col, fontsize=16)
     else:
         plt.bar(sorted_constructs, means, yerr=stds, 
                 capsize=5, color='skyblue', edgecolor='black', alpha=0.8)
     
-    plt.title(title, fontsize=16)
-    plt.xlabel('Construct', fontsize=14)
-    plt.ylabel(y_label, fontsize=14)
+    plt.title(title, fontsize=22, pad=20)
+    plt.xlabel('Sample', fontsize=18)
+    plt.ylabel(y_label, fontsize=18)
     plt.xticks(rotation=45, ha='right')
     plt.grid(axis='y', linestyle='--', alpha=0.7)
     plt.tight_layout()

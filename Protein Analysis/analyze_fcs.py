@@ -3,15 +3,6 @@ import sys
 import glob
 import argparse
 import warnings
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-import seaborn as sns
-from scipy import stats
-
-# Filters warnings from pandas/matplotlib
-warnings.filterwarnings("ignore")
 
 # ---- INSTALL DEPENDENCIES IF MISSING ----
 def install(package):
@@ -30,9 +21,18 @@ for pkg in required_packages:
         install(pkg)
 
 import fcsparser
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import seaborn as sns
+from scipy import stats
 from scipy.stats import gaussian_kde
 from matplotlib.path import Path
 from skimage import measure
+
+# Filters warnings from pandas/matplotlib
+warnings.filterwarnings("ignore")
 
 # ---- CONFIGURATION ----
 NEG_CONTROL_PATTERNS = ["NC", "Negative Control"] # Starts with any of these
@@ -49,6 +49,17 @@ CH_APC = 'APC-A'   # Binding
 # Plot settings
 SNS_STYLE = "whitegrid"
 sns.set_style(SNS_STYLE)
+
+# Global Font Sizes for Presentations/Journals
+plt.rcParams.update({
+    'font.size': 12,           # Base font size
+    'axes.titlesize': 18,      # Subplot titles
+    'axes.labelsize': 16,      # X and Y labels
+    'xtick.labelsize': 12,     # X tick labels
+    'ytick.labelsize': 12,     # Y tick labels
+    'legend.fontsize': 12,     # Legend labels
+    'figure.titlesize': 22     # Main figure title (suptitle)
+})
 
 # ---- HELPER FUNCTIONS ----
 
@@ -623,8 +634,9 @@ def process_directory(input_dir, output_dir):
         axes[1,1].set_title(f"Binding Dist (FC: {fc_bind:.1f}x)")
         axes[1,1].legend()
         
-        plt.tight_layout()
-        plt.savefig(os.path.join(individual_dir, f"{clean_name}_analysis.png"))
+        fig.suptitle(f"Sample Analysis: {clean_name}", fontsize=22)
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust for suptitle
+        plt.savefig(os.path.join(individual_dir, f"{clean_name}_analysis.png"), dpi=300)
         plt.close()
         
         # 2. Publication Plot
@@ -776,11 +788,13 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
             g.map(label, m_info["col"])
             
             g.set(xlim=x_lims)
-            g.fig.subplots_adjust(hspace=-.5)
             g.set_titles("")
             g.set(yticks=[])
+            g.set_ylabels("") # Remove "Density" label as it's implied and crowded
             g.despine(bottom=True, left=True)
-            g.set_xlabels(f"{m_info['x_lab']} - Group {group}")
+            g.fig.subplots_adjust(hspace=-.5, top=0.88) # Increased room for suptitle
+            g.set_xlabels(m_info['x_lab'])
+            g.fig.suptitle(f"Ridgeline Distribution: {m_name} (Group {group})", fontsize=22)
             
             t_thresh = np.log10(max(1, m_info["thresh"]))
             for ax, name in zip(g.axes.flatten(), order_mfi):
@@ -803,9 +817,24 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
         # All Samples Plot
         out_name = os.path.join(output_dir, f"Aggregate_Ridgeline_{m_name}_All.png")
         order = df_stats.sort_values(m_info["mfi"], ascending=False)["Filename"].tolist()
+        # Filter Middle 95% PER SAMPLE for All plot to remove empty space
+        df_ridge_filtered = pd.DataFrame()
+        for sample in df_ridge['Sample'].unique():
+            d_sample = df_ridge[df_ridge['Sample'] == sample]
+            low = d_sample[m_info["col"]].quantile(0.025)
+            high = d_sample[m_info["col"]].quantile(0.975)
+            d_filt = d_sample[(d_sample[m_info["col"]] >= low) & (d_sample[m_info["col"]] <= high)]
+            df_ridge_filtered = pd.concat([df_ridge_filtered, d_filt])
+
+        # Dynamic X-limits for All plot
+        x_min_all = df_ridge_filtered[m_info["col"]].min()
+        x_max_all = df_ridge_filtered[m_info["col"]].max()
+        x_pad_all = (x_max_all - x_min_all) * 0.1
+        x_lims_all = (x_min_all - x_pad_all, x_max_all + x_pad_all*2)
+
         pal = sns.cubehelix_palette(len(order), rot=-.25, light=.7) if m_info["color"] == "cubehelix" else sns.color_palette("mako", len(order))
         
-        g = sns.FacetGrid(df_ridge, row="Sample", hue="Sample", aspect=15, height=0.6, palette=pal, row_order=order)
+        g = sns.FacetGrid(df_ridge_filtered, row="Sample", hue="Sample", aspect=15, height=0.6, palette=pal, row_order=order, hue_order=order)
         g.map(sns.kdeplot, m_info["col"], clip_on=False, fill=True, alpha=1, lw=1.5, bw_adjust=.2)
         g.map(sns.kdeplot, m_info["col"], clip_on=False, color="w", lw=2, bw_adjust=.2)
         g.map(plt.axhline, y=0, lw=2, clip_on=False)
@@ -818,10 +847,12 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
             
         g.map(label, m_info["col"])
         g.set_titles("")
-        g.set(yticks=[])
+        g.set(yticks=[], xlim=x_lims_all)
+        g.set_ylabels("") 
         g.despine(bottom=True, left=True)
-        g.fig.subplots_adjust(hspace=-.5)
+        g.fig.subplots_adjust(hspace=-.5, top=0.88) # Increased room for suptitle
         g.set_xlabels(m_info['x_lab'])
+        g.fig.suptitle(f"Ridgeline Distribution: {m_name} (All Samples)", fontsize=22)
         
         t_thresh = np.log10(max(1, m_info["thresh"]))
         for ax, name in zip(g.axes.flatten(), order):
@@ -863,6 +894,7 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
         sns.barplot(data=df_sorted, x="Filename", y=col_name, palette=colors)
         
         plt.xticks(rotation=90)
+        plt.xlabel("Sample")
         plt.axhline(1, color='k', linestyle='--', label='No Change')
         plt.title(title)
         plt.ylabel("Fold Change")
@@ -896,6 +928,7 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
         sns.barplot(data=df_sorted, x="Filename", y=col_name, palette=colors)
         
         plt.xticks(rotation=90)
+        plt.xlabel("Sample")
         plt.title(title)
         plt.ylabel("Stain Index")
         cbar = plt.colorbar(sm, ax=plt.gca())
@@ -922,6 +955,7 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
     sns.barplot(data=df_sorted, x="Filename", y="Double+ %", palette=colors)
     
     plt.xticks(rotation=90)
+    plt.xlabel("Sample")
     plt.title("Double Positive Population % by Sample")
     cbar = plt.colorbar(sm, ax=plt.gca())
     cbar.set_label("Normalized Effectiveness (Pos Med Ratio)")
@@ -1004,9 +1038,9 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
         plt.tight_layout()
         
         if dropped_text:
-            plt.figtext(0.5, 0.01, dropped_text, ha='center', va='bottom', fontsize=9, color='darkred',
-                        bbox=dict(boxstyle="round,pad=0.3", fc="whitesmoke", ec="darkred", lw=1))
-            plt.subplots_adjust(bottom=max(0.2, 0.15 + 0.03 * dropped_text.count('\n')))
+            plt.figtext(0.99, 0.01, dropped_text, ha='right', va='bottom', fontsize=8, color='darkred',
+                        bbox=dict(boxstyle="round,pad=0.2", fc="whitesmoke", ec="darkred", lw=1))
+            plt.subplots_adjust(bottom=max(0.25, 0.2 + 0.02 * dropped_text.count('\n')))
 
         plt.savefig(os.path.join(pos_ratio_dir, f"Aggregate_{m_col.replace(' ', '_')}.png"), bbox_inches="tight")
         plt.close()
