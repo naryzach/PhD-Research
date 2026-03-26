@@ -475,6 +475,8 @@ with tab_viewer:
                         return f.read()
                 return None
 
+        cif_content, conf_content, pae_matrix = None, None, None
+        
         c1, c2 = st.columns([2, 1])
         with c1:
             view_style = st.radio("3D View Style", ["Interaction Highlight (Manual)", "Confidence Flow (pLDDT)"], horizontal=True)
