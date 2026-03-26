@@ -79,13 +79,16 @@ def load_data():
     def read_df(name):
         if is_remote:
             try:
-                url = f"{out_dir}/{name}"
+                # Sanitize URL: ensure exactly one slash between directory and name
+                base = out_dir.rstrip('/')
+                url = f"{base}/{name}"
                 resp = requests.get(url, timeout=10)
                 if resp.status_code == 200:
                     return pd.read_csv(StringIO(resp.text))
-            except:
-                pass
-            return pd.DataFrame()
+                else:
+                    return pd.DataFrame() # Swallow 404/500 for secondary files
+            except Exception:
+                return pd.DataFrame()
         else:
             p = os.path.join(out_dir, name)
             if os.path.exists(p):
@@ -106,6 +109,19 @@ def load_data():
     
     return df, lead_df, spec_df, inter_df, xd_df, out_dir, source_label, is_remote
 
+# 2. Auxiliary Data Formatting
+def format_protein_df(target_df):
+    if not target_df.empty:
+        if 'target' in target_df.columns:
+            target_df['target'] = target_df['target'].astype(str).str.replace('TIMP3_vs_', '').str.replace('_AF', '')
+        if 'intended_target' in target_df.columns:
+            target_df['intended_target'] = target_df['intended_target'].astype(str).str.replace('TIMP3_vs_', '').str.replace('_AF', '')
+        if 'folded_target' in target_df.columns:
+            target_df['folded_target'] = target_df['folded_target'].astype(str).str.replace('TIMP3_vs_', '').str.replace('_AF', '')
+        if 'heuristic_score' in target_df.columns and 'probability_of_binding_score' not in target_df.columns:
+            target_df.rename(columns={'heuristic_score': 'probability_of_binding_score'}, inplace=True)
+    return target_df
+
 # Load data early to avoid NameError in filters
 df, lead_df, spec_df, inter_df, xd_df, data_dir, data_source, is_remote_data = load_data()
 
@@ -113,17 +129,15 @@ if df.empty:
     st.warning("⚠️ No data found in global_sequence_catalog.csv. Please run the generation pipeline first.")
     st.stop()
 
-# 1. Base Column Formatting for df
+# 1. Preserve verbose path before formatting
 df['target_path'] = df['target']
-df['target'] = df['target'].astype(str).str.replace('TIMP3_vs_', '').str.replace('_AF', '')
-if 'heuristic_score' in df.columns and 'probability_of_binding_score' not in df.columns:
-    df.rename(columns={'heuristic_score': 'probability_of_binding_score'}, inplace=True)
 
-# 2. Base Column Formatting for lead_df
-if not lead_df.empty:
-    lead_df['target'] = lead_df['target'].astype(str).str.replace('TIMP3_vs_', '').str.replace('_AF', '')
-    if 'heuristic_score' in lead_df.columns and 'probability_of_binding_score' not in lead_df.columns:
-        lead_df.rename(columns={'heuristic_score': 'probability_of_binding_score'}, inplace=True)
+# 2. Apply formatting for UI
+df = format_protein_df(df)
+lead_df = format_protein_df(lead_df)
+spec_df = format_protein_df(spec_df)
+inter_df = format_protein_df(inter_df)
+xd_df = format_protein_df(xd_df)
 
 # 3. Sequence Mapping
 def get_seq_str(row):
@@ -160,57 +174,70 @@ selected_targets = st.sidebar.multiselect("Select Targets", options=available_ta
 available_combos = sorted(df['loop_combo'].unique().tolist()) if not df.empty else []
 selected_combos = st.sidebar.multiselect("Select Loop Combinations", options=available_combos, default=available_combos)
 @st.cache_data
-def get_residue_interaction_matrix(cif_content, loop_seq):
+def get_residue_interaction_matrix(cif_content, loop_sequences):
+    """
+    Returns: (matrix, x_labels, y_labels, status_code)
+    status_code: "SUCCESS", "NO_MATCH", "NO_INTERACTION", "ERROR"
+    """
     try:
         atom_array = pdbx.get_structure(pdbx.CIFFile.read(StringIO(cif_content)), model=1)
         # Chain A is TIMP-3, Chain B is Target
         timp = atom_array[atom_array.chain_id == "A"]
         target = atom_array[atom_array.chain_id == "B"]
         
-        # Find loop index
+        # Find all loop indices
         timp_ca = timp[timp.atom_name == "CA"]
         from biotite.sequence import ProteinSequence
-        timp_seq = "".join([ProteinSequence.convert_letter_3to1(rn) if rn != "UNK" else "X" for rn in timp_ca.res_name])
+        timp_seq = "".join([ProteinSequence.convert_letter_3to1(rn).upper() if rn != "UNK" else "X" for rn in timp_ca.res_name])
         
-        match = re.search(loop_seq, timp_seq)
-        if not match:
-            return None, None, None
+        all_loop_res_ids = []
+        for seq in loop_sequences:
+            clean_seq = str(seq).strip().upper()
+            if not clean_seq or clean_seq == "MISSING" or len(clean_seq) < 3:
+                continue
+            match = re.search(clean_seq, timp_seq)
+            if match:
+                all_loop_res_ids.extend(timp_ca.res_id[match.start():match.end()])
+        
+        if not all_loop_res_ids:
+            return None, None, None, "NO_MATCH"
             
-        loop_res_ids = timp_ca.res_id[match.start():match.end()]
+        loop_res_ids = sorted(list(set(all_loop_res_ids)))
         
         # Slices
         loop_atoms = timp[np.isin(timp.res_id, loop_res_ids)]
         
-        # Find target residues within 8A of loop for matrix context
-        target_atoms = target # Entire target might be too big, but we'll prune below
-        
+        # Find target residues within 8A of loop
+        target_atoms = target 
         dists_all = cdist(loop_atoms.coord, target_atoms.coord)
         nearby_target_mask = np.any(dists_all < 8.0, axis=0)
         target_subset = target_atoms[nearby_target_mask]
         target_res_ids = np.unique(target_subset.res_id)
         
-        # Build min-distance matrix per residue pair
+        if len(target_res_ids) == 0:
+            return None, None, None, "NO_INTERACTION"
+
+        # Build matrix
         matrix = np.zeros((len(loop_res_ids), len(target_res_ids)))
         y_labels = []
         for i, r1 in enumerate(loop_res_ids):
             a1 = timp[timp.res_id == r1]
-            y_labels.append(f"{ProteinSequence.convert_letter_3to1(a1.res_name[0])}{r1}")
-            for j, r2 in enumerate(target_res_ids):
-                a2 = target[target.res_id == r2]
-                if len(a1) > 0 and len(a2) > 0:
-                    matrix[i, j] = np.min(cdist(a1.coord, a2.coord))
-                else:
-                    matrix[i, j] = 100.0
+            if len(a1) > 0:
+                y_labels.append(f"{ProteinSequence.convert_letter_3to1(a1.res_name[0])}{r1}")
+                for j, r2 in enumerate(target_res_ids):
+                    a2 = target[target.res_id == r2]
+                    if len(a2) > 0:
+                        matrix[i, j] = np.min(cdist(a1.coord, a2.coord))
+                    else:
+                        matrix[i, j] = 20.0
+            else:
+                y_labels.append(f"UNK{r1}")
+                matrix[i, :] = 20.0
                     
-        x_labels = []
-        for r2 in target_res_ids:
-            a2 = target[target.res_id == r2]
-            x_labels.append(f"{ProteinSequence.convert_letter_3to1(a2.res_name[0])}{r2}")
-            
-        return matrix, x_labels, y_labels
+        x_labels = [f"{ProteinSequence.convert_letter_3to1(target[target.res_id == r].res_name[0])}{r}" for r in target_res_ids]
+        return matrix, x_labels, y_labels, "SUCCESS"
     except Exception as e:
-        st.error(f"Error computing interaction matrix: {e}")
-        return None, None, None
+        return None, None, None, f"ERROR: {e}"
 
 # 5. Global Filter Logic (Using already cleaned/defined filter selections)
 if not df.empty:
@@ -398,8 +425,7 @@ with tab_spec:
     st.header("🎯 Target-Specificity Analysis (Cross-Docking)")
     st.markdown("This analysis evaluates how well variants designed for one target bind to other 'alien' targets.")
     
-    xd_csv = os.path.join(data_dir, "cross_docking_metrics.csv")
-    if not os.path.exists(xd_csv):
+    if xd_df.empty:
         st.info("Cross-docking analysis results not found. Please run `cross_docking_analysis.py` to generate this data.")
     else:
         # df_xd is already loaded by load_data()
@@ -566,15 +592,27 @@ with tab_viewer:
                 
         with c2:
             st.markdown("##### 🧬 Residue Interaction Matrix")
-            # Extract loop sequence
-            loop_key = f"loop_{target_row['loop_combo']}_seq"
-            loop_seq = target_row.get(loop_key, target_row.get("loop_AB_seq", ""))
+            # Loop Focus Selection
+            loops_in_combo = str(target_row['loop_combo']).split('_')
+            loop_options = ["All Interface Loops"] + sorted(loops_in_combo)
+            selected_loop_focus = st.selectbox("Focus Loop", options=loop_options, help="Select a specific loop to isolate its interaction map.")
 
-            if cif_content and loop_seq:
+            loop_sequences = []
+            if selected_loop_focus == "All Interface Loops":
+                for l in loops_in_combo:
+                    s = target_row.get(f"loop_{l}_seq")
+                    if pd.notna(s) and str(s).upper() != "MISSING":
+                        loop_sequences.append(str(s))
+            else:
+                s = target_row.get(f"loop_{selected_loop_focus}_seq")
+                if pd.notna(s) and str(s).upper() != "MISSING":
+                    loop_sequences.append(str(s))
+
+            if cif_content and loop_sequences:
                 with st.spinner("Computing interaction distances..."):
-                    dist_mat, x_labs, y_labs = get_residue_interaction_matrix(cif_content, loop_seq)
+                    dist_mat, x_labs, y_labs, mat_status = get_residue_interaction_matrix(cif_content, loop_sequences)
                 
-                if dist_mat is not None:
+                if mat_status == "SUCCESS":
                     fig_mat = px.imshow(dist_mat,
                                        x=x_labs, y=y_labs,
                                        labels=dict(x="Target Residue", y="Loop Residue", color="Dist (Å)"),
@@ -583,6 +621,14 @@ with tab_viewer:
                                        text_auto=".1f",
                                        title="Min Atomic Distance (Å)")
                     st.plotly_chart(fig_mat, width='stretch', key="dist_heatmap")
+                elif mat_status == "NO_MATCH":
+                    st.warning("⚠️ **Sequence Mapping Failed**: The loop sequence from the catalog was not found in the 3D structure. This might indicate a mismatch between the structure and the metadata.")
+                    with st.expander("Debug Loop Sequences"):
+                        st.write("Searching for:", loop_sequences)
+                elif mat_status == "NO_INTERACTION":
+                    st.info("ℹ️ **No Interactions Found**: The loop is correctly mapped to the structure, but no residues are within 8.0 Å of the target protein. This design may be a non-binder.")
+                elif mat_status.startswith("ERROR"):
+                    st.error(f"Computation Error: {mat_status}")
                 else:
                     st.warning("Interaction matrix requires loop sequence mapping.")
             
