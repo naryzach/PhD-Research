@@ -96,13 +96,18 @@ def load_data():
     if df.empty:
         df = read_df("global_sequence_catalog.csv")
         
-    lead_df = read_df("consensus_ranking.csv")
+    lead_df = read_df("best_binders_consensus.csv")
+    if lead_df.empty:
+        lead_df = read_df("consensus_ranking.csv")
+        
+    spec_df = read_df("specificity_rankings.csv")
+    inter_df = read_df("top_intersection_variants.csv")
     xd_df = read_df("cross_docking_metrics.csv")
     
-    return df, lead_df, xd_df, out_dir, source_label, is_remote
+    return df, lead_df, spec_df, inter_df, xd_df, out_dir, source_label, is_remote
 
 # Load data early to avoid NameError in filters
-df, lead_df, xd_df, data_dir, data_source, is_remote_data = load_data()
+df, lead_df, spec_df, inter_df, xd_df, data_dir, data_source, is_remote_data = load_data()
 
 if df.empty:
     st.warning("⚠️ No data found in global_sequence_catalog.csv. Please run the generation pipeline first.")
@@ -155,9 +160,9 @@ selected_targets = st.sidebar.multiselect("Select Targets", options=available_ta
 available_combos = sorted(df['loop_combo'].unique().tolist()) if not df.empty else []
 selected_combos = st.sidebar.multiselect("Select Loop Combinations", options=available_combos, default=available_combos)
 @st.cache_data
-def get_residue_interaction_matrix(cif_path, loop_seq):
+def get_residue_interaction_matrix(cif_content, loop_seq):
     try:
-        atom_array = pdbx.get_structure(pdbx.CIFFile.read(cif_path), model=1)
+        atom_array = pdbx.get_structure(pdbx.CIFFile.read(StringIO(cif_content)), model=1)
         # Chain A is TIMP-3, Chain B is Target
         timp = atom_array[atom_array.chain_id == "A"]
         target = atom_array[atom_array.chain_id == "B"]
@@ -563,9 +568,9 @@ with tab_viewer:
             loop_key = f"loop_{target_row['loop_combo']}_seq"
             loop_seq = target_row.get(loop_key, target_row.get("loop_AB_seq", ""))
 
-            if os.path.exists(cif_path) and loop_seq:
+            if cif_content and loop_seq:
                 with st.spinner("Computing interaction distances..."):
-                    dist_mat, x_labs, y_labs = get_residue_interaction_matrix(cif_path, loop_seq)
+                    dist_mat, x_labs, y_labs = get_residue_interaction_matrix(cif_content, loop_seq)
                 
                 if dist_mat is not None:
                     fig_mat = px.imshow(dist_mat,
@@ -581,16 +586,14 @@ with tab_viewer:
             
             st.markdown("---")
             st.markdown("##### 📏 PAE Interaction Matrix")
-            if os.path.exists(conf_path):
+            if pae_matrix is not None:
                 try:
-                    with open(conf_path, "r") as f: conf = json.load(f)
-                    if "pae" in conf:
-                        pae_matrix = np.array(conf["pae"])
-                        if len(pae_matrix.shape) == 3: pae_matrix = pae_matrix[0]
-                        fig_pae = px.imshow(pae_matrix, color_continuous_scale="RdYlBu_r", zmin=0, zmax=30, title="Predicted Aligned Error (PAE)")
-                        st.plotly_chart(fig_pae, width='stretch', key='viewer_pae')
+                    # pae_matrix is already extracted in the common get_file_content block
+                    if len(pae_matrix.shape) == 3: pae_matrix = pae_matrix[0]
+                    fig_pae = px.imshow(pae_matrix, color_continuous_scale="RdYlBu_r", zmin=0, zmax=30, title="Predicted Aligned Error (PAE)")
+                    st.plotly_chart(fig_pae, width='stretch', key='viewer_pae')
                 except Exception as e:
-                    st.error(f"Error loading PAE matrix: {e}")
+                    st.error(f"Error drawing PAE matrix: {e}")
             else:
                 st.warning("Confidences JSON (PAE matrix) not available.")
 
@@ -795,41 +798,42 @@ with tab_lead:
     
     with l_c1:
         st.subheader("🔥 Consensus Winners (Multi-Metric)")
-        p_consensus = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Local", "TIMP-Dashboard_output", "best_binders_consensus.csv")
-        if os.path.exists(p_consensus):
-            df_con = pd.read_csv(p_consensus)
-            # Display best by consensus_rank_avg
-            top_con = df_con.sort_values("consensus_rank_avg").head(20)
-            st.dataframe(top_con[["design_id", "target", "loop_combo", "consensus_rank_avg", "iptm", "mean_loop_plddt", "mean_loop_pae"]], width='stretch')
+        if not lead_df.empty:
+            # Display best by consensus_rank_avg (if available) or probability score
+            sort_col = "consensus_rank_avg" if "consensus_rank_avg" in lead_df.columns else "probability_of_binding_score"
+            asc = True if sort_col == "consensus_rank_avg" else False
+            top_con = lead_df.sort_values(sort_col, ascending=asc).head(20)
             
-            # Consistency Plot (Notebook style)
+            show_cols = ["design_id", "target", "loop_combo", sort_col, "iptm", "mean_loop_plddt", "mean_loop_pae"]
+            show_cols = [c for c in show_cols if c in top_con.columns]
+            st.dataframe(top_con[show_cols], width='stretch')
+            
+            # Consistency Plot
             st.markdown("##### Consistency across Metrics")
-            # Count variants with consensus_rank_avg in top quartile
-            q_threshold = df_con["consensus_rank_avg"].quantile(0.25)
-            robust_df = df_con[df_con["consensus_rank_avg"] <= q_threshold]
-            target_counts = robust_df["target"].value_counts().reset_index()
-            target_counts.columns = ["Target", "Top Variant Count"]
-            fig_rob = px.bar(target_counts, x="Target", y="Top Variant Count", color="Target", title="Count of Top-Quartile Consensus Variants per Target")
-            st.plotly_chart(fig_rob, width='stretch')
+            if "consensus_rank_avg" in lead_df.columns:
+                q_threshold = lead_df["consensus_rank_avg"].quantile(0.25)
+                robust_df = lead_df[lead_df["consensus_rank_avg"] <= q_threshold]
+                target_counts = robust_df["target"].value_counts().reset_index()
+                target_counts.columns = ["Target", "Top Variant Count"]
+                fig_rob = px.bar(target_counts, x="Target", y="Top Variant Count", color="Target", title="Count of Top-Quartile Consensus Variants per Target")
+                st.plotly_chart(fig_rob, width='stretch')
         else:
             st.info("Consensus rankings not available. Run analyze_results.py to generate.")
 
     with l_c2:
         st.subheader("🎯 Top Specific Binders")
-        p_spec = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Local", "TIMP-Dashboard_output", "specificity_rankings.csv")
-        if os.path.exists(p_spec):
-            df_s = pd.read_csv(p_spec)
-            st.dataframe(df_s, width='stretch')
-            
-            fig_spec = px.scatter(df_s, x="intended_iptm", y="specificity_gap_iptm", color="intended_target", hover_data=["design_id"], title="ipTM vs Specificity Gap")
-            st.plotly_chart(fig_spec, width='stretch')
+        if not spec_df.empty:
+            st.dataframe(spec_df, width='stretch')
+            if "intended_iptm" in spec_df.columns and "specificity_gap_iptm" in spec_df.columns:
+                fig_spec = px.scatter(spec_df, x="intended_iptm", y="specificity_gap_iptm", color="intended_target", hover_data=["design_id"], title="ipTM vs Specificity Gap")
+                st.plotly_chart(fig_spec, width='stretch')
         else:
             st.info("Specificity rankings require cross-docking data. Run cross_docking_analysis.py then analyze_results.py.")
             
     st.subheader("⭐ Intersection Stars (Top 20% in All Metrics)")
-    p_inter = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Local", "TIMP-Dashboard_output", "top_intersection_variants.csv")
-    if os.path.exists(p_inter):
-        df_inter = pd.read_csv(p_inter)
-        st.dataframe(df_inter[["design_id", "target", "loop_combo", "iptm", "mean_loop_plddt", "bsa", "probability_of_binding_score"]], width='stretch')
+    if not inter_df.empty:
+        sh_cols = ["design_id", "target", "loop_combo", "iptm", "mean_loop_plddt", "bsa", "probability_of_binding_score"]
+        sh_cols = [c for c in sh_cols if c in inter_df.columns]
+        st.dataframe(inter_df[sh_cols], width='stretch')
     else:
         st.info("Intersection variants list not generated yet.")
