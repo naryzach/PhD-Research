@@ -282,6 +282,14 @@ def process_directory(input_dir, output_dir):
     if not os.path.exists(pos_ratio_dir):
         os.makedirs(pos_ratio_dir)
         
+    filtered_bind_dir = os.path.join(output_dir, "Filtered_Histograms", "Binding")
+    if not os.path.exists(filtered_bind_dir):
+        os.makedirs(filtered_bind_dir)
+        
+    filtered_expr_dir = os.path.join(output_dir, "Filtered_Histograms", "Expression")
+    if not os.path.exists(filtered_expr_dir):
+        os.makedirs(filtered_expr_dir)
+        
     # Find files
     search_path = input_dir
     
@@ -514,6 +522,17 @@ def process_directory(input_dir, output_dir):
         pos_mean_ratio = pos_mean_bind / pos_mean_expr if pos_mean_expr > 0 else 0
         pos_med_ratio = pos_med_bind / pos_med_expr if pos_med_expr > 0 else 0
 
+        # --- NEW FILTERED METRICS (User Requested) ---
+        # 1. APC (Binding) stats for Expressed events (FITC > threshold)
+        df_bind_m_expr_pos = df_sing[expr_pos]
+        bind_m_expr_pos_mean = df_bind_m_expr_pos[CH_BIND].mean() if len(df_bind_m_expr_pos) > 0 else 0
+        bind_m_expr_pos_med = df_bind_m_expr_pos[CH_BIND].median() if len(df_bind_m_expr_pos) > 0 else 0
+        
+        # 2. FITC (Expression) stats for Bound events (APC > threshold)
+        df_expr_m_bind_pos = df_sing[bind_pos]
+        expr_m_bind_pos_mean = df_expr_m_bind_pos[CH_EXPR].mean() if len(df_expr_m_bind_pos) > 0 else 0
+        expr_m_bind_pos_med = df_expr_m_bind_pos[CH_EXPR].median() if len(df_expr_m_bind_pos) > 0 else 0
+
         summary_stats.append({
             "Filename": clean_name,
             "Total Events": count_total,
@@ -536,8 +555,59 @@ def process_directory(input_dir, output_dir):
             "Pos Mean Expr": pos_mean_expr,
             "Pos Med Expr": pos_med_expr,
             "Pos Mean Ratio": pos_mean_ratio,
-            "Pos Med Ratio": pos_med_ratio
+            "Pos Med Ratio": pos_med_ratio,
+            # New Filtered Metrics
+            "Bind Mean (Expr+)": bind_m_expr_pos_mean,
+            "Bind Med (Expr+)": bind_m_expr_pos_med,
+            "Expr Mean (Bind+)": expr_m_bind_pos_mean,
+            "Expr Med (Bind+)": expr_m_bind_pos_med
         })
+        
+        log_thresh_bind = np.log10(max(1, thresh_bind))
+        log_thresh_expr = np.log10(max(1, thresh_expr))
+        
+        # --- NEW FILTERED HISTOGRAMS (User Requested) ---
+        # 1. APC Histogram for Expressed Cells
+        if len(df_bind_m_expr_pos) > 0:
+            plt.figure(figsize=(8, 6))
+            t_vals = np.log10(np.clip(df_bind_m_expr_pos[CH_BIND], 1, None))
+            sns.histplot(t_vals, color='g', kde=True, stat='density', element='step', label='Expressed Cells Only')
+            
+            # Overlay Negative Control (total gated)
+            if neg_log_bind is not None:
+                sns.kdeplot(neg_log_bind, color='gray', fill=True, alpha=0.2, label='NC (Total)')
+                
+            plt.axvline(np.log10(max(bind_m_expr_pos_mean, 1)), color='red', linestyle='--', label=f'Mean: {bind_m_expr_pos_mean:.0f}')
+            plt.axvline(np.log10(max(bind_m_expr_pos_med, 1)), color='blue', linestyle=':', label=f'Median: {bind_m_expr_pos_med:.0f}')
+            plt.axvline(log_thresh_bind, color='black', linestyle='-', alpha=0.5, label='Bind Thresh')
+            
+            plt.title(f"Binding of Expressed Cells: {clean_name}")
+            plt.xlabel("Log10 APC (Binding)")
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(os.path.join(filtered_bind_dir, f"{clean_name}_Bind_Filtered.png"), dpi=200)
+            plt.close()
+            
+        # 2. FITC Histogram for Bound Cells
+        if len(df_expr_m_bind_pos) > 0:
+            plt.figure(figsize=(8, 6))
+            t_vals = np.log10(np.clip(df_expr_m_bind_pos[CH_EXPR], 1, None))
+            sns.histplot(t_vals, color='purple', kde=True, stat='density', element='step', label='Bound Cells Only')
+            
+            # Overlay Negative Control
+            if neg_log_expr is not None:
+                sns.kdeplot(neg_log_expr, color='gray', fill=True, alpha=0.2, label='NC (Total)')
+                
+            plt.axvline(np.log10(max(expr_m_bind_pos_mean, 1)), color='red', linestyle='--', label=f'Mean: {expr_m_bind_pos_mean:.0f}')
+            plt.axvline(np.log10(max(expr_m_bind_pos_med, 1)), color='blue', linestyle=':', label=f'Median: {expr_m_bind_pos_med:.0f}')
+            plt.axvline(log_thresh_expr, color='black', linestyle='-', alpha=0.5, label='Expr Thresh')
+            
+            plt.title(f"Expression of Bound Cells: {clean_name}")
+            plt.xlabel("Log10 FITC (Expression)")
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(os.path.join(filtered_expr_dir, f"{clean_name}_Expr_Filtered.png"), dpi=200)
+            plt.close()
         
         # --- POSITIVE DISTRIBUTIONS PLOT ---
         if len(df_pos_expr) > 0 or len(df_pos_bind) > 0:
@@ -716,6 +786,28 @@ def process_directory(input_dir, output_dir):
     df_stats["Norm Pos Mean Ratio"] = df_stats["Pos Mean Ratio"] / pos_mean_rat_ref
     df_stats["Norm Pos Med Ratio"] = df_stats["Pos Med Ratio"] / pos_med_rat_ref
     
+    # 5b. Normalize Filtered Metrics (User Requested)
+    if pos_mask.any():
+        pos_bind_mean_expr_pos_ref = df_stats.loc[pos_mask, "Bind Mean (Expr+)"].median()
+        pos_bind_med_expr_pos_ref = df_stats.loc[pos_mask, "Bind Med (Expr+)"].median()
+        pos_expr_mean_bind_pos_ref = df_stats.loc[pos_mask, "Expr Mean (Bind+)"].median()
+        pos_expr_med_bind_pos_ref = df_stats.loc[pos_mask, "Expr Med (Bind+)"].median()
+    else:
+        pos_bind_mean_expr_pos_ref = df_stats["Bind Mean (Expr+)"].max()
+        pos_bind_med_expr_pos_ref = df_stats["Bind Med (Expr+)"].max()
+        pos_expr_mean_bind_pos_ref = df_stats["Expr Mean (Bind+)"].max()
+        pos_expr_med_bind_pos_ref = df_stats["Expr Med (Bind+)"].max()
+
+    pos_bind_mean_expr_pos_ref = max(pos_bind_mean_expr_pos_ref, 1e-9)
+    pos_bind_med_expr_pos_ref = max(pos_bind_med_expr_pos_ref, 1e-9)
+    pos_expr_mean_bind_pos_ref = max(pos_expr_mean_bind_pos_ref, 1e-9)
+    pos_expr_med_bind_pos_ref = max(pos_expr_med_bind_pos_ref, 1e-9)
+
+    df_stats["Norm Bind Mean (Expr+)"] = df_stats["Bind Mean (Expr+)"] / pos_bind_mean_expr_pos_ref
+    df_stats["Norm Bind Med (Expr+)"] = df_stats["Bind Med (Expr+)"] / pos_bind_med_expr_pos_ref
+    df_stats["Norm Expr Mean (Bind+)"] = df_stats["Expr Mean (Bind+)"] / pos_expr_mean_bind_pos_ref
+    df_stats["Norm Expr Med (Bind+)"] = df_stats["Expr Med (Bind+)"] / pos_expr_med_bind_pos_ref
+    
     # Save Stats
     df_stats.to_csv(os.path.join(output_dir, "summary_stats.csv"), index=False)
     print(f"\nAnalysis complete. Saved to {os.path.join(output_dir, 'summary_stats.csv')}")
@@ -873,7 +965,7 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
     for m_name, col_name, title, hue_col in [("Binding", "Bind Fold Change", "Binding Fold Change (vs Neg)", "Bind+ %"), 
                                              ("Expression", "Expr Fold Change", "Expression Fold Change (vs Neg)", "Expr+ %")]:
         plt.figure(figsize=(12, 6))
-        df_sorted = df_stats.sort_values(col_name, ascending=False)
+        df_sorted = df_stats.sort_values("Filename", ascending=True)
         
         # Determine max value for normalization based on Positive Controls
         pos_ctrl_mask = df_stats['Filename'].apply(lambda x: any(p in x for p in POS_CONTROL_PATTERNS))
@@ -909,7 +1001,7 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
     for m_name, col_name, title, hue_col in [("Binding", "Bind Stain Index", "Binding Stain Index", "Bind+ %"), 
                                              ("Expression", "Expr Stain Index", "Expression Stain Index", "Expr+ %")]:
         plt.figure(figsize=(12, 6))
-        df_sorted = df_stats.sort_values(col_name, ascending=False)
+        df_sorted = df_stats.sort_values("Filename", ascending=True)
         
         pos_ctrl_mask = df_stats['Filename'].apply(lambda x: any(p in x for p in POS_CONTROL_PATTERNS))
         if pos_ctrl_mask.any():
@@ -940,7 +1032,7 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
     
     # 4. Bar plot of Double Positives
     plt.figure(figsize=(12, 6))
-    df_sorted = df_stats.sort_values("Double+ %", ascending=False)
+    df_sorted = df_stats.sort_values("Filename", ascending=True)
     
     vmax_ratio = df_stats["Norm Pos Med Ratio"].max()
     vmax_ratio = max(vmax_ratio, 1.0)
@@ -1006,13 +1098,17 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
     for m_col, title in [("Pos Mean Ratio", "Raw Pos Mean Ratio (Bind/Expr)"),
                          ("Pos Med Ratio", "Raw Pos Median Ratio (Bind/Expr)"),
                          ("Norm Pos Mean Ratio", "Normalized Pos Mean Ratio (Bind/Expr vs PosCtrl)"), 
-                         ("Norm Pos Med Ratio", "Normalized Pos Median Ratio (Bind/Expr vs PosCtrl)")]:
+                         ("Norm Pos Med Ratio", "Normalized Pos Median Ratio (Bind/Expr vs PosCtrl)"),
+                         ("Bind Med (Expr+)", "Median APC for FITC+ Cells"),
+                         ("Expr Med (Bind+)", "Median FITC for APC+ Cells"),
+                         ("Norm Bind Med (Expr+)", "Normalized Median APC for FITC+ Cells (vs PosCtrl)"),
+                         ("Norm Expr Med (Bind+)", "Normalized Median FITC for APC+ Cells (vs PosCtrl)")]:
                          
         if df_valid_ratio.empty:
             continue
             
         plt.figure(figsize=(12, 7))
-        df_sorted = df_valid_ratio.sort_values(m_col, ascending=False)
+        df_sorted = df_valid_ratio.sort_values("Filename", ascending=True)
         
         # Color scale based on Double+ % to give more context than just height
         norm = plt.Normalize(0, vmax_dp)
@@ -1029,7 +1125,12 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
             
         plt.xticks(rotation=90)
         plt.title(title)
-        plt.ylabel("Ratio (Sample / PosCtrl)" if "Norm" in m_col else "Ratio (Bind / Expr)")
+        
+        if "Ratio" in m_col:
+            plt.ylabel("Ratio (Sample / PosCtrl)" if "Norm" in m_col else "Ratio (Bind / Expr)")
+        else:
+            plt.ylabel("Normalized MFI vs PosCtrl" if "Norm" in m_col else "Raw MFI")
+
         plt.xlabel("Sample")
         
         cbar = plt.colorbar(sm, ax=plt.gca())
@@ -1104,6 +1205,9 @@ def generate_report(df, output_dir):
         f.write("- **Pos Mean / Median Ratio (Raw)**: For events strictly above the 99.9% Negative Control threshold, this is the ratio of their Binding level to their Expression level (`Pos Bind / Pos Expr`). Validates how effectively the expressed protein binds the target.\n")
         f.write("- **Normalized Pos Mean / Median Ratio**: The Raw Ratio scaled against the Positive Control's ratio. A value of `1.0` means the sample's binding-to-expression effectiveness perfectly matches the Positive Control. `>1.0` is better than Pos Ctrl, `<1.0` is worse.\n")
         f.write("- **Double+ %**: The percentage of *all* events in the sample that fell into the upper-right quadrant (i.e., they expressed *and* bound above the 99.9% Negative Control thresholds).\n")
+        f.write("- **Bind Med (Expr+)**: The median binding level (APC) of the population that is successfully expressing the protein (FITC > NC boundary).\n")
+        f.write("- **Norm Bind Med (Expr+)**: The above metric, but normalized to the same metric in the Positive Control. A value of 1.0 means the binding effectiveness per expressing cell matches the Positive Control.\n")
+        f.write("- **Expr Med (Bind+)**: The median expression level (FITC) of the population that shows a binding signal (APC > NC boundary).\n")
 
 def stats_observation(fc_bind, fc_expr, efficiency, vs_pos=0):
     obs = []

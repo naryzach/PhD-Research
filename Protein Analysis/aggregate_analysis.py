@@ -192,6 +192,10 @@ def main():
                             norm_ratio = float(row.get('Norm Pos Med Ratio', 0))
                             double_pos = float(row.get('Double+ %', 0))
                             
+                            # New Filtered Metrics
+                            norm_bind_med_expr = float(row.get('Norm Bind Med (Expr+)', 0))
+                            norm_expr_med_bind = float(row.get('Norm Expr Med (Bind+)', 0))
+                            
                             all_data.append({
                                 'Target': target,
                                 'Date': date,
@@ -199,7 +203,9 @@ def main():
                                 'Construct Num': construct_num,
                                 'Raw Name': raw_name,
                                 'Norm Median Ratio': norm_ratio,
-                                'Double+ %': double_pos
+                                'Double+ %': double_pos,
+                                'Norm Bind Med (Expr+)': norm_bind_med_expr,
+                                'Norm Expr Med (Bind+)': norm_expr_med_bind
                             })
                         except (ValueError, KeyError):
                             continue
@@ -215,7 +221,7 @@ def main():
 
     # Save aggregate CSV
     output_csv = os.path.join(output_dir, "aggregate_summary.csv")
-    fieldnames = ['Target', 'Date', 'Construct', 'Raw Name', 'Norm Median Ratio', 'Double+ %']
+    fieldnames = ['Target', 'Date', 'Construct', 'Raw Name', 'Norm Median Ratio', 'Double+ %', 'Norm Bind Med (Expr+)', 'Norm Expr Med (Bind+)']
     with open(output_csv, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
