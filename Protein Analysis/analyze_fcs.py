@@ -46,6 +46,11 @@ CH_SSC_H = 'SSC-H'
 CH_FITC = 'FITC-A' # Expression
 CH_APC = 'APC-A'   # Binding
 
+# Origin Debris Filter
+MIN_FSC = 1000000
+MIN_SSC = 20000
+NC_CUTOFF_PERCENTILE = 99.5
+
 # Plot settings
 SNS_STYLE = "whitegrid"
 sns.set_style(SNS_STYLE)
@@ -114,7 +119,7 @@ def learn_pentagon_gate(df, fsc_col, ssc_col, fraction=0.90):
     """
     # 1. Reject obvious origin debris BEFORE learning density
     # This ensures the KDE isn't skewed down towards (0,0)
-    origin_filter = (df[fsc_col] > 5000) & (df[ssc_col] > 1000)
+    origin_filter = (df[fsc_col] > MIN_FSC) & (df[ssc_col] > MIN_SSC)
     core_df = df[origin_filter]
     
     if len(core_df) < 100:
@@ -221,14 +226,20 @@ def apply_polygon_gate(df, path, fsc_col, ssc_col, plot_ax=None, title="Polygon 
     Applies a matplotlib Path polygon gate to the dataframe.
     """
     if len(df) == 0:
-        return df, []
+        return df
         
     points = np.vstack([df[fsc_col], df[ssc_col]]).T
-    mask = path.contains_points(points)
+    poly_mask = path.contains_points(points)
+    
+    # Explicitly exclude the origin clump for all application of the gate
+    origin_mask = (df[fsc_col] > MIN_FSC) & (df[ssc_col] > MIN_SSC)
+    mask = poly_mask & origin_mask
     
     if plot_ax:
         # Density plot 
         plot_ax.hexbin(df[fsc_col], df[ssc_col], gridsize=100, cmap='inferno', mincnt=1, bins='log')
+        plot_ax.axvline(MIN_FSC, color='gray', linestyle=':', alpha=0.5)
+        plot_ax.axhline(MIN_SSC, color='gray', linestyle=':', alpha=0.5)
         plot_ax.set_xlabel(fsc_col)
         plot_ax.set_ylabel(ssc_col)
         plot_ax.set_title(f"{title} ({mask.sum()}/{len(df)} events)")
@@ -317,7 +328,8 @@ def process_directory(input_dir, output_dir):
         if d_neg_learn is not None:
             # Drop pure zeros or negatives for KDE stability if needed, 
             # but usually the origin points are handled by KDE
-            pentagon_path = learn_pentagon_gate(d_neg_learn, CH_FSC_A, CH_SSC_A, fraction=0.90)
+            # Reduced fraction to 0.85 to tighten the gate
+            pentagon_path = learn_pentagon_gate(d_neg_learn, CH_FSC_A, CH_SSC_A, fraction=0.85)
             
     if pentagon_path is None:
         print("Warning: Could not learn pentagon gate from NC. Cannot proceed accurately.")
@@ -334,10 +346,10 @@ def process_directory(input_dir, output_dir):
             
     if neg_dfs:
         neg_concat = pd.concat(neg_dfs)
-        # Learn Quadrant Gate Thresholds (99.9% NC in lower left)
-        # i.e., threshold is 99.9th percentile of NC
-        thresh_expr = np.percentile(neg_concat[CH_EXPR], 99.9)
-        thresh_bind = np.percentile(neg_concat[CH_BIND], 99.9)
+        # Learn Quadrant Gate Thresholds ({NC_CUTOFF_PERCENTILE}% NC in lower left)
+        # i.e., threshold is dynamic percentile of NC
+        thresh_expr = np.percentile(neg_concat[CH_EXPR], NC_CUTOFF_PERCENTILE)
+        thresh_bind = np.percentile(neg_concat[CH_BIND], NC_CUTOFF_PERCENTILE)
         
         neg_mfi_expr = neg_concat[CH_EXPR].median()
         neg_mfi_bind = neg_concat[CH_BIND].median()
@@ -377,11 +389,11 @@ def process_directory(input_dir, output_dir):
             t_expr_nc = np.log10(np.clip(d_gated_demo[CH_EXPR], 1, None))
             
             ax2.hexbin(t_bind_nc, t_expr_nc, gridsize=100, cmap='jet', mincnt=1, bins='log')
-            ax2.axvline(np.log10(max(thresh_bind, 1)), color='r', linestyle='--', label='99.9% Bind Thresh')
-            ax2.axhline(np.log10(max(thresh_expr, 1)), color='r', linestyle='--', label='99.9% Expr Thresh')
+            ax2.axvline(np.log10(max(thresh_bind, 1)), color='r', linestyle='--', label=f'{NC_CUTOFF_PERCENTILE}% Bind Thresh')
+            ax2.axhline(np.log10(max(thresh_expr, 1)), color='r', linestyle='--', label=f'{NC_CUTOFF_PERCENTILE}% Expr Thresh')
             ax2.set_xlabel("Log10 APC-A (Binding)")
             ax2.set_ylabel("Log10 FITC-A (Expression)")
-            ax2.set_title("99.9% Thresholds on Negative Control")
+            ax2.set_title(f"{NC_CUTOFF_PERCENTILE}% Thresholds on Negative Control")
             ax2.legend(loc='lower left')
             plt.tight_layout()
             plt.savefig(os.path.join(output_dir, "Gating_Strategy_NegCtrl_Quad.png"))
@@ -390,7 +402,7 @@ def process_directory(input_dir, output_dir):
             # 1D Density for Expression on NC
             fig_ex, ax_ex = plt.subplots(1, 1, figsize=(6, 4))
             sns.kdeplot(t_expr_nc, fill=True, ax=ax_ex, color='purple')
-            ax_ex.axvline(np.log10(max(thresh_expr, 1)), color='r', linestyle='--', label=f'99.9% Thresh: {thresh_expr:.0f}')
+            ax_ex.axvline(np.log10(max(thresh_expr, 1)), color='r', linestyle='--', label=f'{NC_CUTOFF_PERCENTILE}% Thresh: {thresh_expr:.0f}')
             ax_ex.set_xlabel("Log10 FITC-A (Expression)")
             ax_ex.set_title("Negative Control Expression Density")
             ax_ex.legend()
@@ -401,7 +413,7 @@ def process_directory(input_dir, output_dir):
             # 1D Density for Binding on NC
             fig_bi, ax_bi = plt.subplots(1, 1, figsize=(6, 4))
             sns.kdeplot(t_bind_nc, fill=True, ax=ax_bi, color='g')
-            ax_bi.axvline(np.log10(max(thresh_bind, 1)), color='r', linestyle='--', label=f'99.9% Thresh: {thresh_bind:.0f}')
+            ax_bi.axvline(np.log10(max(thresh_bind, 1)), color='r', linestyle='--', label=f'{NC_CUTOFF_PERCENTILE}% Thresh: {thresh_bind:.0f}')
             ax_bi.set_xlabel("Log10 APC-A (Binding)")
             ax_bi.set_title("Negative Control Binding Density")
             ax_bi.legend()
@@ -740,7 +752,7 @@ def process_directory(input_dir, output_dir):
                 sns.kdeplot(pos_log_bind, color='blue', label='Pos Ctrl', linestyle='--', linewidth=2)
                 
             sns.kdeplot(t_bind, fill=True, color='green', label=clean_name, alpha=0.4)
-            plt.axvline(log_thresh_bind, color='r', linestyle='--', label='99.9% NC Thresh')
+            plt.axvline(log_thresh_bind, color='r', linestyle='--', label=f'{NC_CUTOFF_PERCENTILE}% NC Thresh')
             
             plt.xlabel("Log10 APC-A (Binding)")
             plt.title(f"Binding Comparison: {clean_name}\n(Ratio vs Pos: {fc_vs_pos:.2f})")
@@ -757,7 +769,7 @@ def process_directory(input_dir, output_dir):
                 sns.kdeplot(pos_log_expr, color='blue', label='Pos Ctrl', linestyle='--', linewidth=2)
                 
             sns.kdeplot(t_expr, fill=True, color='purple', label=clean_name, alpha=0.4)
-            plt.axvline(log_thresh_expr, color='r', linestyle='--', label='99.9% NC Thresh')
+            plt.axvline(log_thresh_expr, color='r', linestyle='--', label=f'{NC_CUTOFF_PERCENTILE}% NC Thresh')
             
             plt.xlabel("Log10 FITC-A (Expression)")
             plt.title(f"Expression Comparison: {clean_name}\n(FC: {fc_expr:.1f}x)")
@@ -1059,8 +1071,8 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
     # 5. Scatter MFI
     plt.figure(figsize=(10, 6))
     sns.scatterplot(data=df_stats, x="Bind MFI", y="Expr MFI", hue="Filename", s=100)
-    plt.axvline(thresh_bind, color='r', linestyle='--', label='99.9% NC Bind Thresh')
-    plt.axhline(thresh_expr, color='r', linestyle='--', label='99.9% NC Expr Thresh')
+    plt.axvline(thresh_bind, color='r', linestyle='--', label=f'{NC_CUTOFF_PERCENTILE}% NC Bind Thresh')
+    plt.axhline(thresh_expr, color='r', linestyle='--', label=f'{NC_CUTOFF_PERCENTILE}% NC Expr Thresh')
     plt.title("Mean Fluorescence Intensity: Binding vs Expression")
     plt.xlabel("Binding MFI (APC)")
     plt.ylabel("Expression MFI (FITC)")
@@ -1202,9 +1214,9 @@ def generate_report(df, output_dir):
         f.write("- **Fold Change (vs Neg)**: The Median MFI of the sample divided by the Median MFI of the Negative Control. A value of 1.0 means it is identical to background.\n")
         f.write("- **Binding Efficiency**: The ratio of Binding Fold Change to Expression Fold Change. Helps identify if a high binding signal is just due to abnormally high expression.\n")
         f.write("- **Stain Index**: A measure of separation between the positive population and the negative population. Calculated as: `(Sample Median - Neg Median) / (2 * robust SD of Neg)`.\n")
-        f.write("- **Pos Mean / Median Ratio (Raw)**: For events strictly above the 99.9% Negative Control threshold, this is the ratio of their Binding level to their Expression level (`Pos Bind / Pos Expr`). Validates how effectively the expressed protein binds the target.\n")
+        f.write(f"- **Pos Mean / Median Ratio (Raw)**: For events strictly above the {NC_CUTOFF_PERCENTILE}% Negative Control threshold, this is the ratio of their Binding level to their Expression level (`Pos Bind / Pos Expr`). Validates how effectively the expressed protein binds the target.\n")
         f.write("- **Normalized Pos Mean / Median Ratio**: The Raw Ratio scaled against the Positive Control's ratio. A value of `1.0` means the sample's binding-to-expression effectiveness perfectly matches the Positive Control. `>1.0` is better than Pos Ctrl, `<1.0` is worse.\n")
-        f.write("- **Double+ %**: The percentage of *all* events in the sample that fell into the upper-right quadrant (i.e., they expressed *and* bound above the 99.9% Negative Control thresholds).\n")
+        f.write(f"- **Double+ %**: The percentage of *all* events in the sample that fell into the upper-right quadrant (i.e., they expressed *and* bound above the {NC_CUTOFF_PERCENTILE}% Negative Control thresholds).\n")
         f.write("- **Bind Med (Expr+)**: The median binding level (APC) of the population that is successfully expressing the protein (FITC > NC boundary).\n")
         f.write("- **Norm Bind Med (Expr+)**: The above metric, but normalized to the same metric in the Positive Control. A value of 1.0 means the binding effectiveness per expressing cell matches the Positive Control.\n")
         f.write("- **Expr Med (Bind+)**: The median expression level (FITC) of the population that shows a binding signal (APC > NC boundary).\n")
