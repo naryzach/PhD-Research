@@ -325,6 +325,12 @@ def main():
             'Comments': comment_str
         })
         
+    def natural_sort_key(d):
+        import re
+        return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', d['Construct'])]
+    
+    cross_data.sort(key=natural_sort_key)
+    
     output_cross_csv = os.path.join(output_dir, "cross_target_summary.csv")
     cross_fieldnames = ['Construct', 'AB Sequence', 'C Sequence', 'Expected', 'Expression', 'MMP2 Trials', 'MMP3 Trials', 'MMP9 Trials', 'ADAM10 Trials', 'ADAM17 Trials', 'Comments']
     with open(output_cross_csv, 'w', newline='') as f:
