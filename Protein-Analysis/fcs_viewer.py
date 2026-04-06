@@ -4,6 +4,8 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import fcsparser
+import s3fs
+import io
 import os
 import glob
 from scipy import stats
@@ -69,19 +71,58 @@ st.markdown("""
 
 # Gating parameters are now managed via the sidebar UI.
 
+# ---- DATA BACKEND INITIALIZATION ----
+
+@st.cache_resource
+def get_fs():
+    """Initializes a connection to R2 if secrets are present, else returns None (local mode)."""
+    if "r2" in st.secrets:
+        try:
+            r2_config = st.secrets["r2"]
+            fs = s3fs.S3FileSystem(
+                key=r2_config["access_key_id"],
+                secret=r2_config["secret_access_key"],
+                endpoint_url=r2_config["endpoint_url"]
+            )
+            return fs, r2_config["bucket_name"]
+        except Exception as e:
+            st.error(f"Error connecting to R2: {e}")
+            return None, None
+    return None, None
+
+fs, BUCKET = get_fs()
+
 # ---- HELPER FUNCTIONS ----
 
 @st.cache_data
 def load_fcs(file_path):
     """Loads an FCS file and returns metadata and dataframe."""
     try:
-        meta, data = fcsparser.parse(file_path, reformat_meta=True)
+        if fs and file_path.startswith(BUCKET):
+            with fs.open(file_path, 'rb') as f:
+                # Use a buffer because fcsparser needs seekable stream
+                buffer = io.BytesIO(f.read())
+                meta, data = fcsparser.parse(buffer, reformat_meta=True)
+        else:
+            meta, data = fcsparser.parse(file_path, reformat_meta=True)
         return meta, data
     except Exception as e:
         return None, None
 
 def get_fcs_folders(base_dir):
     """Finds all subdirectories containing .fcs files."""
+    if fs and base_dir.startswith(BUCKET):
+        try:
+            # R2 doesn't have true directories, but we can browse via prefixes
+            all_files = fs.find(base_dir)
+            folders = set()
+            for f in all_files:
+                if f.lower().endswith('.fcs'):
+                    folders.add(os.path.dirname(f))
+            return sorted(list(folders))
+        except:
+            return []
+            
     if not os.path.exists(base_dir):
         return []
     folders = []
@@ -92,6 +133,15 @@ def get_fcs_folders(base_dir):
 
 def get_files(directory):
     """Finds FCS files in a specific directory."""
+    if fs and directory.startswith(BUCKET):
+        try:
+            # We want files directly in this "directory" (prefix)
+            files = fs.ls(directory, detail=False)
+            fcs_files = [f for f in files if f.lower().endswith('.fcs')]
+            return sorted(fcs_files)
+        except:
+            return []
+
     if not os.path.exists(directory):
         return []
     files = glob.glob(os.path.join(directory, "*.fcs"))
@@ -539,9 +589,19 @@ def render_scatter(df, key_prefix):
 st.sidebar.title("🧬 FCS Viewer")
 st.sidebar.markdown("Explore raw flow cytometry data interactively.")
 
-default_path = os.path.join(os.path.dirname(__file__), "../Local")
-default_path = os.path.abspath(default_path)
-base_path = st.sidebar.text_input("Base Directory", value=default_path)
+if BUCKET:
+    data_mode = st.sidebar.radio("Data Source", ["Cloud (R2)", "Local"], horizontal=True)
+    if data_mode == "Cloud (R2)":
+        default_path = BUCKET
+    else:
+        default_path = os.path.join(os.path.dirname(__file__), "../Local")
+        default_path = os.path.abspath(default_path)
+else:
+    data_mode = "Local"
+    default_path = os.path.join(os.path.dirname(__file__), "../Local")
+    default_path = os.path.abspath(default_path)
+
+base_path = st.sidebar.text_input("Data Root (Path or Bucket)", value=default_path)
 
 # (Rest of the sidebar and processing logic...)
 # (Skipping identical lines to reach the TABS section correctly)
@@ -554,11 +614,17 @@ with st.sidebar.expander("🛠️ Advanced Gating Settings"):
     g_gate_frac = st.slider("Gate Target Fraction", 0.5, 1.0, 0.9)
     g_nc_pct = st.slider("NC Cutoff Percentile", 90.0, 100.0, 99.5, step=0.1)
 
-if os.path.exists(base_path):
+is_cloud = fs and base_path.startswith(BUCKET)
+
+if is_cloud or os.path.exists(base_path):
     folders = get_fcs_folders(base_path)
     if folders:
         def format_folder(path):
             try:
+                if is_cloud:
+                    if path == base_path: return "."
+                    # Remove the base_path prefix to show relative path
+                    return path[len(base_path):].strip("/")
                 rel = os.path.relpath(path, base_path)
                 return "." if rel == "." else rel
             except:
@@ -574,11 +640,11 @@ if os.path.exists(base_path):
             st.sidebar.warning("No .fcs files found in selected folder.")
             selected_file = None
     else:
-        st.sidebar.warning("No folders with .fcs files found in Base Directory.")
+        st.sidebar.warning("No folders with .fcs files found in Data Root.")
         selected_file = None
         search_path = base_path
 else:
-    st.sidebar.error("Base Directory not found.")
+    st.sidebar.error("Data Root not found.")
     selected_file = None
 
 st.sidebar.markdown("---")

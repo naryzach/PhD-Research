@@ -6,3 +6,5 @@ streamlit
 pandas
 numpy
 matplotlib
+s3fs
+boto3
