@@ -131,8 +131,8 @@ def learn_pentagon_gate(df, fsc_col, ssc_col, fraction=0.90):
     
     # 2. Filter upper extreme outliers so KDE is focused tightly on main clusters
     # This prevents the boundary from getting stretched to 10^7
-    fsc_99 = np.percentile(x, 99)
-    ssc_99 = np.percentile(y, 99)
+    fsc_99 = np.percentile(x, 90)
+    ssc_99 = np.percentile(y, 90)
     core_idx = (x < fsc_99) & (y < ssc_99)
     
     x_core = x[core_idx]
@@ -329,7 +329,7 @@ def process_directory(input_dir, output_dir):
             # Drop pure zeros or negatives for KDE stability if needed, 
             # but usually the origin points are handled by KDE
             # Reduced fraction to 0.85 to tighten the gate
-            pentagon_path = learn_pentagon_gate(d_neg_learn, CH_FSC_A, CH_SSC_A, fraction=0.85)
+            pentagon_path = learn_pentagon_gate(d_neg_learn, CH_FSC_A, CH_SSC_A, fraction=0.90)
             
     if pentagon_path is None:
         print("Warning: Could not learn pentagon gate from NC. Cannot proceed accurately.")
