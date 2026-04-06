@@ -12,6 +12,7 @@ from scipy import stats
 from scipy.stats import gaussian_kde
 from scipy.spatial import ConvexHull
 from matplotlib.path import Path
+import tempfile
 
 # ---- PAGE CONFIGURATION ----
 st.set_page_config(
@@ -82,7 +83,9 @@ def get_fs():
             fs = s3fs.S3FileSystem(
                 key=r2_config["access_key_id"],
                 secret=r2_config["secret_access_key"],
-                endpoint_url=r2_config["endpoint_url"]
+                endpoint_url=r2_config["endpoint_url"],
+                # R2 requires region_name='auto' for some operations
+                client_kwargs={'region_name': 'auto'}
             )
             return fs, r2_config["bucket_name"]
         except Exception as e:
@@ -92,21 +95,46 @@ def get_fs():
 
 fs, BUCKET = get_fs()
 
+# Debug R2 connection in sidebar (visible only when BUCKET is set)
+if fs and BUCKET:
+    with st.sidebar.expander("🔍 R2 Connection Debug"):
+        st.write(f"Bucket: `{BUCKET}`")
+        try:
+            test_ls = fs.ls(BUCKET, detail=False)
+            st.write(f"Root items found: {len(test_ls)}")
+            if len(test_ls) > 0:
+                st.write("First item:", test_ls[0])
+        except Exception as e:
+            st.error(f"Connection Test Failed: {e}")
+
 # ---- HELPER FUNCTIONS ----
 
 @st.cache_data
 def load_fcs(file_path):
     """Loads an FCS file and returns metadata and dataframe."""
     try:
-        if fs and file_path.startswith(BUCKET):
-            with fs.open(file_path, 'rb') as f:
-                # Use a buffer because fcsparser needs seekable stream
-                buffer = io.BytesIO(f.read())
-                meta, data = fcsparser.parse(buffer, reformat_meta=True)
+        # Check if this is an R2 path
+        if fs and BUCKET and file_path.startswith(BUCKET):
+            # Create a temporary file with .fcs suffix
+            with tempfile.NamedTemporaryFile(suffix=".fcs", delete=False) as tmp:
+                tmp_path = tmp.name
+            
+            try:
+                # Download the R2 object to the temporary local file
+                fs.get(file_path, tmp_path)
+                # Parse the local temporary file
+                meta, data = fcsparser.parse(tmp_path, reformat_meta=True)
+                return meta, data
+            finally:
+                # Clean up the temporary file
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
         else:
+            # Standard local file loading
             meta, data = fcsparser.parse(file_path, reformat_meta=True)
-        return meta, data
+            return meta, data
     except Exception as e:
+        st.error(f"Error loading {file_path}: {e}")
         return None, None
 
 def get_fcs_folders(base_dir):
@@ -268,7 +296,7 @@ def apply_polygon_gate(df, path, fsc_col="FSC-A", ssc_col="SSC-A", min_fsc=50000
 
 @st.cache_data(show_spinner=False)
 def analyze_folder_controls(directory, fsc_col="FSC-A", ssc_col="SSC-A", expr_col="FITC-A", bind_col="APC-A", nc_percentile=99.5, min_fsc=500000, min_ssc=20000, upper_pct=95, gate_fraction=0.9):
-    all_files = glob.glob(os.path.join(directory, "*.fcs"))
+    all_files = get_files(directory)
     neg_files = [f for f in all_files if any(os.path.basename(f).startswith(p) for p in ["NC", "Negative Control"])]
     pos_files = [f for f in all_files if any(os.path.basename(f).startswith(p) for p in ["Positive Control", "TIMP"])]
     
@@ -335,7 +363,7 @@ def analyze_folder_controls(directory, fsc_col="FSC-A", ssc_col="SSC-A", expr_co
 
 @st.cache_data(show_spinner=False)
 def get_folder_aggregate_stats(directory, _ctrls, fsc_col="FSC-A", ssc_col="SSC-A", expr_col="FITC-A", bind_col="APC-A", def_thresh_expr=1.0, def_thresh_bind=1.0, min_fsc=500000, min_ssc=20000, upper_pct=95):
-    all_files = glob.glob(os.path.join(directory, "*.fcs"))
+    all_files = get_files(directory)
     stats_list = []
     
     pent_path = _ctrls.get("pentagon_path")
