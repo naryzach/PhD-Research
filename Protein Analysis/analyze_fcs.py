@@ -47,9 +47,11 @@ CH_FITC = 'FITC-A' # Expression
 CH_APC = 'APC-A'   # Binding
 
 # Origin Debris Filter
-MIN_FSC = 1000000
+MIN_FSC = 500000
 MIN_SSC = 20000
 NC_CUTOFF_PERCENTILE = 99.5
+UPPER_FILTER_PERCENTILE = 95
+GATE_TARGET_FRACTION = 0.90
 
 # Plot settings
 SNS_STYLE = "whitegrid"
@@ -109,7 +111,7 @@ def simplify_polygon_vw(points, num_points=5):
         pts.pop(min_idx)
     return np.array(pts)
 
-def learn_pentagon_gate(df, fsc_col, ssc_col, fraction=0.90):
+def learn_pentagon_gate(df, fsc_col, ssc_col, fraction=GATE_TARGET_FRACTION):
     """
     Learns a 5-point polygon (pentagon) gate on FSC vs SSC.
     Actively rejects points near the origin (debris) before contouring 
@@ -131,9 +133,9 @@ def learn_pentagon_gate(df, fsc_col, ssc_col, fraction=0.90):
     
     # 2. Filter upper extreme outliers so KDE is focused tightly on main clusters
     # This prevents the boundary from getting stretched to 10^7
-    fsc_99 = np.percentile(x, 90)
-    ssc_99 = np.percentile(y, 90)
-    core_idx = (x < fsc_99) & (y < ssc_99)
+    fsc_upper = np.percentile(x, UPPER_FILTER_PERCENTILE)
+    ssc_upper = np.percentile(y, UPPER_FILTER_PERCENTILE)
+    core_idx = (x < fsc_upper) & (y < ssc_upper)
     
     x_core = x[core_idx]
     y_core = y[core_idx]
@@ -147,8 +149,8 @@ def learn_pentagon_gate(df, fsc_col, ssc_col, fraction=0.90):
     
     # Score a representative sample to quickly find the threshold
     # Using the real data points themselves means the gate perfectly wraps the data
-    all_x = df[fsc_col].values
-    all_y = df[ssc_col].values
+    all_x = core_df[fsc_col].values
+    all_y = core_df[ssc_col].values
     
     n_score = min(20000, len(all_x))
     idx_score = np.random.choice(len(all_x), n_score, replace=False)
@@ -216,7 +218,7 @@ def learn_pentagon_gate(df, fsc_col, ssc_col, fraction=0.90):
         best_path = Path(poly_verts)
 
     exact_captured = best_path.contains_points(np.vstack([all_x, all_y]).T).mean()
-    print(f"Pentagon generated: captures ~{exact_captured*100:.1f}% events.")
+    print(f"Pentagon generated: captures ~{exact_captured*100:.1f}% of clean core events.")
     
     return best_path
 
@@ -329,7 +331,7 @@ def process_directory(input_dir, output_dir):
             # Drop pure zeros or negatives for KDE stability if needed, 
             # but usually the origin points are handled by KDE
             # Reduced fraction to 0.85 to tighten the gate
-            pentagon_path = learn_pentagon_gate(d_neg_learn, CH_FSC_A, CH_SSC_A, fraction=0.90)
+            pentagon_path = learn_pentagon_gate(d_neg_learn, CH_FSC_A, CH_SSC_A, fraction=GATE_TARGET_FRACTION)
             
     if pentagon_path is None:
         print("Warning: Could not learn pentagon gate from NC. Cannot proceed accurately.")
