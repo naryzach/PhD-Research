@@ -1,3 +1,8 @@
 plotly
 fcsparser
 scipy
+requests
+streamlit
+pandas
+numpy
+matplotlib

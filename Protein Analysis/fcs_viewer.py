@@ -67,12 +67,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# ---- CONFIGURATION ----
-MIN_FSC = 500000
-MIN_SSC = 20000
-UPPER_FILTER_PERCENTILE = 95
-GATE_TARGET_FRACTION = 0.90
-NC_CUTOFF_PERCENTILE = 99.5
+# Gating parameters are now managed via the sidebar UI.
 
 # ---- HELPER FUNCTIONS ----
 
@@ -85,8 +80,18 @@ def load_fcs(file_path):
     except Exception as e:
         return None, None
 
+def get_fcs_folders(base_dir):
+    """Finds all subdirectories containing .fcs files."""
+    if not os.path.exists(base_dir):
+        return []
+    folders = []
+    for root, _, files in os.walk(base_dir):
+        if any(f.lower().endswith('.fcs') for f in files):
+            folders.append(root)
+    return sorted(folders)
+
 def get_files(directory):
-    """Recursively finds FCS files."""
+    """Finds FCS files in a specific directory."""
     if not os.path.exists(directory):
         return []
     files = glob.glob(os.path.join(directory, "*.fcs"))
@@ -114,8 +119,8 @@ def simplify_polygon_vw(points, num_points=5):
     return np.array(pts)
 
 @st.cache_data(show_spinner=False)
-def learn_pentagon_gate(df, fsc_col="FSC-A", ssc_col="SSC-A", fraction=GATE_TARGET_FRACTION):
-    origin_filter = (df[fsc_col] > MIN_FSC) & (df[ssc_col] > MIN_SSC)
+def learn_pentagon_gate(df, fsc_col="FSC-A", ssc_col="SSC-A", fraction=0.9, min_fsc=500000, min_ssc=20000, upper_pct=95):
+    origin_filter = (df[fsc_col] > min_fsc) & (df[ssc_col] > min_ssc)
     core_df = df[origin_filter]
     
     if len(core_df) < 100:
@@ -124,8 +129,8 @@ def learn_pentagon_gate(df, fsc_col="FSC-A", ssc_col="SSC-A", fraction=GATE_TARG
     x = core_df[fsc_col].values
     y = core_df[ssc_col].values
     
-    fsc_upper = np.percentile(x, UPPER_FILTER_PERCENTILE)
-    ssc_upper = np.percentile(y, UPPER_FILTER_PERCENTILE)
+    fsc_upper = np.percentile(x, upper_pct)
+    ssc_upper = np.percentile(y, upper_pct)
     core_idx = (x < fsc_upper) & (y < ssc_upper)
     
     x_core = x[core_idx]
@@ -203,16 +208,16 @@ def learn_pentagon_gate(df, fsc_col="FSC-A", ssc_col="SSC-A", fraction=GATE_TARG
 
     return best_path, best_verts
 
-def apply_polygon_gate(df, path, fsc_col="FSC-A", ssc_col="SSC-A"):
+def apply_polygon_gate(df, path, fsc_col="FSC-A", ssc_col="SSC-A", min_fsc=500000, min_ssc=20000):
     if len(df) == 0:
         return df
     points = np.vstack([df[fsc_col], df[ssc_col]]).T
     poly_mask = path.contains_points(points)
-    origin_mask = (df[fsc_col] > MIN_FSC) & (df[ssc_col] > MIN_SSC)
+    origin_mask = (df[fsc_col] > min_fsc) & (df[ssc_col] > min_ssc)
     return df[poly_mask & origin_mask]
 
 @st.cache_data(show_spinner=False)
-def analyze_folder_controls(directory, fsc_col="FSC-A", ssc_col="SSC-A", expr_col="FITC-A", bind_col="APC-A", nc_percentile=NC_CUTOFF_PERCENTILE):
+def analyze_folder_controls(directory, fsc_col="FSC-A", ssc_col="SSC-A", expr_col="FITC-A", bind_col="APC-A", nc_percentile=99.5, min_fsc=500000, min_ssc=20000, upper_pct=95, gate_fraction=0.9):
     all_files = glob.glob(os.path.join(directory, "*.fcs"))
     neg_files = [f for f in all_files if any(os.path.basename(f).startswith(p) for p in ["NC", "Negative Control"])]
     pos_files = [f for f in all_files if any(os.path.basename(f).startswith(p) for p in ["Positive Control", "TIMP"])]
@@ -228,12 +233,14 @@ def analyze_folder_controls(directory, fsc_col="FSC-A", ssc_col="SSC-A", expr_co
         "neg_mfi_bind": None,
         "pos_mfi_expr": None,
         "pos_mfi_bind": None,
+        "neg_sample": None,
+        "pos_sample": None,
     }
     
     if neg_files:
         _, d_neg_learn = load_fcs(neg_files[0])
         if d_neg_learn is not None and fsc_col in d_neg_learn.columns and ssc_col in d_neg_learn.columns:
-            path, verts = learn_pentagon_gate(d_neg_learn, fsc_col, ssc_col)
+            path, verts = learn_pentagon_gate(d_neg_learn, fsc_col, ssc_col, gate_fraction, min_fsc, min_ssc, upper_pct)
             results["pentagon_path"] = path
             results["pentagon_verts"] = verts
             
@@ -253,6 +260,7 @@ def analyze_folder_controls(directory, fsc_col="FSC-A", ssc_col="SSC-A", expr_co
                     results["thresh_bind"] = np.percentile(neg_concat[bind_col], nc_percentile)
                     results["neg_mfi_expr"] = neg_concat[expr_col].median()
                     results["neg_mfi_bind"] = neg_concat[bind_col].median()
+                    results["neg_sample"] = neg_concat.sample(n=min(5000, len(neg_concat)))
                     results["has_nc"] = True
 
     if pos_files and results["has_nc"]:
@@ -260,7 +268,7 @@ def analyze_folder_controls(directory, fsc_col="FSC-A", ssc_col="SSC-A", expr_co
         for f in pos_files:
             _, d = load_fcs(f)
             if d is not None:
-                d_gated = apply_polygon_gate(d, results["pentagon_path"], fsc_col, ssc_col)
+                d_gated = apply_polygon_gate(d, results["pentagon_path"], fsc_col, ssc_col, min_fsc, min_ssc)
                 if expr_col in d_gated.columns and bind_col in d_gated.columns:
                     d_gated = d_gated[(d_gated[expr_col] > 0) & (d_gated[bind_col] > 0)]
                     pos_dfs.append(d_gated)
@@ -270,25 +278,138 @@ def analyze_folder_controls(directory, fsc_col="FSC-A", ssc_col="SSC-A", expr_co
             if len(pos_concat) > 0:
                 results["pos_mfi_expr"] = pos_concat[expr_col].median()
                 results["pos_mfi_bind"] = pos_concat[bind_col].median()
+                results["pos_sample"] = pos_concat.sample(n=min(5000, len(pos_concat)))
                 results["has_pc"] = True
 
     return results
 
-@st.cache_data
-def calculate_density(x, y, subsample=5000):
-    if len(x) > subsample:
-        idx = np.random.choice(len(x), subsample, replace=False)
-        if hasattr(x, 'iloc'):
-            x_sub, y_sub = x.iloc[idx], y.iloc[idx]
-        else:
-            x_sub, y_sub = x[idx], y[idx]
-    else:
-        x_sub, y_sub = x, y
+@st.cache_data(show_spinner=False)
+def get_folder_aggregate_stats(directory, _ctrls, fsc_col="FSC-A", ssc_col="SSC-A", expr_col="FITC-A", bind_col="APC-A", def_thresh_expr=1.0, def_thresh_bind=1.0, min_fsc=500000, min_ssc=20000, upper_pct=95):
+    all_files = glob.glob(os.path.join(directory, "*.fcs"))
+    stats_list = []
+    
+    pent_path = _ctrls.get("pentagon_path")
+    if not pent_path:
+        return pd.DataFrame(), pd.DataFrame()
         
-    values = np.vstack([x_sub, y_sub])
-    kernel = stats.gaussian_kde(values)
-    z = kernel(np.vstack([x, y]))
-    return z
+    neg_mfi_expr = _ctrls.get("neg_mfi_expr", 1)
+    neg_mfi_bind = _ctrls.get("neg_mfi_bind", 1)
+    
+    ridge_data = []
+
+    for f in all_files:
+        meta, df = load_fcs(f)
+        if df is None: continue
+        
+        df_sing = apply_polygon_gate(df, pent_path, fsc_col, ssc_col, min_fsc, min_ssc)
+        if len(df_sing) > 0 and expr_col in df_sing.columns and bind_col in df_sing.columns:
+            df_sing = df_sing[(df_sing[expr_col] > 0) & (df_sing[bind_col] > 0)]
+            
+        if len(df_sing) == 0:
+            continue
+            
+        expr_pos = df_sing[expr_col] > def_thresh_expr
+        bind_pos = df_sing[bind_col] > def_thresh_bind
+        double_pos = expr_pos & bind_pos
+        
+        pct_double = double_pos.mean() * 100
+        
+        mfi_expr = df_sing[expr_col].median()
+        mfi_bind = df_sing[bind_col].median()
+        
+        fc_expr = mfi_expr / max(neg_mfi_expr, 1)
+        fc_bind = mfi_bind / max(neg_mfi_bind, 1)
+        
+        pos_expr_mask = df_sing[expr_pos]
+        pos_bind_mask = df_sing[bind_pos]
+        
+        pos_med_expr = pos_expr_mask[expr_col].median() if len(pos_expr_mask) > 0 else 0
+        pos_med_bind = pos_bind_mask[bind_col].median() if len(pos_bind_mask) > 0 else 0
+        pos_med_ratio = (pos_med_bind / pos_med_expr) if pos_med_expr > 0 else 0
+        
+        pos_mean_expr = pos_expr_mask[expr_col].mean() if len(pos_expr_mask) > 0 else 0
+        pos_mean_bind = pos_bind_mask[bind_col].mean() if len(pos_bind_mask) > 0 else 0
+        pos_mean_ratio = (pos_mean_bind / pos_mean_expr) if pos_mean_expr > 0 else 0
+        
+        clean_name = os.path.basename(f)
+        stats_list.append({
+            "Filename": clean_name,
+            "Double+ %": pct_double,
+            "Expr MFI": mfi_expr,
+            "Bind MFI": mfi_bind,
+            "Bind Fold Change": fc_bind,
+            "Expr Fold Change": fc_expr,
+            "Pos Med Ratio": pos_med_ratio,
+            "Pos Mean Ratio": pos_mean_ratio,
+            "Bind Med (Expr+)": pos_med_bind,
+            "Expr Med (Bind+)": pos_med_expr,
+            "Bind Mean (Expr+)": pos_mean_bind,
+            "Expr Mean (Bind+)": pos_mean_expr
+        })
+        
+        sub = df_sing.sample(n=min(len(df_sing), 1000))
+        for _, row in sub.iterrows():
+            ridge_data.append({
+                "Sample": clean_name,
+                "LogBinding": np.log10(max(row[bind_col], 1)),
+                "LogExpression": np.log10(max(row[expr_col], 1))
+            })
+            
+    df_stats = pd.DataFrame(stats_list)
+    df_ridge = pd.DataFrame(ridge_data)
+    
+    if _ctrls["has_pc"] and not df_stats.empty:
+        pos_mask = df_stats['Filename'].apply(lambda x: any(p in x for p in ["Positive Control", "TIMP"]))
+        if pos_mask.any():
+            p_med_rat_ref = df_stats.loc[pos_mask, "Pos Med Ratio"].median()
+            p_mean_rat_ref = df_stats.loc[pos_mask, "Pos Mean Ratio"].median()
+            p_bind_med_ref = df_stats.loc[pos_mask, "Bind Med (Expr+)"].median()
+            p_expr_med_ref = df_stats.loc[pos_mask, "Expr Med (Bind+)"].median()
+            p_bind_mean_ref = df_stats.loc[pos_mask, "Bind Mean (Expr+)"].median()
+            p_expr_mean_ref = df_stats.loc[pos_mask, "Expr Mean (Bind+)"].median()
+        else:
+            p_med_rat_ref = df_stats["Pos Med Ratio"].max()
+            p_mean_rat_ref = df_stats["Pos Mean Ratio"].max()
+            p_bind_med_ref = df_stats["Bind Med (Expr+)"].max()
+            p_expr_med_ref = df_stats["Expr Med (Bind+)"].max()
+            p_bind_mean_ref = df_stats["Bind Mean (Expr+)"].max()
+            p_expr_mean_ref = df_stats["Expr Mean (Bind+)"].max()
+
+        df_stats["Norm Pos Med Ratio"] = df_stats["Pos Med Ratio"] / max(p_med_rat_ref, 1e-9)
+        df_stats["Norm Pos Mean Ratio"] = df_stats["Pos Mean Ratio"] / max(p_mean_rat_ref, 1e-9)
+        df_stats["Norm Bind Med (Expr+)"] = df_stats["Bind Med (Expr+)"] / max(p_bind_med_ref, 1e-9)
+        df_stats["Norm Expr Med (Bind+)"] = df_stats["Expr Med (Bind+)"] / max(p_expr_med_ref, 1e-9)
+        df_stats["Norm Bind Mean (Expr+)"] = df_stats["Bind Mean (Expr+)"] / max(p_bind_mean_ref, 1e-9)
+        df_stats["Norm Expr Mean (Bind+)"] = df_stats["Expr Mean (Bind+)"] / max(p_expr_mean_ref, 1e-9)
+        
+    elif not df_stats.empty:
+        for m in ["Pos Med Ratio", "Pos Mean Ratio", "Bind Med (Expr+)", "Expr Med (Bind+)", "Bind Mean (Expr+)", "Expr Mean (Bind+)"]:
+            df_stats[f"Norm {m}"] = df_stats[m] / max(df_stats[m].max(), 1e-9)
+        
+    return df_stats, df_ridge
+
+@st.cache_data
+def calculate_density(x, y, bins=100):
+    """
+    Computes binned density for scatter plots, more consistent with flow software
+    and 'analyze_fcs.py' hexbin logic.
+    """
+    if len(x) == 0:
+        return np.array([])
+        
+    counts, x_edges, y_edges = np.histogram2d(x, y, bins=bins)
+    
+    # Map each point to its corresponding bin index
+    ix = np.searchsorted(x_edges, x) - 1
+    iy = np.searchsorted(y_edges, y) - 1
+    
+    # Clip indices to stay within bin bounds
+    ix = np.clip(ix, 0, bins - 1)
+    iy = np.clip(iy, 0, bins - 1)
+    
+    # Retrieve the counts and apply log-scaling for the 'flow' look
+    z = counts[ix, iy]
+    return np.log10(z + 1)
 
 def render_scatter(df, key_prefix):
     col1, col2 = st.columns([1, 3])
@@ -371,6 +492,16 @@ def render_scatter(df, key_prefix):
                 else:
                      fig = px.scatter(plot_df, x=x_axis, y=y_axis,
                                       template="plotly_dark", opacity=0.6, render_mode='webgl')
+            
+            # Draw pentagon gate if axes match FSC/SSC
+            if show_gate and 'selected_folder' in globals() and 'ctrls' in globals():
+                 # We need to check if the axes currently selected match the ones used for gating
+                 # Usually FSC-A and SSC-A. Since we are in render_scatter, we check session state or ctrls
+                 p_verts = ctrls.get("pentagon_verts")
+                 if p_verts is not None and x_axis == "FSC-A" and y_axis == "SSC-A":
+                     path_parts = [f"{p[0]},{p[1]}" for p in p_verts]
+                     path_str = "M " + " L ".join(path_parts) + " Z"
+                     fig.add_shape(type="path", path=path_str, line=dict(color='cyan', dash='dash', width=3), layer='above')
         elif color_mode == "Channel":
              fig = px.scatter(plot_df, x=x_axis, y=y_axis, color=color_ch,
                               color_continuous_scale="Viridis", template="plotly_dark",
@@ -402,32 +533,59 @@ def render_scatter(df, key_prefix):
             yaxis_title=plot_ylabel,
             margin=dict(l=0, r=0, t=0, b=0)
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch', key=f"scatter_plot_{key_prefix}")
 
 # ---- SIDEBAR ----
 st.sidebar.title("🧬 FCS Viewer")
 st.sidebar.markdown("Explore raw flow cytometry data interactively.")
 
-default_path = os.path.join(os.path.dirname(__file__), "../Local/TwistBio_FCS")
+default_path = os.path.join(os.path.dirname(__file__), "../Local")
 default_path = os.path.abspath(default_path)
-search_path = st.sidebar.text_input("Data Directory", value=default_path)
+base_path = st.sidebar.text_input("Base Directory", value=default_path)
 
-if os.path.exists(search_path):
-    files = get_files(search_path)
-    if files:
-        selected_file = st.sidebar.selectbox("Select FCS File", files, format_func=os.path.basename)
+# (Rest of the sidebar and processing logic...)
+# (Skipping identical lines to reach the TABS section correctly)
+
+
+with st.sidebar.expander("🛠️ Advanced Gating Settings"):
+    g_min_fsc = st.number_input("Min FSC-A (Singlets)", value=500000, step=50000)
+    g_min_ssc = st.number_input("Min SSC-A (Singlets)", value=20000, step=5000)
+    g_upper_pct = st.slider("Upper Filter Percentile", 50, 100, 95)
+    g_gate_frac = st.slider("Gate Target Fraction", 0.5, 1.0, 0.9)
+    g_nc_pct = st.slider("NC Cutoff Percentile", 90.0, 100.0, 99.5, step=0.1)
+
+if os.path.exists(base_path):
+    folders = get_fcs_folders(base_path)
+    if folders:
+        def format_folder(path):
+            try:
+                rel = os.path.relpath(path, base_path)
+                return "." if rel == "." else rel
+            except:
+                return path
+                
+        selected_folder = st.sidebar.selectbox("Select Folder Context", folders, format_func=format_folder)
+        search_path = selected_folder
+        
+        files = get_files(selected_folder)
+        if files:
+            selected_file = st.sidebar.selectbox("Select FCS File", files, format_func=os.path.basename)
+        else:
+            st.sidebar.warning("No .fcs files found in selected folder.")
+            selected_file = None
     else:
-        st.sidebar.warning("No .fcs files found in directory.")
+        st.sidebar.warning("No folders with .fcs files found in Base Directory.")
         selected_file = None
+        search_path = base_path
 else:
-    st.sidebar.error("Directory not found.")
+    st.sidebar.error("Base Directory not found.")
     selected_file = None
 
 st.sidebar.markdown("---")
 
 if selected_file:
     with st.spinner("Analyzing folder controls..."):
-        ctrls = analyze_folder_controls(search_path)
+        ctrls = analyze_folder_controls(search_path, nc_percentile=g_nc_pct, min_fsc=g_min_fsc, min_ssc=g_min_ssc, upper_pct=g_upper_pct, gate_fraction=g_gate_frac)
     
     st.sidebar.subheader("Gating Context")
     if ctrls["has_nc"]:
@@ -450,8 +608,8 @@ if selected_file:
             def_thresh_expr = float(ctrls["thresh_expr"])
             def_thresh_bind = float(ctrls["thresh_bind"])
         else:
-            def_thresh_expr = float(np.percentile(df[expr_col], NC_CUTOFF_PERCENTILE))
-            def_thresh_bind = float(np.percentile(df[bind_col], NC_CUTOFF_PERCENTILE))
+            def_thresh_expr = float(np.percentile(df[expr_col], g_nc_pct))
+            def_thresh_bind = float(np.percentile(df[bind_col], g_nc_pct))
 
         thresh_expr_val = st.sidebar.number_input("Expression Thresh", value=def_thresh_expr)
         thresh_bind_val = st.sidebar.number_input("Binding Thresh", value=def_thresh_bind)
@@ -473,9 +631,9 @@ if selected_file and df is not None:
         pent_path, pent_verts = ctrls["pentagon_path"], ctrls["pentagon_verts"]
     else:
         with st.spinner("Learning pentagon gate on current file..."):
-            pent_path, pent_verts = learn_pentagon_gate(df, fsc_col, ssc_col)
+            pent_path, pent_verts = learn_pentagon_gate(df, fsc_col, ssc_col, fraction=g_gate_frac, min_fsc=g_min_fsc, min_ssc=g_min_ssc, upper_pct=g_upper_pct)
             
-    df_sing = apply_polygon_gate(df, pent_path, fsc_col, ssc_col)
+    df_sing = apply_polygon_gate(df, pent_path, fsc_col, ssc_col, min_fsc=g_min_fsc, min_ssc=g_min_ssc)
     
     if len(df_sing) > 0 and expr_col in df_sing.columns and bind_col in df_sing.columns:
         df_sing = df_sing[(df_sing[expr_col] > 0) & (df_sing[bind_col] > 0)]
@@ -506,7 +664,9 @@ if selected_file and df is not None:
             st.markdown("---")
             
     # TABS
-    tab_main, tab_custom, tab_raw, tab_meta = st.tabs(["📊 Main Analysis", "🛠️ Custom Plots", "📄 Raw Data", "ℹ️ Metadata"])
+    tab_main, tab_pos, tab_custom, tab_raw, tab_meta, tab_folder, tab_agg = st.tabs([
+        "📊 Main Analysis", "🟢 Pos Control Analytics", "🛠️ Custom Plots", "📄 Raw Data", "ℹ️ Metadata", "📁 Folder Analysis", "📊 Aggregate Analysis"
+    ])
     
     with tab_main:
         if len(df_sing) > 0:
@@ -528,12 +688,16 @@ if selected_file and df is not None:
                     name='Events'
                 ))
                 if pent_verts is not None:
-                    fig1.add_trace(go.Scatter(
-                        x=pent_verts[:,0], y=pent_verts[:,1],
-                        mode='lines',
-                        line=dict(color='cyan', dash='dash', width=2),
-                        name='Pentagon Gate'
-                    ))
+                    # Create path string for SVG path
+                    path_parts = [f"{p[0]},{p[1]}" for p in pent_verts]
+                    path_str = "M " + " L ".join(path_parts) + " Z"
+                    
+                    fig1.add_shape(
+                        type="path",
+                        path=path_str,
+                        line=dict(color='cyan', dash='dash', width=3),
+                        layer='above'
+                    )
                 fig1.update_layout(
                     title=f"Original Gate ({len(df_sing)}/{len(df)})",
                     xaxis_title=fsc_col,
@@ -541,7 +705,7 @@ if selected_file and df is not None:
                     template='plotly_dark',
                     height=450, margin=dict(l=0,r=0,b=0)
                 )
-                st.plotly_chart(fig1, use_container_width=True)
+                st.plotly_chart(fig1, width='stretch', key="main_gate_fig")
 
             with col_b:
                 t_expr = np.log10(np.clip(plot_df_sing[expr_col], 1, None))
@@ -560,7 +724,7 @@ if selected_file and df is not None:
                     height=450, margin=dict(l=0,r=0,b=0),
                     showlegend=False
                 )
-                st.plotly_chart(fig2, use_container_width=True)
+                st.plotly_chart(fig2, width='stretch', key="main_expr_hist")
                 
             col_c, col_d = st.columns(2)
             
@@ -598,7 +762,7 @@ if selected_file and df is not None:
                     height=450, margin=dict(l=0,r=0,b=0),
                     showlegend=False
                 )
-                st.plotly_chart(fig3, use_container_width=True)
+                st.plotly_chart(fig3, width='stretch', key="main_quad_scatter")
 
             with col_d:
                 t_bind = np.log10(np.clip(plot_df_sing[bind_col], 1, None))
@@ -617,9 +781,182 @@ if selected_file and df is not None:
                     height=450, margin=dict(l=0,r=0,b=0),
                     showlegend=False
                 )
-                st.plotly_chart(fig4, use_container_width=True)
+                st.plotly_chart(fig4, width='stretch', key="main_bind_hist")
+                
+            if ctrls.get("neg_sample") is not None:
+                st.markdown("---")
+                st.subheader("Comparison vs Controls")
+                
+                comp_a, comp_b = st.columns(2)
+                
+                # Combine data for Expression Plotly Histogram
+                val_expr = []
+                cond_expr = []
+                
+                neg_e_vals = np.log10(np.clip(ctrls["neg_sample"][expr_col], 1, None)).values
+                val_expr.extend(neg_e_vals)
+                cond_expr.extend(["Neg Ctrl"] * len(neg_e_vals))
+                
+                if ctrls["has_pc"] and ctrls.get("pos_sample") is not None:
+                    pos_e_vals = np.log10(np.clip(ctrls["pos_sample"][expr_col], 1, None)).values
+                    val_expr.extend(pos_e_vals)
+                    cond_expr.extend(["Pos Ctrl"] * len(pos_e_vals))
+                
+                sam_e_vals = t_expr.values
+                val_expr.extend(sam_e_vals)
+                cond_expr.extend(["Sample"] * len(sam_e_vals))
+                
+                df_e_comp = pd.DataFrame({'Value': val_expr, 'Condition': cond_expr})
+                fig_c2 = px.histogram(df_e_comp, x='Value', color='Condition', barmode='overlay', histnorm='density', template='plotly_dark')
+                fig_c2.add_vline(x=log_thresh_expr, line_dash="dash", line_color="red")
+                fig_c2.update_layout(title="Expression Comparison", xaxis_title=f"Log10 {expr_col}", yaxis_title="Density", height=400, margin=dict(l=0,r=0,b=0))
+                
+                with comp_a:
+                    st.plotly_chart(fig_c2, width='stretch', key="main_expr_comp_hist")
+
+                # Combine data for Binding Plotly Histogram
+                val_bind = []
+                cond_bind = []
+                
+                neg_b_vals = np.log10(np.clip(ctrls["neg_sample"][bind_col], 1, None)).values
+                val_bind.extend(neg_b_vals)
+                cond_bind.extend(["Neg Ctrl"] * len(neg_b_vals))
+                
+                if ctrls["has_pc"] and ctrls.get("pos_sample") is not None:
+                    pos_b_vals = np.log10(np.clip(ctrls["pos_sample"][bind_col], 1, None)).values
+                    val_bind.extend(pos_b_vals)
+                    cond_bind.extend(["Pos Ctrl"] * len(pos_b_vals))
+                
+                sam_b_vals = t_bind.values
+                val_bind.extend(sam_b_vals)
+                cond_bind.extend(["Sample"] * len(sam_b_vals))
+                
+                df_b_comp = pd.DataFrame({'Value': val_bind, 'Condition': cond_bind})
+                fig_c1 = px.histogram(df_b_comp, x='Value', color='Condition', barmode='overlay', histnorm='density', template='plotly_dark')
+                fig_c1.add_vline(x=log_thresh_bind, line_dash="dash", line_color="red")
+                fig_c1.update_layout(title="Binding Comparison", xaxis_title=f"Log10 {bind_col}", yaxis_title="Density", height=400, margin=dict(l=0,r=0,b=0))
+                
+                with comp_b:
+                    st.plotly_chart(fig_c1, width='stretch', key="main_bind_comp_hist")
+                    
         else:
             st.warning("No gated events found.")
+
+    with tab_pos:
+        st.subheader("Positive Event Distributions")
+        pos_expr_evts = df_sing[df_sing[expr_col] > thresh_expr_val]
+        pos_bind_evts = df_sing[df_sing[bind_col] > thresh_bind_val]
+        
+        # Function to build the styled histogram with overlay and markers
+        def build_pos_hist(series, nc_series, thresh, title, x_label, color):
+            fig = go.Figure()
+            # Calculate metrics
+            median_val = np.log10(np.clip(series.median(), 1, None))
+            mean_val = np.log10(np.clip(series.mean(), 1, None))
+            log_thresh = np.log10(np.clip(thresh, 1, None))
+            
+            # 1. Negative Control (NC) Overlay Trace
+            if nc_series is not None:
+                nc_vals = np.log10(np.clip(nc_series, 1, None))
+                fig.add_trace(go.Histogram(
+                    x=nc_vals, nbinsx=100, histnorm='density',
+                    name='Neg Ctrl', marker_color='rgba(150, 150, 150, 0.4)',
+                    showlegend=True
+                ))
+            
+            # 2. Sample Trace
+            fig.add_trace(go.Histogram(
+                x=np.log10(np.clip(series, 1, None)), nbinsx=100, histnorm='density',
+                name='Sample', marker_color=color,
+                opacity=0.8, showlegend=True
+            ))
+            
+            # 3. Vertical Markers
+            fig.add_vline(x=log_thresh, line_dash="dash", line_color="red", annotation_text="Thresh", annotation_position="top left")
+            fig.add_vline(x=median_val, line_dash="solid", line_color="white", annotation_text="Med", annotation_position="top left")
+            fig.add_vline(x=mean_val, line_dash="dot", line_color="white", annotation_text="Mean", annotation_position="bottom right")
+            
+            fig.update_layout(
+                title=title, xaxis_title=x_label, yaxis_title="Density",
+                template='plotly_dark', barmode='overlay',
+                height=400, margin=dict(l=0,r=0,b=20,t=40),
+                legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0)")
+            )
+            return fig
+
+        pc_c1, pc_c2 = st.columns(2)
+        nc_sample = ctrls.get("neg_sample")
+        
+        if len(pos_expr_evts) > 0:
+            fig_pe = build_pos_hist(pos_expr_evts[expr_col], nc_sample[expr_col] if nc_sample is not None else None, 
+                                   thresh_expr_val, "Positive Expression Dist", f"Log10 {expr_col} (Expr+ ONLY)", "purple")
+            pc_c1.plotly_chart(fig_pe, width='stretch', key="pos_expr_dist_hist")
+            pe_med = pos_expr_evts[expr_col].median()
+            pe_mean = pos_expr_evts[expr_col].mean()
+            pc_c1.latex(rf"\text{{Med: }} {pe_med:.1f} \quad \text{{Mean: }} {pe_mean:.1f}")
+        else:
+            pc_c1.info("No Expr+ events.")
+            
+        if len(pos_bind_evts) > 0:
+            fig_pb = build_pos_hist(pos_bind_evts[bind_col], nc_sample[bind_col] if nc_sample is not None else None, 
+                                   thresh_bind_val, "Positive Binding Dist", f"Log10 {bind_col} (Bind+ ONLY)", "green")
+            pc_c2.plotly_chart(fig_pb, width='stretch', key="pos_bind_dist_hist")
+            pb_med = pos_bind_evts[bind_col].median()
+            pb_mean = pos_bind_evts[bind_col].mean()
+            pc_c2.latex(rf"\text{{Med: }} {pb_med:.1f} \quad \text{{Mean: }} {pb_mean:.1f}")
+        else:
+            pc_c2.info("No Bind+ events.")
+
+        st.subheader("Filtered Histograms (Cross-Gated)")
+        f1, f2 = st.columns(2)
+        
+        # Swapped Order: Expression on Left, Binding on Right
+        if len(pos_bind_evts) > 0:
+            fig_fe = build_pos_hist(pos_bind_evts[expr_col], nc_sample[expr_col] if nc_sample is not None else None, 
+                                   thresh_expr_val, "Filtered Expression (FITC for APC+)", f"Log10 {expr_col} (APC+ ONLY)", "orange")
+            f1.plotly_chart(fig_fe, width='stretch', key="filt_expr_hist")
+            exp_med = pos_bind_evts[expr_col].median()
+            exp_mean = pos_bind_evts[expr_col].mean()
+            f1.latex(rf"\text{{Med: }} {exp_med:.1f} \quad \text{{Mean: }} {exp_mean:.1f}")
+        else:
+            f1.info("No APC+ events.")
+
+        if len(pos_expr_evts) > 0:
+            fig_fb = build_pos_hist(pos_expr_evts[bind_col], nc_sample[bind_col] if nc_sample is not None else None, 
+                                   thresh_bind_val, "Filtered Binding (APC for FITC+)", f"Log10 {bind_col} (FITC+ ONLY)", "cyan")
+            f2.plotly_chart(fig_fb, width='stretch', key="filt_bind_hist")
+            bin_med = pos_expr_evts[bind_col].median()
+            bin_mean = pos_expr_evts[bind_col].mean()
+            f2.latex(rf"\text{{Med: }} {bin_med:.1f} \quad \text{{Mean: }} {bin_mean:.1f}")
+        else:
+            f2.info("No FITC+ events.")
+            
+        st.subheader("Positive Metrics for this file")
+        pos_med_expr_v = pos_expr_evts[expr_col].median() if len(pos_expr_evts) > 0 else 0
+        pos_med_bind_v = pos_bind_evts[bind_col].median() if len(pos_bind_evts) > 0 else 0
+        raw_pos_med_ratio = (pos_med_bind_v / pos_med_expr_v) if pos_med_expr_v > 0 else 0
+        
+        cmp1, cmp2 = st.columns(2)
+        cmp1.metric("Raw Pos Median Ratio (Bind / Expr)", f"{raw_pos_med_ratio:.3f}")
+        
+        if ctrls["has_pc"] and ctrls.get("pos_sample") is not None:
+            pc_expr_p = ctrls["pos_sample"][expr_col] > thresh_expr_val
+            pc_bind_p = ctrls["pos_sample"][bind_col] > thresh_bind_val
+            pc_m_e = ctrls["pos_sample"][pc_expr_p][expr_col].median() if pc_expr_p.sum() > 0 else 1
+            pc_m_b = ctrls["pos_sample"][pc_bind_p][bind_col].median() if pc_bind_p.sum() > 0 else 1
+            pc_ratio = pc_m_b / pc_m_e if pc_m_e > 0 else 1
+            
+            norm_ratio = raw_pos_med_ratio / max(pc_ratio, 1e-9)
+            cmp2.metric("Normalized Pos Median Ratio vs Pos Ctrl", f"{norm_ratio:.3f}")
+            
+            df_comp_ratio = pd.DataFrame({
+                "Sample": [os.path.basename(selected_file), "Positive Control"],
+                "Ratio": [raw_pos_med_ratio, pc_ratio]
+            })
+            fig_ratio = px.bar(df_comp_ratio, x="Sample", y="Ratio", color="Sample", template="plotly_dark", title="Pos Median Ratio Comparison")
+            st.plotly_chart(fig_ratio, width='stretch', key="pos_ratio_comp_bar")
+        else:
+            st.info("No Positive Control in directory to compute normalized ratios.")
 
     with tab_custom:
         enable_comparison = st.checkbox("Enable Comparison Mode (Side-by-Side)", value=False)
@@ -636,7 +973,7 @@ if selected_file and df is not None:
             render_scatter(df, "Main")
 
     with tab_raw:
-        st.dataframe(df, use_container_width=True, height=600)
+        st.dataframe(df, width='stretch', height=600)
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button("Download CSV", csv, "fcs_data.csv", "text/csv")
         
@@ -646,7 +983,7 @@ if selected_file and df is not None:
         for k, v in meta.items():
             if not k.startswith("$P"):
                 meta_items.append({"Parameter": k, "Value": str(v)})
-        st.dataframe(pd.DataFrame(meta_items), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(meta_items), width='stretch', hide_index=True)
         
         st.subheader("Channel Parameters")
         params = []
@@ -660,7 +997,160 @@ if selected_file and df is not None:
             })
             i += 1
         if params:
-            st.dataframe(pd.DataFrame(params), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(params), width='stretch', hide_index=True)
+
+    with tab_folder:
+        if search_path and os.path.exists(search_path):
+            st.subheader(f"Folder Aggregates: {os.path.basename(search_path)}")
+            agg_csv = os.path.join(search_path, "aggregate_summary.csv")
+            cross_csv = os.path.join(search_path, "cross_target_summary.csv")
+            sum_csv = os.path.join(search_path, "summary_stats.csv")
+            
+            has_agg = False
+            if os.path.exists(cross_csv):
+                st.markdown("**Cross-Target Summary**")
+                st.dataframe(pd.read_csv(cross_csv), width='stretch')
+                has_agg = True
+            elif os.path.exists(agg_csv):
+                st.markdown("**Aggregate Summary**")
+                st.dataframe(pd.read_csv(agg_csv), width='stretch')
+                has_agg = True
+            elif os.path.exists(sum_csv):
+                st.markdown("**Summary Stats**")
+                st.dataframe(pd.read_csv(sum_csv), width='stretch')
+                has_agg = True
+                
+            if not has_agg:
+                st.info("No static aggregate CSVs found in this folder. Generating dynamically...")
+                with st.spinner("Generating Folder Aggregate Stats dynamically..."):
+                    df_stats, df_ridge = get_folder_aggregate_stats(search_path, ctrls, fsc_col, ssc_col, expr_col, bind_col, thresh_expr_val, thresh_bind_val, min_fsc=g_min_fsc, min_ssc=g_min_ssc, upper_pct=g_upper_pct)
+                    
+                if not df_stats.empty:
+                    df_stats_sorted = df_stats.sort_values("Filename")
+                    st.dataframe(df_stats, width='stretch')
+                    
+                    row1_c1, row1_c2 = st.columns(2)
+                    
+                    fig_dp = px.bar(df_stats_sorted, x="Filename", y="Double+ %", color="Norm Pos Med Ratio", template="plotly_dark", title="Double Positive %")
+                    row1_c1.plotly_chart(fig_dp, width='stretch', key="agg_dp_bar")
+                    
+                    fig_mfi = px.scatter(df_stats, x="Bind MFI", y="Expr MFI", color="Filename", template="plotly_dark", title="MFI Scatter (Bind vs Expr)")
+                    row1_c2.plotly_chart(fig_mfi, width='stretch', key="agg_mfi_scatter")
+                    
+                    row2_c1, row2_c2 = st.columns(2)
+                    
+                    fig_fc = px.bar(df_stats_sorted, x="Filename", y="Bind Fold Change", color="Double+ %", template="plotly_dark", title="Binding Fold Change (vs NC)")
+                    row2_c1.plotly_chart(fig_fc, width='stretch', key="agg_bind_fc_bar")
+
+                    fig_efc = px.bar(df_stats_sorted, x="Filename", y="Expr Fold Change", color="Double+ %", template="plotly_dark", title="Expression Fold Change (vs NC)")
+                    row2_c2.plotly_chart(fig_efc, width='stretch', key="agg_expr_fc_bar")
+                    
+                    df_ridge_sorted = df_ridge.sort_values("Sample", ascending=False)
+                    
+                    fig_ridge = px.violin(df_ridge_sorted, x="LogBinding", y="Sample", color="Sample", orientation="h", template="plotly_dark", title="Ridgeline: LogBinding", points=False)
+                    fig_ridge.update_traces(side='positive', width=2.5)
+                    fig_ridge.update_layout(xaxis_showgrid=False, xaxis_zeroline=False, showlegend=False)
+                    st.plotly_chart(fig_ridge, width='stretch', key="agg_ridge_bind")
+                    
+                    fig_ridge_ex = px.violin(df_ridge_sorted, x="LogExpression", y="Sample", color="Sample", orientation="h", template="plotly_dark", title="Ridgeline: LogExpression", points=False)
+                    fig_ridge_ex.update_traces(side='positive', width=2.5)
+                    fig_ridge_ex.update_layout(xaxis_showgrid=False, xaxis_zeroline=False, showlegend=False)
+                    st.plotly_chart(fig_ridge_ex, width='stretch', key="agg_ridge_expr")
+
+                    if ctrls["has_pc"]:
+                        st.markdown("---")
+                        st.subheader("📁 Positive Control Aggregate Analytics")
+                        
+                        view_type = st.radio("Display Analytics Mode:", ["Normalized (vs Positive Control)", "Raw (MFI / Ratios)"], horizontal=True, key="an_mode_final")
+                        is_norm = "Normalized" in view_type
+                        pref = "Norm " if is_norm else ""
+
+                        plots = [
+                            (f"{pref}Pos Med Ratio", "Pos Median Ratio (Bind/Expr)"),
+                            (f"{pref}Pos Mean Ratio", "Pos Mean Ratio (Bind/Expr)"),
+                            (f"{pref}Expr Med (Bind+)", "Median Expr for Positive Binding"),
+                            (f"{pref}Bind Med (Expr+)", "Median Bind for Positive Expression"),
+                            (f"{pref}Expr Mean (Bind+)", "Mean Expr for Positive Binding"),
+                            (f"{pref}Bind Mean (Expr+)", "Mean Bind for Positive Expression")
+                        ]
+                        
+                        for i in range(0, len(plots), 2):
+                            rrc1, rrc2 = st.columns(2)
+                            p1_col, p1_title = plots[i]
+                            fig_p1 = px.bar(df_stats_sorted, x="Filename", y=p1_col, color="Double+ %", template="plotly_dark", title=f"{pref}{p1_title}" if is_norm else p1_title)
+                            if is_norm: fig_p1.add_hline(y=1, line_dash="dash", line_color="white", annotation_text="Pos Ctrl")
+                            rrc1.plotly_chart(fig_p1, width='stretch', key=f"agg_pos_ctrl_{p1_col}")
+                            
+                            if i+1 < len(plots):
+                                p2_col, p2_title = plots[i+1]
+                                fig_p2 = px.bar(df_stats_sorted, x="Filename", y=p2_col, color="Double+ %", template="plotly_dark", title=f"{pref}{p2_title}" if is_norm else p2_title)
+                                if is_norm: fig_p2.add_hline(y=1, line_dash="dash", line_color="white", annotation_text="Pos Ctrl")
+                                rrc2.plotly_chart(fig_p2, width='stretch', key=f"agg_pos_ctrl_{p2_col}")
+                else:
+                    st.warning("Could not compute aggregate stats on the fly.")
+
+    with tab_agg:
+        global_agg_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../Local/Aggregate_FCS_Analysis"))
+        if os.path.exists(global_agg_dir):
+            st.subheader("📊 Global Aggregate Analysis")
+            g_cross_csv = os.path.join(global_agg_dir, "cross_target_summary.csv")
+            g_agg_csv = os.path.join(global_agg_dir, "aggregate_summary.csv")
+            
+            found_g = False
+            if os.path.exists(g_agg_csv):
+                found_g = True
+                df_agg = pd.read_csv(g_agg_csv)
+                
+                # Filter by Target Dropdown
+                available_targets = sorted(df_agg["Target"].unique())
+                target_choice = st.selectbox("🎯 Filter by Target", ["All Targets"] + list(available_targets), key="global_target_sel")
+                
+                if target_choice != "All Targets":
+                    df_agg_f = df_agg[df_agg["Target"] == target_choice]
+                else:
+                    df_agg_f = df_agg
+                    
+                # Visualizations
+                st.markdown(f"### Comparative Analytics: {target_choice}")
+                
+                v_col1, v_col2 = st.columns(2)
+                
+                with v_col1:
+                    # Norm Median Ratio Bar Chart
+                    fig_agg_ratio = px.bar(
+                        df_agg_f, x="Construct", y="Norm Median Ratio", color="Date",
+                        template="plotly_dark", title="Normalized Median Ratio by Construct",
+                        text="Norm Median Ratio"
+                    )
+                    fig_agg_ratio.update_traces(texttemplate='%{text:.2f}', textposition='outside')
+                    fig_agg_ratio.add_hline(y=1, line_dash="dash", line_color="white", annotation_text="Pos Ctrl")
+                    fig_agg_ratio.update_layout(height=500)
+                    st.plotly_chart(fig_agg_ratio, width='stretch', key="agg_ratio_global_bar")
+                    
+                with v_col2:
+                    # Double+ % Bar Chart
+                    fig_agg_dp = px.bar(
+                        df_agg_f, x="Construct", y="Double+ %", color="Date",
+                        template="plotly_dark", title="Double Positive Percentage (%)",
+                        text="Double+ %"
+                    )
+                    fig_agg_dp.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+                    fig_agg_dp.update_layout(height=500)
+                    st.plotly_chart(fig_agg_dp, width='stretch', key="agg_dp_global_bar")
+                
+                st.markdown("**Global Aggregate Data Table**")
+                st.dataframe(df_agg_f, width='stretch', hide_index=True)
+                st.markdown("---")
+
+            if os.path.exists(g_cross_csv):
+                found_g = True
+                st.markdown("**Global Cross-Target Summary (Experimental Mapping)**")
+                st.dataframe(pd.read_csv(g_cross_csv), width='stretch', hide_index=True)
+                
+            if not found_g:
+                st.info(f"Global directory found at '{global_agg_dir}', but no summary CSVs were detected.")
+        else:
+            st.info(f"Global aggregate directory not found at: {global_agg_dir}")
 
 else:
     if selected_file is None:
