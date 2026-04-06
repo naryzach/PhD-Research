@@ -175,6 +175,22 @@ def main():
             print(f"  Skipping {dir_name}: summary_stats.csv not found.", flush=True)
             continue
             
+        trial_failed = False
+        try:
+            with open(csv_path, 'r') as f:
+                reader = csv.DictReader(f)
+                pos_ctrl_dps = []
+                for row in reader:
+                    raw_name = row['Filename']
+                    if any(ctrl in raw_name.upper() for ctrl in ["POSITIVE CONTROL", "TIMP"]):
+                        pos_ctrl_dps.append(float(row.get('Double+ %', 0)))
+                
+                # If no positive controls exist or max is < 2.0%, fail trial
+                if not pos_ctrl_dps or max(pos_ctrl_dps) < 2.0:
+                    trial_failed = True
+        except Exception as e:
+            print(f"  Error checking Pos Ctrls for {csv_path}: {e}", flush=True)
+            
         try:
             with open(csv_path, 'r') as f:
                 reader = csv.DictReader(f)
@@ -209,7 +225,8 @@ def main():
                                 'Norm Median Ratio': norm_ratio,
                                 'Double+ %': double_pos,
                                 'Norm Bind Med (Expr+)': norm_bind_med_expr,
-                                'Norm Expr Med (Bind+)': norm_expr_med_bind
+                                'Norm Expr Med (Bind+)': norm_expr_med_bind,
+                                'Trial Failed': trial_failed
                             })
                         except (ValueError, KeyError):
                             continue
@@ -237,6 +254,9 @@ def main():
     print("Generating plots...", flush=True)
     global_df = pd.DataFrame(all_data)
     
+    # Use only valid trials for the generated bar graphs
+    global_df_filtered = global_df[global_df['Trial Failed'] == False]
+    
     metrics_to_plot = [
         {
             "y_col": "Norm Median Ratio",
@@ -259,7 +279,7 @@ def main():
             
         # Global Plot (using the given metric, color-coded by Double+ %)
         plot_stats(
-            global_df, 
+            global_df_filtered, 
             f"{metric['title_prefix']} - All Targets", 
             os.path.join(metric_dir, f"aggregate_colorcoded.png"),
             y_col=metric['y_col'],
@@ -269,9 +289,9 @@ def main():
         )
         
         # Individual Plots per Target
-        targets = sorted(global_df['Target'].unique())
+        targets = sorted(global_df_filtered['Target'].unique())
         for t in targets:
-            target_df = global_df[global_df['Target'] == t]
+            target_df = global_df_filtered[global_df_filtered['Target'] == t]
             plot_stats(
                 target_df,
                 f"{metric['title_prefix']}: {t}",
@@ -290,23 +310,33 @@ def main():
     for c in constructs:
         c_subset = global_df[global_df['Construct'] == c]
         
-        # Get overall expression dates for this construct
-        expression_dates_list = sorted(c_subset['Date'].unique())
+        valid_subset = c_subset[c_subset['Trial Failed'] == False]
+        failed_subset = c_subset[c_subset['Trial Failed'] == True]
+        
+        # Get overall expression dates for this construct (only from valid trials)
+        expression_dates_list = sorted(valid_subset['Date'].unique())
         expression_dates_str = f"{len(expression_dates_list)} dates: {', '.join(expression_dates_list)}" if expression_dates_list else ""
         
-        # Determine trial dates per target
+        # Determine trial dates per target (only from valid trials)
         target_counts = {}
         for tgt in ['MMP2', 'MMP3', 'MMP9', 'ADAM10', 'ADAM17']:
-            tgt_dates_list = sorted(c_subset[c_subset['Target'] == tgt]['Date'].unique())
+            tgt_dates_list = sorted(valid_subset[valid_subset['Target'] == tgt]['Date'].unique())
             tgt_dates_count = len(tgt_dates_list)
             target_counts[tgt] = f"{tgt_dates_count} dates: {', '.join(tgt_dates_list)}" if tgt_dates_count > 0 else ""
             
-        # Check for unreliable double+ %
-        unreliable_trials = c_subset[c_subset['Double+ %'] < 0.1]
+        # Collect comments
         comments = []
+        
+        if not failed_subset.empty:
+            for _, row in failed_subset.drop_duplicates(['Date', 'Target']).iterrows():
+                comments.append(f"Excluded {row['Date']} ({row['Target']}) due to invalid Pos Ctrl")
+                
+        # Check for unreliable double+ % in own sample (only in valid trials to avoid double reporting)
+        unreliable_trials = valid_subset[valid_subset['Double+ %'] < 0.1]
         if not unreliable_trials.empty:
             for _, row in unreliable_trials.iterrows():
                 comments.append(f"Low Double+ (<0.1%) on {row['Date']} ({row['Target']})")
+                
         comment_str = "; ".join(comments)
         
         ref_info = ref_dict.get(c, {})
