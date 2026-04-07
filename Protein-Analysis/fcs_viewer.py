@@ -1217,7 +1217,7 @@ if selected_file and df is not None:
     with tab_agg:
         if fs and BUCKET:
             # Look for global aggregates in the R2 bucket
-            global_agg_dir = os.path.join(BUCKET, "Local/Aggregate_FCS_Analysis")
+            global_agg_dir = os.path.join(BUCKET, "Aggregate_FCS_Analysis")
         else:
             global_agg_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../Local/Aggregate_FCS_Analysis"))
             
