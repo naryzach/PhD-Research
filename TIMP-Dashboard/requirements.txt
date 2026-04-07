@@ -7,3 +7,5 @@ matplotlib
 biotite
 scipy
 requests
+s3fs
+boto3

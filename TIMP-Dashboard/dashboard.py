@@ -12,30 +12,42 @@ from scipy.spatial.distance import cdist
 import re
 import requests
 from io import StringIO
+# s3fs imported conditionally for local environment flexibility
 
 st.set_page_config(page_title="TIMP3 PPI Dashboard", layout="wide")
 
 def check_password():
-    """Returns True if the user had the correct password."""
+    """Returns True if the user has entered the correct password."""
     def password_entered():
-        if st.session_state["password"] == st.secrets["password"]:
+        """Checks whether a password entered by the user is correct."""
+        password = st.session_state.get("password")
+        # Check top-level or [admin] section for password
+        correct_password = st.secrets.get("password")
+        if not correct_password and "admin" in st.secrets:
+            correct_password = st.secrets["admin"].get("password")
+            
+        if password and correct_password and password == correct_password:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # don't store password
+            if "password" in st.session_state:
+                del st.session_state["password"]  # don't store password
         else:
             st.session_state["password_correct"] = False
 
-    if "password_correct" not in st.session_state:
-        # First-time login attempt
-        st.text_input("Enter Dashboard Password", type="password", on_change=password_entered, key="password")
-        return False
-    elif not st.session_state["password_correct"]:
-        # Previous password was incorrect
-        st.text_input("Enter Dashboard Password", type="password", on_change=password_entered, key="password")
-        st.error("😕 Password incorrect")
-        return False
-    else:
-        # Password correct
+    if st.session_state.get("password_correct", False):
         return True
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.title("🔒 Password Protected")
+        st.text_input(
+            "Enter password to access the TIMP3 PPI Dashboard", 
+            type="password", 
+            on_change=password_entered, 
+            key="password"
+        )
+        if "password_correct" in st.session_state and not st.session_state["password_correct"]:
+            st.error("😕 Password incorrect")
+    return False
 
 if not check_password():
     st.stop()
@@ -43,51 +55,85 @@ if not check_password():
 st.title("🧬 TIMP3 Protein-Protein Interaction Dashboard")
 st.markdown("Explore generated TIMP3 variants and their RF3 prediction metrics against various MMP/ADAM targets.")
 
-@st.cache_data
-def load_data():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    r2_base_url = st.secrets.get("data_url", "")
-    
-    # Check R2 first
+@st.cache_resource
+def get_fs():
+    """Initializes R2 filesystem if secrets are present."""
+    if "r2" not in st.secrets:
+        return None, "Missing [r2] section in secrets.toml"
+        
     try:
-        r2_check = requests.get(f"{r2_base_url}/global_sequence_catalog.csv", timeout=5)
-        if r2_check.status_code == 200:
-            out_dir = r2_base_url
-            source_label = "☁️ R2 Cloud Bucket"
-            is_remote = True
-        else:
-            raise Exception("R2 not reachable or file missing")
-    except Exception:
-        # Potential data locations: local output vs. repo-relative data/
+        import s3fs
+        r2_config = st.secrets["r2"]
+        fs = s3fs.S3FileSystem(
+            key=r2_config["access_key_id"],
+            secret=r2_config["secret_access_key"],
+            endpoint_url=r2_config["endpoint_url"],
+            client_kwargs={'region_name': 'auto'}
+        )
+        return fs, "✅ S3FileSystem Initialized"
+    except ImportError:
+        return None, "❌ s3fs not found. Run pip install s3fs"
+    except Exception as e:
+        return None, f"❌ Connection Error: {e}"
+
+fs, fs_status = get_fs()
+
+@st.cache_data
+def load_data(mode="Cloud (R2)"):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Bucket preference
+    bucket = ""
+    if "r2" in st.secrets:
+        r2_config = st.secrets["r2"]
+        bucket = r2_config.get("dashboard_bucket", r2_config.get("bucket_name", ""))
+
+    is_remote = False
+    source_label = "💻 Local Filesystem"
+    out_dir = None
+
+    # 1. Try R2 S3 API (Priority if mode is Cloud)
+    if fs and bucket and mode == "Cloud (R2)":
+        try:
+            # Check root first, then potential subfolders
+            r2_base = bucket
+            if not fs.exists(f"{r2_base}/global_sequence_catalog.csv"):
+                # Check common subfolder names
+                for sub in ["lanm_output", "timp_output", "TIMP-Dashboard_output"]:
+                    if fs.exists(f"{bucket}/{sub}/global_sequence_catalog.csv"):
+                        r2_base = f"{bucket}/{sub}"
+                        break
+            
+            if fs.exists(f"{r2_base}/global_sequence_catalog.csv"):
+                out_dir = r2_base
+                source_label = f"☁️ R2 Cloud Bucket ({r2_base})"
+                is_remote = True
+        except:
+            pass
+
+    # 2. Try Local if Cloud not chosen or failed
+    if not is_remote:
         potential_paths = [
             os.path.join(script_dir, "..", "Local", "TIMP-Dashboard_output"),
             os.path.join(script_dir, "data"),
-            script_dir # Fallback to current dir
+            script_dir
         ]
         
-        out_dir = None
-        source_label = "💻 Local Filesystem"
-        is_remote = False
         for p in potential_paths:
             if os.path.exists(os.path.join(p, "global_sequence_catalog.csv")):
                 out_dir = p
                 break
         
         if out_dir is None:
-            out_dir = potential_paths[0] # Default to local output dir
+            out_dir = potential_paths[0]
 
     def read_df(name):
         if is_remote:
             try:
-                # Sanitize URL: ensure exactly one slash between directory and name
-                base = out_dir.rstrip('/')
-                url = f"{base}/{name}"
-                resp = requests.get(url, timeout=10)
-                if resp.status_code == 200:
-                    return pd.read_csv(StringIO(resp.text))
-                else:
-                    return pd.DataFrame() # Swallow 404/500 for secondary files
-            except Exception:
+                path = f"{out_dir}/{name}"
+                with fs.open(path, 'rb') as f:
+                    return pd.read_csv(f)
+            except:
                 return pd.DataFrame()
         else:
             p = os.path.join(out_dir, name)
@@ -123,7 +169,11 @@ def format_protein_df(target_df):
     return target_df
 
 # Load data early to avoid NameError in filters
-df, lead_df, spec_df, inter_df, xd_df, data_dir, data_source, is_remote_data = load_data()
+# --- Data Source Selection ---
+if "data_mode" not in st.session_state:
+    st.session_state["data_mode"] = "Cloud (R2)" if fs else "Local"
+
+df, lead_df, spec_df, inter_df, xd_df, data_dir, data_source, is_remote_data = load_data(mode=st.session_state["data_mode"])
 
 if df.empty:
     st.warning("⚠️ No data found in global_sequence_catalog.csv. Please run the generation pipeline first.")
@@ -167,7 +217,6 @@ if not xd_df.empty:
 
 # --- Global Filters Sidebar ---
 st.sidebar.header("🔍 Global Filters")
-st.sidebar.info(f"Data Source: {data_source}")
 available_targets = sorted(df['target'].unique().tolist()) if not df.empty else []
 selected_targets = st.sidebar.multiselect("Select Targets", options=available_targets, default=available_targets)
 
@@ -276,6 +325,56 @@ if st.sidebar.button("✨ Apply Optimal Settings"):
     if 'h_bonds' in df.columns:
         st.session_state["h_bonds_slider"] = (1.0, float(df['h_bonds'].max()))
     st.rerun()
+
+st.sidebar.divider()
+st.sidebar.subheader("📊 Data Selection")
+if fs:
+    st.sidebar.radio("Data Source", ["Cloud (R2)", "Local"], horizontal=True, key="data_mode")
+else:
+    st.sidebar.warning("☁️ R2 Credentials not found.")
+
+if is_remote_data:
+    st.sidebar.success(f"☁️ Using Cloudflare R2 Data")
+else:
+    st.sidebar.info("📂 Using Local Data")
+
+# --- R2 Migration Debug ---
+with st.sidebar.expander("🛠️ Debug R2 Connection"):
+    st.write(f"**FS Status**: {fs_status}")
+    if "r2" in st.secrets:
+        st.write(f"**Bucket**: `{st.secrets['r2'].get('bucket_name')}`")
+        if fs:
+            try:
+                bucket = st.secrets["r2"].get("bucket_name")
+                if fs.exists(bucket):
+                    st.write("✅ Bucket reachable!")
+                    # Check root and common subfolders
+                    variants = ["", "lanm_output", "timp_output", "TIMP-Dashboard_output"]
+                    found_at = None
+                    for v in variants:
+                        p = f"{bucket}/{v}".rstrip("/")
+                        if fs.exists(f"{p}/global_sequence_catalog.csv"):
+                            found_at = v if v else "Root"
+                            break
+                    
+                    if found_at:
+                        st.write(f"✅ Catalog found at: `{found_at}`")
+                    else:
+                        st.write("❌ Catalog NOT found in any common path.")
+                        # List first 5 files found for debugging
+                        files = fs.ls(bucket)[:5]
+                        if files:
+                            st.write("**Top-level files/folders**:")
+                            for f in files:
+                                st.write(f"- `{f.replace(bucket+'/', '')}`")
+                else:
+                    st.write("❌ Bucket NOT found in R2.")
+            except Exception as e:
+                st.write(f"❌ Error checking bucket: {e}")
+    else:
+        st.write("❌ `[r2]` section missing in `secrets.toml`.")
+
+st.sidebar.divider()
 
 available_all_metrics = [c for c in [
     "probability_of_binding_score", "plddt", "TIMP_pLDDT", "Target_pLDDT", 
@@ -489,12 +588,11 @@ with tab_viewer:
         def get_file_content(path_or_url):
             if is_remote_data:
                 try:
-                    r = requests.get(path_or_url, timeout=10)
-                    if r.status_code == 200:
-                        return r.text
-                except:
-                    pass
-                return None
+                    # Secure R2 fetch using s3fs
+                    return fs.read_text(path_or_url)
+                except Exception as e:
+                    st.error(f"Error fetching structural data from R2: {e}")
+                    return None
             else:
                 if os.path.exists(path_or_url):
                     with open(path_or_url, 'r') as f:

@@ -9,6 +9,7 @@ import py3Dmol
 import math
 import requests
 import io
+# s3fs imported conditionally for local environment flexibility
 
 # Set page config - MUST be first streamlit command
 st.set_page_config(page_title="Lanm Output Dashboard", layout="wide")
@@ -109,8 +110,39 @@ def get_category(ion):
     return "Other"
 
 # --- Data Loading ---
+@st.cache_resource
+def get_fs():
+    """Initializes R2 filesystem if secrets are present."""
+    if "r2" not in st.secrets:
+        return None, "Missing [r2] section in secrets.toml"
+        
+    try:
+        import s3fs
+        r2_config = st.secrets["r2"]
+        fs = s3fs.S3FileSystem(
+            key=r2_config["access_key_id"],
+            secret=r2_config["secret_access_key"],
+            endpoint_url=r2_config["endpoint_url"],
+            client_kwargs={'region_name': 'auto'}
+        )
+        return fs, "✅ S3FileSystem Initialized"
+    except ImportError:
+        return None, "❌ s3fs not found. Run pip install s3fs"
+    except Exception as e:
+        return None, f"❌ Connection Error: {e}"
+
+fs, fs_status = get_fs()
+
 @st.cache_data
 def get_cif_data(cif_path):
+    if fs and cif_path.split('/')[0] == st.secrets["r2"].get("bucket_name"):
+        try:
+            # Secure R2 fetch
+            return fs.read_text(cif_path)
+        except Exception as e:
+            st.error(f"Error fetching structural data from R2: {e}")
+            return None
+            
     if cif_path.startswith("http"):
         try:
             response = requests.get(cif_path, headers=HEADERS, timeout=5)
@@ -127,31 +159,48 @@ def get_cif_data(cif_path):
         return f.read()
 
 @st.cache_data
-def load_data():
-    # Get the directory where dashboard.py is located
+def load_data(mode="Cloud (R2)"):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # Check for remote data override in secrets (root or admin section)
+    # Check for R2 config
+    bucket = st.secrets["r2"].get("bucket_name") if "r2" in st.secrets else None
+    is_remote = False
+    base_path = None
+
+    # 1. Try R2 S3 API (Priority if mode is Cloud)
+    if fs and bucket and mode == "Cloud (R2)":
+        try:
+            # Check root first, then lanm_output/ subfolder
+            r2_base = bucket
+            if not fs.exists(f"{r2_base}/global_sequence_catalog.csv"):
+                if fs.exists(f"{bucket}/lanm_output/global_sequence_catalog.csv"):
+                    r2_base = f"{bucket}/lanm_output"
+            
+            if fs.exists(f"{r2_base}/global_sequence_catalog.csv"):
+                base_path = r2_base
+                is_remote = True
+                
+                with fs.open(f"{base_path}/global_sequence_catalog.csv", 'rb') as f1, \
+                     fs.open(f"{base_path}/full_sequences_log.csv", 'rb') as f2:
+                    df = pd.read_csv(f1)
+                    full_seq_df = pd.read_csv(f2)
+                    
+                ions = sorted(df['metal_ion'].unique().tolist()) if not df.empty else []
+                return df, full_seq_df, ions, base_path, is_remote
+        except Exception as e:
+            st.warning(f"R2 S3 API check failed: {e}. Falling back...")
+
+    # 2. Check for legacy REMOTE_DATA_BASE_URL (Public URL - only if mode is Cloud)
     remote_base = st.secrets.get("REMOTE_DATA_BASE_URL", None)
     if not remote_base and "admin" in st.secrets:
         remote_base = st.secrets["admin"].get("REMOTE_DATA_BASE_URL", None)
-    
-    # Potential local data directories
-    potential_paths = [
-        os.path.join(script_dir, "..", "Local", "lanm_output"),
-        os.path.join(script_dir, "lanm_data")
-    ]
-    base_path = None
-    is_remote = False
-    
-    # 1. Try remote base IF PROVIDED (Priority)
-    if remote_base:
+
+    if remote_base and mode == "Cloud (R2)":
         base_path = remote_base.rstrip("/")
         is_remote = True
         catalog_path = f"{base_path}/global_sequence_catalog.csv"
         full_seq_path = f"{base_path}/full_sequences_log.csv"
         try:
-            # Use requests with headers for R2 compatibility
             r1 = requests.get(catalog_path, headers=HEADERS, timeout=10)
             r2 = requests.get(full_seq_path, headers=HEADERS, timeout=10)
             if r1.status_code == 200 and r2.status_code == 200:
@@ -160,27 +209,29 @@ def load_data():
                 ions = sorted(df['metal_ion'].unique().tolist()) if not df.empty else []
                 return df, full_seq_df, ions, base_path, is_remote
             else:
-                st.warning(f"Remote data check failed (Status {r1.status_code}/{r2.status_code}). Falling back to local...")
+                st.warning(f"Remote public data check failed. Falling back to local...")
                 is_remote = False
                 base_path = None
         except Exception as e:
-            st.warning(f"Could not load remote data: {e}. Falling back to local...")
-            # If remote fails, unset is_remote so we can try local
+            st.warning(f"Could not load remote public data: {e}. Falling back to local...")
             is_remote = False
             base_path = None
 
-    # 2. Try local paths if remote not provided or failed
+    # 3. Try local paths
+    potential_paths = [
+        os.path.join(script_dir, "..", "Local", "lanm_output"),
+        os.path.join(script_dir, "lanm_data")
+    ]
+    
     if base_path is None:
         for path in potential_paths:
             if os.path.exists(os.path.join(path, "global_sequence_catalog.csv")):
                 base_path = path
                 break
                 
-    # Fallback to the first path if none found (locally) or if no remote base
     if base_path is None:
         base_path = potential_paths[0]
         
-    # Local Loading Logic
     catalog_path = os.path.join(base_path, "global_sequence_catalog.csv")
     full_seq_path = os.path.join(base_path, "full_sequences_log.csv")
     df = pd.read_csv(catalog_path) if os.path.exists(catalog_path) else pd.DataFrame()
@@ -191,9 +242,7 @@ def load_data():
         ions = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d)) and d.isupper() and len(d) <= 2]
     
     if not df.empty:
-        # Update Metal Category
         df['metal_category'] = df['metal_ion'].apply(get_category)
-        # Add Binding Probability
         df['binding_probability'] = df.apply(calculate_binding_probability, axis=1)
     
     return df, full_seq_df, ions, base_path, is_remote
@@ -249,6 +298,15 @@ def get_b_metrics(cif_data):
 
 @st.cache_data
 def load_cross_docking_data(base_path):
+    if fs and base_path == st.secrets["r2"].get("bucket_name"):
+        cross_dock_path = f"{base_path}/cross_docking_catalog.csv"
+        try:
+            with fs.open(cross_dock_path, 'rb') as f:
+                return pd.read_csv(f)
+        except Exception:
+            pass
+        return pd.DataFrame()
+
     if base_path.startswith("http"):
         cross_dock_path = f"{base_path.rstrip('/')}/cross_docking_catalog.csv"
         try:
@@ -264,7 +322,11 @@ def load_cross_docking_data(base_path):
         return pd.read_csv(cross_dock_path)
     return pd.DataFrame()
 
-df, full_seq_df, available_ions, base_path, is_remote_mode = load_data()
+# --- Data Source Selection ---
+if "data_mode" not in st.session_state:
+    st.session_state["data_mode"] = "Cloud (R2)" if fs else "Local"
+
+df, full_seq_df, available_ions, base_path, is_remote_mode = load_data(mode=st.session_state["data_mode"])
 
 if df.empty:
     st.warning("⚠️ No data found in global_sequence_catalog.csv. Please ensure the pipeline has generated results.")
@@ -609,10 +671,50 @@ st.sidebar.download_button(
 )
 
 st.sidebar.divider()
+st.sidebar.subheader("📊 Data Selection")
+if fs:
+    st.sidebar.radio("Data Source", ["Cloud (R2)", "Local"], horizontal=True, key="data_mode")
+else:
+    st.sidebar.warning("☁️ R2 Credentials not found.")
+
 if is_remote_mode:
     st.sidebar.success("☁️ Using Cloudflare R2 Data")
 else:
     st.sidebar.info("📂 Using Local Data")
+
+# --- R2 Migration Debug ---
+with st.sidebar.expander("🛠️ Debug R2 Connection"):
+    st.write(f"**FS Status**: {fs_status}")
+    if "r2" in st.secrets:
+        st.write(f"**Bucket**: `{st.secrets['r2'].get('bucket_name')}`")
+        if fs:
+            try:
+                bucket = st.secrets["r2"].get("bucket_name")
+                if fs.exists(bucket):
+                    st.write("✅ Bucket reachable!")
+                    # Check root
+                    root_catalog = fs.exists(f"{bucket}/global_sequence_catalog.csv")
+                    sub_catalog = fs.exists(f"{bucket}/lanm_output/global_sequence_catalog.csv")
+                    if root_catalog:
+                        st.write("✅ Catalog found at root!")
+                    elif sub_catalog:
+                        st.write("✅ Catalog found in `lanm_output/`!")
+                    else:
+                        st.write("❌ Catalog NOT found in root or `lanm_output/`.")
+                        # List first 5 files found for debugging
+                        files = fs.ls(bucket)[:5]
+                        if files:
+                            st.write("**Top-level files/folders**:")
+                            for f in files:
+                                st.write(f"- `{f.replace(bucket+'/', '')}`")
+                else:
+                    st.write("❌ Bucket NOT found in R2.")
+            except Exception as e:
+                st.write(f"❌ Error checking bucket: {e}")
+    else:
+        st.write("❌ `[r2]` section missing in `secrets.toml`.")
+
+st.sidebar.divider()
 
 # --- Main Dashboard ---
 metrics_cols = st.columns(6)

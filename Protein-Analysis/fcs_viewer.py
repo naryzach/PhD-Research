@@ -77,35 +77,32 @@ st.markdown("""
 @st.cache_resource
 def get_fs():
     """Initializes a connection to R2 if secrets are present, else returns None (local mode)."""
-    if "r2" in st.secrets:
-        try:
-            r2_config = st.secrets["r2"]
-            fs = s3fs.S3FileSystem(
-                key=r2_config["access_key_id"],
-                secret=r2_config["secret_access_key"],
-                endpoint_url=r2_config["endpoint_url"],
-                # R2 requires region_name='auto' for some operations
-                client_kwargs={'region_name': 'auto'}
-            )
-            return fs, r2_config["bucket_name"]
-        except Exception as e:
-            st.error(f"Error connecting to R2: {e}")
-            return None, None
-    return None, None
+    if "r2" not in st.secrets:
+        return None, "Missing [r2] section in secrets.toml"
+        
+    try:
+        import s3fs
+        r2_config = st.secrets["r2"]
+        fs = s3fs.S3FileSystem(
+            key=r2_config["access_key_id"],
+            secret=r2_config["secret_access_key"],
+            endpoint_url=r2_config["endpoint_url"],
+            client_kwargs={'region_name': 'auto'}
+        )
+        return fs, r2_config.get("bucket_name", "Unknown")
+    except ImportError:
+        return None, "❌ s3fs not found. Run pip install s3fs"
+    except Exception as e:
+        return None, f"❌ Connection Error: {e}"
 
 fs, BUCKET = get_fs()
+fs_status = "✅ Connected to R2" if fs else BUCKET # BUCKET contains error msg when fs is None
 
-# Debug R2 connection in sidebar (visible only when BUCKET is set)
-if fs and BUCKET:
-    with st.sidebar.expander("🔍 R2 Connection Debug"):
-        st.write(f"Bucket: `{BUCKET}`")
-        try:
-            test_ls = fs.ls(BUCKET, detail=False)
-            st.write(f"Root items found: {len(test_ls)}")
-            if len(test_ls) > 0:
-                st.write("First item:", test_ls[0])
-        except Exception as e:
-            st.error(f"Connection Test Failed: {e}")
+# --- Data Source Selection State ---
+if "data_mode" not in st.session_state:
+    st.session_state["data_mode"] = "Cloud (R2)" if fs else "Local"
+
+# (Connection Debug moved to sidebar bottom)
 
 # ---- HELPER FUNCTIONS ----
 
@@ -630,15 +627,9 @@ def render_scatter(df, key_prefix):
 st.sidebar.title("🧬 FCS Viewer")
 st.sidebar.markdown("Explore raw flow cytometry data interactively.")
 
-if BUCKET:
-    data_mode = st.sidebar.radio("Data Source", ["Cloud (R2)", "Local"], horizontal=True)
-    if data_mode == "Cloud (R2)":
-        default_path = BUCKET
-    else:
-        default_path = os.path.join(os.path.dirname(__file__), "../Local")
-        default_path = os.path.abspath(default_path)
+if st.session_state["data_mode"] == "Cloud (R2)" and fs:
+    default_path = BUCKET
 else:
-    data_mode = "Local"
     default_path = os.path.join(os.path.dirname(__file__), "../Local")
     default_path = os.path.abspath(default_path)
 
@@ -723,6 +714,33 @@ if selected_file:
 
         log_thresh_expr = np.log10(max(1, thresh_expr_val))
         log_thresh_bind = np.log10(max(1, thresh_bind_val))
+
+st.sidebar.divider()
+st.sidebar.subheader("📊 Data Selection")
+if fs:
+    st.sidebar.radio("Data Source", ["Cloud (R2)", "Local"], horizontal=True, key="data_mode")
+else:
+    st.sidebar.warning("☁️ R2 Credentials not found.")
+
+if fs and st.session_state["data_mode"] == "Cloud (R2)":
+    st.sidebar.success(f"☁️ Using Cloudflare R2 Data")
+else:
+    st.sidebar.info("📂 Using Local Data")
+
+# --- R2 Migration Debug ---
+with st.sidebar.expander("🛠️ Debug R2 Connection"):
+    st.write(f"**FS Status**: {fs_status}")
+    if fs and BUCKET:
+        st.write(f"**Bucket**: `{BUCKET}`")
+        try:
+            test_ls = fs.ls(BUCKET, detail=False)
+            st.write(f"Items found: {len(test_ls)}")
+        except Exception as e:
+            st.write(f"❌ Test Failed: {e}")
+    else:
+        st.write("❌ No active R2 connection.")
+
+st.sidebar.divider()
 
 # ---- MAIN CONTENT ----
 if selected_file and df is not None:
