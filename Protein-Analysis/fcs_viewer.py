@@ -175,6 +175,19 @@ def get_files(directory):
     files = glob.glob(os.path.join(directory, "*.fcs"))
     return sorted(files)
 
+def cloud_exists(path):
+    """Checks if a path exists locally or in R2."""
+    if fs and BUCKET and path.startswith(BUCKET):
+        return fs.exists(path)
+    return os.path.exists(path)
+
+def cloud_read_csv(path):
+    """Reads a CSV file from local disk or R2."""
+    if fs and BUCKET and path.startswith(BUCKET):
+        with fs.open(path, 'rb') as f:
+            return pd.read_csv(f)
+    return pd.read_csv(path)
+
 def simplify_polygon_vw(points, num_points=5):
     pts = list(points)
     if np.allclose(pts[0], pts[-1]):
@@ -1094,24 +1107,24 @@ if selected_file and df is not None:
             st.dataframe(pd.DataFrame(params), width='stretch', hide_index=True)
 
     with tab_folder:
-        if search_path and os.path.exists(search_path):
+        if search_path and cloud_exists(search_path):
             st.subheader(f"Folder Aggregates: {os.path.basename(search_path)}")
             agg_csv = os.path.join(search_path, "aggregate_summary.csv")
             cross_csv = os.path.join(search_path, "cross_target_summary.csv")
             sum_csv = os.path.join(search_path, "summary_stats.csv")
             
             has_agg = False
-            if os.path.exists(cross_csv):
+            if cloud_exists(cross_csv):
                 st.markdown("**Cross-Target Summary**")
-                st.dataframe(pd.read_csv(cross_csv), width='stretch')
+                st.dataframe(cloud_read_csv(cross_csv), width='stretch')
                 has_agg = True
-            elif os.path.exists(agg_csv):
+            elif cloud_exists(agg_csv):
                 st.markdown("**Aggregate Summary**")
-                st.dataframe(pd.read_csv(agg_csv), width='stretch')
+                st.dataframe(cloud_read_csv(agg_csv), width='stretch')
                 has_agg = True
-            elif os.path.exists(sum_csv):
+            elif cloud_exists(sum_csv):
                 st.markdown("**Summary Stats**")
-                st.dataframe(pd.read_csv(sum_csv), width='stretch')
+                st.dataframe(cloud_read_csv(sum_csv), width='stretch')
                 has_agg = True
                 
             if not has_agg:
@@ -1184,16 +1197,21 @@ if selected_file and df is not None:
                     st.warning("Could not compute aggregate stats on the fly.")
 
     with tab_agg:
-        global_agg_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../Local/Aggregate_FCS_Analysis"))
-        if os.path.exists(global_agg_dir):
+        if fs and BUCKET:
+            # Look for global aggregates in the R2 bucket
+            global_agg_dir = os.path.join(BUCKET, "Local/Aggregate_FCS_Analysis")
+        else:
+            global_agg_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../Local/Aggregate_FCS_Analysis"))
+            
+        if cloud_exists(global_agg_dir):
             st.subheader("📊 Global Aggregate Analysis")
             g_cross_csv = os.path.join(global_agg_dir, "cross_target_summary.csv")
             g_agg_csv = os.path.join(global_agg_dir, "aggregate_summary.csv")
             
             found_g = False
-            if os.path.exists(g_agg_csv):
+            if cloud_exists(g_agg_csv):
                 found_g = True
-                df_agg = pd.read_csv(g_agg_csv)
+                df_agg = cloud_read_csv(g_agg_csv)
                 
                 # Filter by Target Dropdown
                 available_targets = sorted(df_agg["Target"].unique())
@@ -1236,10 +1254,10 @@ if selected_file and df is not None:
                 st.dataframe(df_agg_f, width='stretch', hide_index=True)
                 st.markdown("---")
 
-            if os.path.exists(g_cross_csv):
+            if cloud_exists(g_cross_csv):
                 found_g = True
                 st.markdown("**Global Cross-Target Summary (Experimental Mapping)**")
-                st.dataframe(pd.read_csv(g_cross_csv), width='stretch', hide_index=True)
+                st.dataframe(cloud_read_csv(g_cross_csv), width='stretch', hide_index=True)
                 
             if not found_g:
                 st.info(f"Global directory found at '{global_agg_dir}', but no summary CSVs were detected.")
