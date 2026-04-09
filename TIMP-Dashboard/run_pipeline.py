@@ -176,7 +176,7 @@ def calculate_heuristic_score(contacts, interface_area, clashes, centroid_distan
 
 # --- GENERATION PIPELINE ---
 def main():
-    seed_everything(42)
+    #seed_everything(42)
     checkpoint_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Tools", "foundry_checkpoints"))
     os.makedirs(checkpoint_dir, exist_ok=True)
     os.environ["FOUNDRY_CHECKPOINT_DIRS"] = checkpoint_dir
@@ -257,7 +257,7 @@ def main():
             generated_arrays = []
             try:
                 rfd3_config = getattr(__import__('rfd3.engine', fromlist=['RFD3InferenceConfig']), 'RFD3InferenceConfig')(
-                    diffusion_batch_size=min(10, NUM_RFD3_DESIGNS), 
+                    diffusion_batch_size=min(5, NUM_RFD3_DESIGNS), 
                     low_memory_mode=False,
                     specification={'length': f"{total_output_length_min}-{total_output_length_max}", 'contig': full_contig_string, 'extra': {}}
                 )
