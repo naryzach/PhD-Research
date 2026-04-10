@@ -344,6 +344,86 @@ elif choice == "📥 Export Data (CSV)":
             st.caption(f"Rows: {len(df_export)}")
             
     st.markdown("---")
+    st.subheader("📋 External Tracker Export")
+    st.info("Download a specialized CSV formatted for the Lab's External Tracker (matches your template).")
+    
+    # Fetch purchase requests for tracker export
+    df_tracker_raw = db.get_query_df("SELECT * FROM purchase_requests ORDER BY request_date DESC")
+    
+    if not df_tracker_raw.empty:
+        # 1. Helper for Initials
+        def get_initials(name):
+            if not name or pd.isna(name): return ""
+            return "".join([word[0].upper() for word in str(name).split() if word])
+
+        # 2. Helper for Date Formatting (DD-Mon-YY)
+        def format_tracker_date(dt_val):
+            if pd.isna(dt_val) or dt_val == "" or dt_val == "None": return ""
+            try:
+                # Ensure we handle various timestamp formats
+                dt = pd.to_datetime(dt_val)
+                return dt.strftime('%d-%b-%y')
+            except:
+                return str(dt_val)
+
+        # 3. Transform data to match the template
+        tracker_data = pd.DataFrame()
+        tracker_data['Item'] = df_tracker_raw['item_name']
+        tracker_data['Size'] = df_tracker_raw['specs']
+        tracker_data['Quantity'] = df_tracker_raw['quantity']
+        tracker_data['CAT No.'] = df_tracker_raw['catalog_number']
+        tracker_data['Vendor'] = df_tracker_raw['seller']
+        tracker_data['Unit Price'] = df_tracker_raw['price'].apply(lambda x: f"${x:.2f}" if pd.notna(x) else "")
+        tracker_data['Initial'] = df_tracker_raw['requester_name'].apply(get_initials)
+        tracker_data['Date Requested'] = df_tracker_raw['request_date'].apply(format_tracker_date)
+        tracker_data['Status'] = df_tracker_raw['status']
+        
+        # Order Date: If status is Ordered or Shipped/Received, use status_updated_at as a proxy
+        # since we don't have a dedicated order_date field yet.
+        def get_order_date(row):
+            if row['status'] in ['Ordered', 'Shipped', 'Received', 'Pending']:
+                return format_tracker_date(row['status_updated_at'])
+            return ""
+        
+        tracker_data['Order Date'] = df_tracker_raw.apply(get_order_date, axis=1)
+        
+        # Add placeholder columns for the rest of the template
+        tracker_data['GR #'] = ""
+        tracker_data['Order #'] = df_tracker_raw['order_number']
+        tracker_data['Expected Delivery Date'] = ""
+        tracker_data['Tracking #'] = df_tracker_raw['shipping_number']
+        tracker_data['Storage'] = ""
+        tracker_data['Comments'] = ""
+        tracker_data['Link'] = df_tracker_raw['link']
+        tracker_data['Received (initial/date)'] = ""
+        tracker_data['Stored'] = ""
+
+        # Column Order as requested by user
+        tracker_cols = [
+            'Item', 'Size', 'Quantity', 'CAT No.', 'Vendor', 'Unit Price', 'Initial', 
+            'Date Requested', 'Status', 'Order Date', 'GR #', 'Order #', 
+            'Expected Delivery Date', 'Tracking #', 'Storage', 'Comments', 
+            'Link', 'Received (initial/date)', 'Stored'
+        ]
+        
+        tracker_final = tracker_data[tracker_cols]
+        
+        # Download button for Tracker CSV
+        tracker_csv = tracker_final.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download Tracker-Ready CSV",
+            data=tracker_csv,
+            file_name=f"lab_tracker_export_{datetime.now().strftime('%Y-%m-%d')}.csv",
+            mime='text/csv',
+            use_container_width=True
+        )
+        
+        with st.expander("👁️ Preview Tracker Format"):
+            st.dataframe(tracker_final.head(10), hide_index=True)
+    else:
+        st.warning("No purchase requests found to export.")
+
+    st.markdown("---")
     st.subheader("🛠️ Full Database Backups")
     st.info("Download a complete snapshot of your data.")
     
