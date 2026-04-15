@@ -789,8 +789,8 @@ if selected_file and df is not None:
             st.markdown("---")
             
     # TABS
-    tab_main, tab_pos, tab_custom, tab_raw, tab_meta, tab_folder, tab_agg = st.tabs([
-        "📊 Main Analysis", "🟢 Pos Control Analytics", "🛠️ Custom Plots", "📄 Raw Data", "ℹ️ Metadata", "📁 Folder Analysis", "📊 Aggregate Analysis"
+    tab_main, tab_pos, tab_folder, tab_agg, tab_custom, tab_raw, tab_meta = st.tabs([
+        "Main Analysis", "Pos Control Analytics", "Folder Analysis", "Aggregate Analysis", "Custom Plots", "Raw Data", "Metadata"
     ])
     
     with tab_main:
@@ -1151,8 +1151,14 @@ if selected_file and df is not None:
                     df_stats, df_ridge = get_folder_aggregate_stats(search_path, ctrls, fsc_col, ssc_col, expr_col, bind_col, thresh_expr_val, thresh_bind_val, min_fsc=g_min_fsc, min_ssc=g_min_ssc, upper_pct=g_upper_pct)
                     
                 if not df_stats.empty:
-                    df_stats_sorted = df_stats.sort_values("Filename")
-                    st.dataframe(df_stats, width='stretch')
+                    hide_nc_folder = st.checkbox("Hide Negative Controls", value=True, key="hide_nc_fld")
+                    
+                    df_stats_plot = df_stats.copy()
+                    if hide_nc_folder:
+                        df_stats_plot = df_stats_plot[~df_stats_plot['Filename'].str.upper().str.contains("NC|NEGATIVE CONTROL")]
+                        
+                    df_stats_sorted = df_stats_plot.sort_values("Filename")
+                    st.dataframe(df_stats_plot, width='stretch')
                     
                     row1_c1, row1_c2 = st.columns(2)
                     
@@ -1171,7 +1177,9 @@ if selected_file and df is not None:
                     row2_c2.plotly_chart(fig_efc, width='stretch', key="agg_expr_fc_bar")
                     
                     df_ridge_sorted = df_ridge.sort_values("Sample", ascending=False)
-                    
+                    if hide_nc_folder:
+                        df_ridge_sorted = df_ridge_sorted[~df_ridge_sorted['Sample'].str.upper().str.contains("NC|NEGATIVE CONTROL")]
+
                     fig_ridge = px.violin(df_ridge_sorted, x="LogBinding", y="Sample", color="Sample", orientation="h", template="plotly_dark", title="Ridgeline: LogBinding", points=False)
                     fig_ridge.update_traces(side='positive', width=2.5)
                     fig_ridge.update_layout(xaxis_showgrid=False, xaxis_zeroline=False, showlegend=False)
@@ -1233,24 +1241,119 @@ if selected_file and df is not None:
                 
                 # Filter by Target Dropdown
                 available_targets = sorted(df_agg["Target"].unique())
-                target_choice = st.selectbox("🎯 Filter by Target", ["All Targets"] + list(available_targets), key="global_target_sel")
                 
-                if target_choice != "All Targets":
-                    df_agg_f = df_agg[df_agg["Target"] == target_choice]
-                else:
-                    df_agg_f = df_agg
+                with st.expander("🛠️ Advanced Aggregate Settings"):
+                    qc_c1, qc_c2 = st.columns([1, 1])
+                    with qc_c1:
+                        target_choice = st.selectbox("🎯 Filter by Target", ["All Targets"] + list(available_targets), key="global_target_sel")
+                    with qc_c2:
+                        pc_keywords = st.text_input("PC Keywords (Comma separated)", value="Positive Control, PC, TIMP", help="Keywords to identify which rows are positive controls.")
+                        pc_pattern = "|".join([k.strip().upper() for k in pc_keywords.split(",") if k.strip()])
                     
+                    pc_thresh = st.slider("QC Threshold: Min PC Double+ %", 0.0, 10.0, 1.0, step=0.1, help="Exclude trials where the identified positive control performed poorly.")
+                    
+                    st.divider()
+                    metric_options = {
+                        "Norm Median Ratio": "Norm Median Ratio",
+                        "Norm Mean Ratio": "Norm Mean Ratio",
+                        "Norm Median of FITC+": "Norm Bind Med (Expr+)",
+                        "Norm Mean of FITC+": "Norm Bind Mean (Expr+)"
+                    }
+                    sel_metric_label = st.radio("Select Analysis Metric", list(metric_options.keys()), horizontal=True, index=0)
+                    sel_metric_col = metric_options[sel_metric_label]
+
+                # 1. Identify Positive Controls on the fly
+                df_agg_all = df_agg.copy()
+                
+                # Categorize as PC or Construct
+                df_agg_all["IsPC"] = df_agg_all["Construct"].str.upper().str.contains(pc_pattern) | \
+                                     df_agg_all["Raw Name"].str.upper().str.contains(pc_pattern)
+
+                # 2. For each Trial (Target + Date), find the best PC value
+                trial_groups = df_agg_all.groupby(["Target", "Date"])
+                valid_trials = []
+                pc_info = []
+
+                for (tgt, dt), group in trial_groups:
+                    pcs = group[group["IsPC"]]
+                    # If multiple PCs, take the one with highest Double+ %
+                    if not pcs.empty:
+                        best_pc_dp = pcs["Double+ %"].max()
+                        pc_row = pcs[pcs["Double+ %"] == best_pc_dp].iloc[0]
+                        pc_name = pc_row["Raw Name"]
+                    else:
+                        best_pc_dp = 0
+                        pc_name = "None Found"
+                        
+                    pc_info.append({"Target": tgt, "Date": dt, "PC Name": pc_name, "PC Double+ %": best_pc_dp})
+                    
+                    if best_pc_dp >= pc_thresh:
+                        valid_trials.append((tgt, dt))
+
+                df_pc_status = pd.DataFrame(pc_info)
+                
+                # Apply Filters (Target + QC)
+                df_agg_f = df_agg_all.copy()
+                if target_choice != "All Targets":
+                    df_agg_f = df_agg_f[df_agg_f["Target"] == target_choice]
+                
+                # Filter by valid trials (QC)
+                # Convert TrialID to string to avoid PyArrow conversion issues in st.dataframe
+                df_agg_all["TrialID"] = df_agg_all["Target"].astype(str) + "_" + df_agg_all["Date"].astype(str)
+                valid_trial_ids = [f"{tgt}_{dt}" for tgt, dt in valid_trials]
+                
+                df_agg_f = df_agg_all.copy()
+                if target_choice != "All Targets":
+                    df_agg_f = df_agg_f[df_agg_f["Target"] == target_choice]
+                
+                df_agg_f = df_agg_f[df_agg_f["TrialID"].isin(valid_trial_ids)]
+                
+                # 3. Separate Constructs from PCs for plotting
+                df_constructs = df_agg_f[~df_agg_f["IsPC"]].copy()
+                
+                # --- NEW: Aggregated Summary View (Mean/SD) ---
+                st.markdown("### 🏆 Combined Variant Performance (Mean/SD)")
+                if not df_constructs.empty:
+                    # Ensure alphabetical sorting here
+                    df_constructs = df_constructs.sort_values("Construct")
+                    
+                    # Update grouping to use selected metric
+                    df_grouped = df_constructs.groupby("Construct").agg({
+                        sel_metric_col: ["mean", "std"],
+                        "Double+ %": "mean"
+                    }).reset_index()
+                    df_grouped.columns = ["Construct", "Mean Val", "SD Val", "Avg Double+ %"]
+                    # User requested alphabetical order
+                    df_grouped = df_grouped.sort_values("Construct")
+                    
+                    fig_sum = px.bar(
+                        df_grouped, x="Construct", y="Mean Val", error_y="SD Val",
+                        color="Avg Double+ %", color_continuous_scale="Viridis",
+                        template="plotly_dark", title=f"{sel_metric_label} by Construct (Aggregated Across Valid Trials)",
+                        text_auto='.2f'
+                    )
+                    fig_sum.update_layout(height=550)
+                    st.plotly_chart(fig_sum, width='stretch', key="agg_mean_sd_bar")
+                else:
+                    st.info("No constructs match current filters or QC criteria.")
+
+                with st.expander("📋 Review Identified Positive Controls"):
+                    st.dataframe(df_pc_status, hide_index=True, width='stretch')
+
                 # Visualizations
-                st.markdown(f"### Comparative Analytics: {target_choice}")
+                st.markdown(f"### 📅 Trial-by-Trial Analytics: {target_choice}")
+                
+                # Sort for alphabetical order in trial plots
+                df_agg_f = df_agg_f.sort_values("Construct")
                 
                 v_col1, v_col2 = st.columns(2)
                 
                 with v_col1:
-                    # Norm Median Ratio Bar Chart
+                    # Adaptive Bar Chart based on selected metric
                     fig_agg_ratio = px.bar(
-                        df_agg_f, x="Construct", y="Norm Median Ratio", color="Date",
-                        template="plotly_dark", title="Normalized Median Ratio by Construct",
-                        text="Norm Median Ratio"
+                        df_agg_f, x="Construct", y=sel_metric_col, color="Date",
+                        template="plotly_dark", title=f"{sel_metric_label} by Construct",
+                        text=sel_metric_col
                     )
                     fig_agg_ratio.update_traces(texttemplate='%{text:.2f}', textposition='outside')
                     fig_agg_ratio.add_hline(y=1, line_dash="dash", line_color="white", annotation_text="Pos Ctrl")

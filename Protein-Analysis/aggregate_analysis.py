@@ -195,13 +195,20 @@ def main():
             with open(csv_path, 'r') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    raw_name = row['Filename']
+                    # Filter out negative controls, keep constructs and positive controls
+                    is_nc = any(ctrl in raw_name.upper() for ctrl in ["NC", "NEGATIVE CONTROL"])
+                    is_pc = any(ctrl in raw_name.upper() for ctrl in ["POSITIVE CONTROL", "PC"])
                     
-                    # Filter out controls
-                    if any(ctrl in raw_name.upper() for ctrl in ["NC", "NEGATIVE CONTROL", "POSITIVE CONTROL"]):
+                    if is_nc:
                         continue
                     
                     standard_name = standardize_construct(raw_name)
+                    
+                    # If it's a known PC pattern or "TIMP" (exactly), and not a variant, include it
+                    if not standard_name:
+                        if is_pc or raw_name.upper() == "TIMP":
+                             standard_name = raw_name
+                    
                     if standard_name:
                         try:
                             # Extract number for expectation mapping
@@ -209,11 +216,13 @@ def main():
                             construct_num = num_match.group(1) if num_match else None
                             
                             # Extract required metrics
-                            norm_ratio = float(row.get('Norm Pos Med Ratio', 0))
+                            norm_med_ratio = float(row.get('Norm Pos Med Ratio', 0))
+                            norm_mean_ratio = float(row.get('Norm Pos Mean Ratio', 0))
                             double_pos = float(row.get('Double+ %', 0))
                             
                             # New Filtered Metrics
                             norm_bind_med_expr = float(row.get('Norm Bind Med (Expr+)', 0))
+                            norm_bind_mean_expr = float(row.get('Norm Bind Mean (Expr+)', 0))
                             norm_expr_med_bind = float(row.get('Norm Expr Med (Bind+)', 0))
                             
                             all_data.append({
@@ -222,9 +231,11 @@ def main():
                                 'Construct': standard_name,
                                 'Construct Num': construct_num,
                                 'Raw Name': raw_name,
-                                'Norm Median Ratio': norm_ratio,
+                                'Norm Median Ratio': norm_med_ratio,
+                                'Norm Mean Ratio': norm_mean_ratio,
                                 'Double+ %': double_pos,
                                 'Norm Bind Med (Expr+)': norm_bind_med_expr,
+                                'Norm Bind Mean (Expr+)': norm_bind_mean_expr,
                                 'Norm Expr Med (Bind+)': norm_expr_med_bind,
                                 'Trial Failed': trial_failed
                             })
@@ -242,7 +253,7 @@ def main():
 
     # Save aggregate CSV
     output_csv = os.path.join(output_dir, "aggregate_summary.csv")
-    fieldnames = ['Target', 'Date', 'Construct', 'Raw Name', 'Norm Median Ratio', 'Double+ %', 'Norm Bind Med (Expr+)', 'Norm Expr Med (Bind+)']
+    fieldnames = ['Target', 'Date', 'Construct', 'Raw Name', 'Norm Median Ratio', 'Norm Mean Ratio', 'Double+ %', 'Norm Bind Med (Expr+)', 'Norm Bind Mean (Expr+)', 'Norm Expr Med (Bind+)']
     with open(output_csv, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
