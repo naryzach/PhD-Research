@@ -396,5 +396,102 @@ def main():
         writer.writerows(cross_data)
     print(f"Saved cross-target summary to {output_cross_csv}", flush=True)
 
+    # 3. Selectivity Analysis
+    # Pass the filtered global dataframe (valid trials only)
+    perform_selectivity_analysis(global_df_filtered, output_dir)
+
+def perform_selectivity_analysis(df, output_dir):
+    """
+    Identifies constructs tested against multiple targets and generates
+    comparison plots and summaries.
+    """
+    print("Performing selectivity analysis...", flush=True)
+    
+    selectivity_dir = os.path.join(output_dir, "Selectivity_Analysis")
+    if not os.path.exists(selectivity_dir):
+        os.makedirs(selectivity_dir)
+        print(f"  Created selectivity directory: {selectivity_dir}", flush=True)
+        
+    # 1. Aggregate data by Construct and Target
+    # We use "Norm Median Ratio" as the primary metric
+    metric = "Norm Median Ratio"
+    
+    # Calculate Mean, StdDev, and Count for each (Construct, Target) pair
+    stats_df = df.groupby(['Construct', 'Target'])[metric].agg(['mean', 'std', 'count']).reset_index()
+    stats_df.columns = ['Construct', 'Target', 'Mean', 'StdDev', 'Count']
+    
+    # Calculate SEM (Standard Error of the Mean) for error bars
+    stats_df['SEM'] = stats_df.apply(lambda row: row['StdDev'] / (row['Count']**0.5) if row['Count'] > 1 else 0, axis=1)
+    
+    # 2. Identify multi-target constructs
+    target_counts = stats_df.groupby('Construct')['Target'].count()
+    multi_target_constructs = target_counts[target_counts > 1].index.tolist()
+    
+    if not multi_target_constructs:
+        print("  No constructs found with multiple targets for comparison.", flush=True)
+        return
+
+    # Filter stats for these constructs
+    selectivity_df = stats_df[stats_df['Construct'].isin(multi_target_constructs)].copy()
+    
+    # Save CSV
+    csv_path = os.path.join(selectivity_dir, "selectivity_summary.csv")
+    selectivity_df.to_csv(csv_path, index=False)
+    print(f"  Saved selectivity summary to {csv_path}", flush=True)
+    
+    # 3. Plotting - Grouped Bar Chart
+    # Use pandas plotting for grouped bars
+    pivot_df = selectivity_df.pivot(index='Construct', columns='Target', values='Mean')
+    pivot_sem = selectivity_df.pivot(index='Construct', columns='Target', values='SEM').fillna(0)
+    
+    if not pivot_df.empty:
+        plt.figure(figsize=(16, 10))
+        ax = pivot_df.plot(kind='bar', yerr=pivot_sem, figsize=(16, 10), capsize=4, edgecolor='black', alpha=0.8)
+        
+        plt.title("Selectivity Analysis: Binding Across Targets", fontsize=22, pad=20)
+        plt.xlabel("Construct", fontsize=18)
+        plt.ylabel(f"Mean {metric}", fontsize=18)
+        plt.xticks(rotation=45, ha='right')
+        plt.legend(title="Target", fontsize=12, title_fontsize=14, loc='upper left', bbox_to_anchor=(1, 1))
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.tight_layout()
+        
+        plot_path = os.path.join(selectivity_dir, "selectivity_comparison_all.png")
+        plt.savefig(plot_path, dpi=300)
+        plt.close()
+        print(f"  Saved grouped comparison plot to {plot_path}", flush=True)
+    
+    # 4. Individual plots for each multi-target construct
+    indiv_dir = os.path.join(selectivity_dir, "Individual_Comparisons")
+    if not os.path.exists(indiv_dir):
+        os.makedirs(indiv_dir)
+        
+    for construct in multi_target_constructs:
+        c_df = selectivity_df[selectivity_df['Construct'] == construct]
+        
+        plt.figure(figsize=(10, 6))
+        # Use a consistent color map for targets
+        colors = plt.cm.viridis(np.linspace(0, 0.8, len(c_df)))
+        bars = plt.bar(c_df['Target'], c_df['Mean'], yerr=c_df['SEM'], capsize=5, 
+                       color=colors, edgecolor='black', alpha=0.9)
+        
+        plt.title(f"Target Selectivity: {construct}", fontsize=20, pad=15)
+        plt.xlabel("Target", fontsize=16)
+        plt.ylabel(f"Mean {metric}", fontsize=16)
+        plt.grid(axis='y', linestyle='--', alpha=0.5)
+        
+        # Add value labels on top of bars
+        for bar in bars:
+            height = bar.get_height()
+            plt.text(bar.get_x() + bar.get_width()/2., height + (max(c_df['Mean']) * 0.02),
+                    f'{height:.2f}', ha='center', va='bottom', fontsize=11, fontweight='bold')
+            
+        plt.tight_layout()
+        safe_name = construct.replace(" ", "_").replace("/", "-")
+        plt.savefig(os.path.join(indiv_dir, f"selectivity_{safe_name}.png"), dpi=200)
+        plt.close()
+    
+    print(f"  Saved {len(multi_target_constructs)} individual comparison plots to {indiv_dir}", flush=True)
+
 if __name__ == "__main__":
     main()
