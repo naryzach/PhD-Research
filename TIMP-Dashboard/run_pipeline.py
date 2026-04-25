@@ -1,4 +1,18 @@
 import os
+import subprocess
+
+# --- PORTABILITY: GPU-Aware Environment Setup ---
+# We must detect the GPU and set DISABLE_CUEQUIVARIANCE before importing heavy ML libraries.
+# cuEquivariance checks this at import time, so inside main() is too late.
+try:
+    # Use nvidia-smi to check for V100
+    smi_out = subprocess.check_output(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"]).decode()
+    if "V100" in smi_out:
+        os.environ["DISABLE_CUEQUIVARIANCE"] = "1"
+        print(f"Detected V100 GPU. Automatically setting DISABLE_CUEQUIVARIANCE=1 for compatibility.")
+except Exception:
+    pass
+
 import sys
 import numpy as np
 import pandas as pd
@@ -39,8 +53,8 @@ logging.getLogger("foundry").setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", module="biotite")
 
 # --- USER CONFIGURABLE VARIABLES ---
-NUM_RFD3_DESIGNS = 15
-NUM_LMPNN_STRUCTURES = 10
+NUM_RFD3_DESIGNS = 5
+NUM_LMPNN_STRUCTURES = 5
 LMPNN_SAMPLING_TEMP = 0.1
 
 TARGET_PDBS = [
@@ -256,6 +270,14 @@ def main():
             print("--- Running RFd3 ---")
             generated_arrays = []
             try:
+                # Detect GPU and set precision overrides
+                precision = "bf16-mixed"
+                if torch.cuda.is_available():
+                    device_name = torch.cuda.get_device_name(0)
+                    if "V100" in device_name:
+                        precision = "16-mixed"
+                    print(f"Detected GPU: {device_name}. Using precision: {precision}, DISABLE_CUEQUIVARIANCE: {os.environ.get('DISABLE_CUEQUIVARIANCE', '0')}")
+
                 rfd3_config = getattr(__import__('rfd3.engine', fromlist=['RFD3InferenceConfig']), 'RFD3InferenceConfig')(
                     diffusion_batch_size=min(5, NUM_RFD3_DESIGNS), 
                     low_memory_mode=False,
@@ -383,7 +405,13 @@ def main():
             # --- STAGE 3: RUN RF3 VALIDATION ---
             print(f"--- Running RF3 Validations on {len(lmpnn_jobs)} sequences ---")
             try:
-                rf3_engine = RF3InferenceEngine(ckpt_path='rf3', verbose=False)
+                # Use same precision check here
+                precision = "bf16-mixed"
+                if torch.cuda.is_available():
+                    if "V100" in torch.cuda.get_device_name(0):
+                        precision = "16-mixed"
+                
+                rf3_engine = RF3InferenceEngine(ckpt_path='rf3', verbose=False, trainer_overrides={"precision": precision})
                 for job in tqdm(lmpnn_jobs, desc="Validating Structs", leave=False):
                     design_id = f"{job['design_id']}_mpnn{job['seq_idx']}"
                     lmpnn_array = job['lmpnn_array']
