@@ -195,6 +195,7 @@ def main():
             with open(csv_path, 'r') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
+                    raw_name = row['Filename']
                     # Filter out negative controls, keep constructs and positive controls
                     is_nc = any(ctrl in raw_name.upper() for ctrl in ["NC", "NEGATIVE CONTROL"])
                     is_pc = any(ctrl in raw_name.upper() for ctrl in ["POSITIVE CONTROL", "PC"])

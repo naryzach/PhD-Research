@@ -15,3 +15,6 @@ Protein Analysis/.streamlit/secrets.toml
 
 # MetalBinder
 MetalBinder/__pycache__/
+
+# Inprogress Articles
+Papers/
