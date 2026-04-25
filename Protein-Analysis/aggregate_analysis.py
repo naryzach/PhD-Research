@@ -220,6 +220,12 @@ def main():
                             norm_med_ratio = float(row.get('Norm Pos Med Ratio', 0))
                             norm_mean_ratio = float(row.get('Norm Pos Mean Ratio', 0))
                             double_pos = float(row.get('Double+ %', 0))
+                            expr_pos = float(row.get('Expr+ %', 0))
+                            gated_events = int(float(row.get('Gated Events', 0)))
+                            
+                            # QC Flags
+                            low_expression = expr_pos < 1.0
+                            low_events = gated_events < 500
                             
                             # New Filtered Metrics
                             norm_bind_med_expr = float(row.get('Norm Bind Med (Expr+)', 0))
@@ -238,6 +244,10 @@ def main():
                                 'Norm Bind Med (Expr+)': norm_bind_med_expr,
                                 'Norm Bind Mean (Expr+)': norm_bind_mean_expr,
                                 'Norm Expr Med (Bind+)': norm_expr_med_bind,
+                                'Expr+ %': expr_pos,
+                                'Gated Events': gated_events,
+                                'Low Expression': low_expression,
+                                'Low Events': low_events,
                                 'Trial Failed': trial_failed
                             })
                         except (ValueError, KeyError):
@@ -254,7 +264,7 @@ def main():
 
     # Save aggregate CSV
     output_csv = os.path.join(output_dir, "aggregate_summary.csv")
-    fieldnames = ['Target', 'Date', 'Construct', 'Raw Name', 'Norm Median Ratio', 'Norm Mean Ratio', 'Double+ %', 'Norm Bind Med (Expr+)', 'Norm Bind Mean (Expr+)', 'Norm Expr Med (Bind+)']
+    fieldnames = ['Target', 'Date', 'Construct', 'Raw Name', 'Norm Median Ratio', 'Norm Mean Ratio', 'Double+ %', 'Expr+ %', 'Gated Events', 'Norm Bind Med (Expr+)', 'Norm Bind Mean (Expr+)', 'Norm Expr Med (Bind+)', 'Low Expression', 'Low Events', 'Trial Failed']
     with open(output_csv, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -266,8 +276,8 @@ def main():
     print("Generating plots...", flush=True)
     global_df = pd.DataFrame(all_data)
     
-    # Use only valid trials for the generated bar graphs
-    global_df_filtered = global_df[global_df['Trial Failed'] == False]
+    # Use only valid trials and samples with sufficient expression/events for the generated bar graphs
+    global_df_filtered = global_df[(global_df['Trial Failed'] == False) & (global_df['Low Expression'] == False) & (global_df['Low Events'] == False)]
     
     metrics_to_plot = [
         {
@@ -322,8 +332,8 @@ def main():
     for c in constructs:
         c_subset = global_df[global_df['Construct'] == c]
         
-        valid_subset = c_subset[c_subset['Trial Failed'] == False]
-        failed_subset = c_subset[c_subset['Trial Failed'] == True]
+        valid_subset = c_subset[(c_subset['Trial Failed'] == False) & (c_subset['Low Expression'] == False) & (c_subset['Low Events'] == False)]
+        failed_subset = c_subset[(c_subset['Trial Failed'] == True) | (c_subset['Low Expression'] == True) | (c_subset['Low Events'] == True)]
         
         # Get overall expression dates for this construct (only from valid trials)
         expression_dates_list = sorted(valid_subset['Date'].unique())
@@ -341,7 +351,12 @@ def main():
         
         if not failed_subset.empty:
             for _, row in failed_subset.drop_duplicates(['Date', 'Target']).iterrows():
-                comments.append(f"Excluded {row['Date']} ({row['Target']}) due to invalid Pos Ctrl")
+                if row['Trial Failed']:
+                    comments.append(f"Excluded {row['Date']} ({row['Target']}) due to invalid Pos Ctrl")
+                if row['Low Expression']:
+                    comments.append(f"Excluded {row['Date']} ({row['Target']}) due to low expression ({row['Expr+ %']:.1f}%)")
+                if row['Low Events']:
+                    comments.append(f"Excluded {row['Date']} ({row['Target']}) due to few events ({row['Gated Events']})")
                 
         # Check for unreliable double+ % in own sample (only in valid trials to avoid double reporting)
         unreliable_trials = valid_subset[valid_subset['Double+ %'] < 0.1]
