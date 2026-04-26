@@ -1,0 +1,116 @@
+# Name: Combined RFdiffusion 2 + LigandMPNN + AllMetal3D (Stock)
+# Purpose: Single environment for running all three tools with standard/stable dependencies.
+name: MetalCombine
+channels:
+  - nvidia/label/cuda-12.4.0
+  - https://conda.rosettacommons.org
+  - pytorch
+  - dglteam/label/th24_cu124
+  - acellera
+  - conda-forge
+  - defaults
+dependencies:
+  # Base Python (3.10 for broad compatibility with AM3D and LMPNN default scripts)
+  - python=3.10
+  - pip
+  
+  # Core Scientific Stack
+  - numpy<2
+  - scipy
+  - matplotlib
+  - pandas
+  - networkx
+  - biopython
+  
+  # Tool Specific - RFdiffusion 2
+  - jupyterlab
+  - conda-forge::openbabel=3.1.1
+  - dgl
+  - pyrosetta
+
+  # LigandMPNN
+  - mpmath
+  - sympy
+  - typing_extensions
+  - filelock
+  - fsspec
+  - Jinja2
+  - MarkupSafe
+  - pyparsing
+  
+  # Core ML - PyTorch 2.4 (Stock RFd2 requirement)
+  - pytorch=2.4.0
+  - pytorch-cuda=12.4
+
+  # AllMetal3D
+  - gxx_linux-64
+  - moleculekit
+  
+  # Pip packages
+  - pip:
+      # PyG / PyTorch Geometric dependencies
+      - --find-links https://data.pyg.org/whl/torch-2.4.0+cu124.html
+      - pyg-lib
+      - torch-scatter
+      - torch-sparse
+      - torch-cluster
+      - torch-spline-conv
+
+      # RAPIDS nightly
+      - --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple
+      - pylibcugraphops-cu12>=24.6.0a24
+
+      # Combined Pipe Packages
+      - addict
+      - allmetal3d
+      - assertpy
+      - biotite
+      - colorlog
+      - compact-json
+      - cython
+      - cytoolz
+      - debugpy
+      - deepdiff
+      - dm-tree
+      - e3nn
+      - einops
+      - executing
+      - fastparquet
+      - fire
+      - GPUtil
+      - "huggingface_hub<1.0"
+      - hydra-core
+      - icecream
+      - ipdb
+      - ipykernel
+      - ipython
+      - ipywidgets
+      - mdtraj
+      - ml-collections
+      - numba
+      - omegaconf
+      - opt_einsum
+      - plotly
+      - pre-commit
+      - ProDy
+      - py3Dmol
+      - pyarrow
+      - pydantic
+      - pyrsistent
+      - pytest
+      - pytest-benchmark
+      - pytest-cov
+      - pytest-dotenv
+      - rdkit
+      - requests
+      - RestrictedPython
+      - ruff
+      - seaborn
+      - setuptools==81.0.0
+      - submitit
+      - tmtools
+      - torchdata
+      - tqdm
+      - triton
+      - typer
+      - wandb

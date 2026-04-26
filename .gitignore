@@ -8,3 +8,13 @@ SLURM/SLURM_credentials.sh
 
 # RFdiffusion output files
 outputs/
+
+# Protein Analysis
+Protein Analysis/__pycache__/
+Protein Analysis/.streamlit/secrets.toml
+
+# MetalBinder
+MetalBinder/__pycache__/
+
+# Inprogress Articles
+Papers/

@@ -36,7 +36,7 @@ for pdb_name in pdb_files:
         proteinmpnn_repo = "../Tools/ProteinMPNN"
 
         # --- Input PDB file ---
-        data_path = "../Data"
+        data_path = "../Data/TIMP_Complexes/HADDOCK_PDB"
         pdb_path_orig = os.path.join(data_path, pdb_name)
         pdb_basename = os.path.basename(pdb_path_orig).replace(".pdb", "")
 

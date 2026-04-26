@@ -1,0 +1,33 @@
+name: Weekly Lab Orders Digest
+
+on:
+  schedule:
+    # Runs at 21:00 UTC (4:00 PM EST / 5:00 PM EDT) every Friday
+    - cron: '0 21 * * 5'
+  workflow_dispatch: # Allows manual trigger from the GitHub Actions tab
+
+jobs:
+  send-digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          pip install pandas toml
+
+      - name: Run Friday Mailer Script
+        run: python "Inventory Manager/friday_mailer.py"
+        env:
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          MANAGER_EMAIL: ${{ secrets.MANAGER_EMAIL }}
+          EMAIL_SERVER: ${{ secrets.EMAIL_SERVER }}
+          EMAIL_PORT: ${{ secrets.EMAIL_PORT }}

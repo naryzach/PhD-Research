@@ -1,0 +1,22 @@
+# Name: SuperMetal (Newer CUDA)
+# GitHub: https://github.com/XiaoboLinlin/SuperMetal
+name: supermetal_newer_env
+channels:
+  - nvidia/label/cuda-12.8.0
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.10
+  - cuda-toolkit
+  - pip
+  - pip:
+    - --index-url https://download.pytorch.org/whl/cu128
+    - torch
+    - torchvision
+    - torchaudio
+    - numpy
+    - scipy
+    - pandas
+    - scikit-learn
+    - biopython
+    # Note: Exact requirements.txt was unavailable.

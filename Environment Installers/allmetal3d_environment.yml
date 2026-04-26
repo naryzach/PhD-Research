@@ -1,0 +1,27 @@
+name: allmetal3d
+channels:
+  - acellera
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - gxx_linux-64
+  - moleculekit
+  - pip
+  - pip:
+    # Basic dependencies
+    - biopython
+    - gradio
+    - gradio_molecule3d
+    - halo
+    - numpy
+    - pydantic
+    - scikit-learn
+    - scipy
+    - tabulate
+    # PyTorch - using the version currently installed. 
+    # Note: 2.7.0+cu128 suggests a nightly or specific CUDA build. 
+    # If this fails, standard pytorch >= 2.0 with CUDA 12 support should work for RTX 5070.
+    - torch==2.7.0+cu128 --extra-index-url https://download.pytorch.org/whl/cu128
+    # AllMetal3D - installed without deps to avoid downgrading torch
+    - allmetal3d --no-deps

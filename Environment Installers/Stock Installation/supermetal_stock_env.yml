@@ -1,0 +1,23 @@
+# Name: SuperMetal
+# GitHub: https://github.com/XiaoboLinlin/SuperMetal
+name: supermetal_stock_env
+channels:
+  - defaults
+  - conda-forge
+  - pytorch
+  - nvidia
+dependencies:
+  - python=3.9
+  - pip
+  - numpy
+  - scipy
+  - pandas
+  - scikit-learn
+  - biopython
+  - pytorch
+  - torchvision
+  - torchaudio
+  - cudatoolkit
+  # Note: Exact requirements.txt was unavailable.
+  # These are standard ML/Bioinformatics dependencies.
+  # Install additional packages as needed: pip install -r requirements.txt (if obtained)

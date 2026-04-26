@@ -1,0 +1,17 @@
+# Name: RFdiffusion 3 (Foundry) - Newer CUDA
+# GitHub: https://github.com/RosettaCommons/foundry
+name: rfdiffusion3_newer_env
+channels:
+  - nvidia/label/cuda-12.8.0
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.12
+  - cuda-toolkit
+  - pip
+  - pip:
+    - --index-url https://download.pytorch.org/whl/cu128
+    - torch
+    - torchvision
+    - torchaudio
+    - rc-foundry[rfd3]

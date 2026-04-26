@@ -1,0 +1,114 @@
+# Name: Combined RFdiffusion 2 + LigandMPNN (Newer CUDA)
+# Purpose: Single environment for running RFdiffusion 2 and LigandMPNN with updated CUDA 12.8 stack.
+name: ProtGen
+channels:
+  - nvidia/label/cuda-12.8.0
+  - https://conda.rosettacommons.org
+  - pytorch
+  - dglteam/label/th24_cu124
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+
+  # RFdiffusion 2
+  - numpy<2
+  - matplotlib
+  - jupyterlab
+  - conda-forge::openbabel=3.1.1
+  - dgl
+  - pytorch=2.9
+  - pytorch-gpu
+  - pyrosetta 
+
+  # LigandMPNN
+  - scipy=1.12.0
+  - networkx=3.2.1
+  - mpmath=1.3.0
+  - sympy>=1.13.3
+  - typing_extensions=4.10.0
+  - filelock=3.13.1
+  - fsspec=2024.3.1
+  - Jinja2=3.1.3
+  - MarkupSafe=2.1.5
+  - pyparsing=3.1.1
+  - biopython=1.79
+  - fsspec=2024.3.1
+  #- triton=2.2.0
+  - cuda-toolkit
+
+  # ML utils
+  - ml-collections=0.1.1
+  - dm-tree
+
+  # Prebuilt ProDy
+  - prody=2.4.1
+  
+  # Pip packages
+  - pip:
+    # PyG / PyTorch Geometric dependencies
+    - --find-links https://data.pyg.org/whl/torch-2.7.0+cu128.html
+    - pyg-lib 
+    - torch-scatter
+    - torch-sparse
+    - torch-cluster
+    - torch-spline-conv
+
+    # LigandMPNN Specifics
+    - setuptools==81.0.0
+
+    # RFdiffusion 2 Dependencies
+    - hydra-core==1.3.1
+    - omegaconf==2.3.0
+    - e3nn==0.5.1
+    - icecream==2.1.3
+
+    # RAPIDS nightly
+    - --extra-index-url https://pypi.anaconda.org/rapidsai-wheels-nightly/simple
+    - pylibcugraphops-cu12>=24.6.0a24
+
+    # General Python packages (Safe Subset)
+    - addict==2.4.0
+    - assertpy==1.1.0
+    - colorlog
+    - compact-json
+    - cython==3.0.0
+    - cytoolz==0.12.3
+    - debugpy==1.8.5
+    - deepdiff==6.3.0
+    - einops==0.7.0
+    - executing==2.0.0
+    - fastparquet==2024.5.0
+    - fire==0.6.0
+    - GPUtil==1.4.0
+    - ipdb==0.13.11
+    - ipykernel==6.29.5
+    - ipython==8.27.0
+    - ipywidgets
+    - mdtraj==1.10.0
+    - numba
+    - opt_einsum==3.3.0
+    - plotly==5.16.1
+    - pre-commit==3.7.1
+    - py3Dmol==2.2.1
+    - pyarrow==17.0.0
+    - pydantic
+    - pyrsistent==0.19.3
+    - pytest-benchmark
+    - pytest-cov==4.1.0
+    - pytest-dotenv==0.5.2
+    - pytest==8.2.0
+    - rdkit==2024.3.5
+    - RestrictedPython
+    - ruff==0.6.2
+    - seaborn==0.13.2
+    - submitit
+    - sympy==1.13.2
+    - tmtools
+    - tqdm==4.65.0
+    - typer==0.12.5
+    - wandb==0.13.10
+    - biotite
+    - torchdata==0.9.0
+

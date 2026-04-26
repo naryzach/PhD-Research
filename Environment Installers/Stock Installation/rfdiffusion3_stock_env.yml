@@ -1,0 +1,15 @@
+# Name: RFdiffusion 3 (Foundry)
+# GitHub: https://github.com/RosettaCommons/foundry
+name: rfdiffusion3_stock_env
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+    - --extra-index-url https://download.pytorch.org/whl/cu128
+    - torch
+    - torchvision
+    - torchaudio
+    - rc-foundry[rfd3]

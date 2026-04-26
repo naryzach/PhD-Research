@@ -26,47 +26,44 @@ protein_mpnn_path = "../Tools/ProteinMPNN/"
 pmpnn_out_dir = "../Local/proteinmpnn_output"
 output_prefix = "design"
 
-loop_name = "C"
-if loop_name == "AB":
-    loop_length_normal = 6
-    loop_length_max = 15 
-    loop_position = 30
-    flank_left = "LVK"
-    flank_right = "LVY"
-elif loop_name == "C":
-    loop_length_normal = 6
-    loop_length_max = 15 
-    loop_position = 62
-    flank_left = "HTE"
-    flank_right = "GLK"
-elif loop_name == "EF":
-    loop_length_normal = 4
-    loop_length_max = 10 
-    loop_position = 92
-    flank_left = "MYT"
-    flank_right = "FVE"
-elif loop_name == "GH":
-    loop_length_normal = 10
-    loop_length_max = 20 
-    loop_position = 127
-    flank_left = "KSC"
-    flank_right = "NEC"
-elif loop_name == "Multi":
-    loop_length_normal = 10
-    loop_length_max = 20 
-    loop_position = 143
-    flank_left = "LWT"
-    flank_right = "YQS"
-else:
-    raise Exception("Specified Loop is unknown")
+loop_names = ["C", "EF"]
+if isinstance(loop_names, str):
+    loop_names = [loop_names]
+
+loop_configs = {
+    "AB": {"normal": 6, "max": 15, "pos": 30, "left": "LVK", "right": "LVY"},
+    "C": {"normal": 6, "max": 15, "pos": 62, "left": "HTE", "right": "GLK"},
+    "EF": {"normal": 4, "max": 10, "pos": 92, "left": "MYT", "right": "FVE"},
+    "GH": {"normal": 10, "max": 20, "pos": 127, "left": "KSC", "right": "NEC"},
+    "Multi": {"normal": 10, "max": 20, "pos": 143, "left": "LWT", "right": "YQS"}
+}
+
+for name in loop_names:
+    if name not in loop_configs:
+        raise Exception(f"Specified Loop '{name}' is unknown")
+
+selected_loops = [loop_configs[name] for name in loop_names]
+selected_loops.sort(key=lambda x: x["pos"])
 
 chain_to_design = "A"
 fixed_chains = ["B"]
 total_length = 121
 
-contig_string = f"{chain_to_design}1-{loop_position}/{loop_length_normal}-{loop_length_max}/{chain_to_design}{loop_position+loop_length_normal+1}-{total_length}"
-num_sequences_to_generate = 100
-mp_seqs = 100
+contig_parts = []
+current_pos = 1
+
+for loop in selected_loops:
+    if current_pos <= loop["pos"]:
+        contig_parts.append(f"{chain_to_design}{current_pos}-{loop['pos']}")
+    contig_parts.append(f"{loop['normal']}-{loop['max']}")
+    current_pos = loop["pos"] + loop["normal"] + 1
+
+if current_pos <= total_length:
+    contig_parts.append(f"{chain_to_design}{current_pos}-{total_length}")
+
+contig_string = "/".join(contig_parts)
+num_sequences_to_generate = 25
+mp_seqs = 25
 
 print(original_directory)
 print(contig_string)
@@ -83,12 +80,12 @@ pdb_file_list = ["PDB_fold_timp3_v_adam10cd_wt_model_0.pdb",
              "PDB_fold_timp3_variant_mmp9cd_wt_model_0.pdb"
              ]
 '''
-pdb_file_list = ["TIMP3_vs_ADAM10_HADDOCK_Xray.pdb",
+pdb_file_list = [#"TIMP3_vs_ADAM10_HADDOCK_Xray.pdb",
              "TIMP3_vs_ADAM17_HADDOCK_Xray.pdb",
-             "TIMP3_vs_MMP2_HADDOCK_Xray.pdb",
-             "TIMP3_vs_MMP7_HADDOCK_Xray.pdb",
-             "TIMP3_vs_MMP9_HADDOCK_Xray.pdb",
-             "TIMP3_vs_MMP10_HADDOCK_Xray.pdb"
+             #"TIMP3_vs_MMP2_HADDOCK_Xray.pdb",
+             #"TIMP3_vs_MMP7_HADDOCK_Xray.pdb",
+             #"TIMP3_vs_MMP9_HADDOCK_Xray.pdb",
+             #"TIMP3_vs_MMP10_HADDOCK_Xray.pdb"
              ]
 
 
@@ -153,8 +150,6 @@ for pdb_complex_file_name in pdb_file_list:
     generated_sequences = set()
     generated_loops = set()
     chain_id_to_extract = contig_string.split('/')[0][0] # Get chain from contig
-    start_res, end_res = map(int, contig_string.split('/')[1].split('-'))
-    loop_length_range = range(start_res, end_res + 1)
 
     for i in range(num_sequences_to_generate):
         pdb_file_name = f"{output_prefix}_{i}.pdb"
@@ -162,9 +157,22 @@ for pdb_complex_file_name in pdb_file_list:
         if os.path.exists(pdb_file):
             current_sequence = get_aa_sequence(pdb_file, chain_id_to_extract)
             generated_sequences.add(current_sequence)
-            loop_seq = "".join(current_sequence[loop_position:loop_position + start_res])
-            if len(loop_seq) in loop_length_range:
-                generated_loops.add(loop_seq)
+            
+            loop_seqs = []
+            curr_idx = 0
+            for loop in selected_loops:
+                flank_left = loop["left"]
+                flank_right = loop["right"]
+                regex_pattern = re.compile(f"{flank_left}([A-Z]+?){flank_right}")
+                match = regex_pattern.search(current_sequence[curr_idx:])
+                if match:
+                    loop_seqs.append(match.group(1))
+                    curr_idx += match.end() - len(flank_right)
+                else:
+                    loop_seqs.append("MISSING")
+            
+            if "MISSING" not in loop_seqs:
+                generated_loops.add("_".join(loop_seqs))
 
     print(f"\nExtracted {len(generated_sequences)} unique, novel loop sequences.")
     print("Here are a few examples (full):")
@@ -195,16 +203,32 @@ for pdb_complex_file_name in pdb_file_list:
             raise FileNotFoundError
         print(aa_sequence)
 
-        regex_pattern = re.compile(f"{flank_left}([A-Z]+?){flank_right}")
-        match = regex_pattern.search(aa_sequence)
-        inserted_seq = match.group(1)
-        new_total_length = total_length - loop_length_normal + len(inserted_seq)
+        fixed_positions = []
+        current_fixed_start = 1
+        current_seq_idx = 0
+        
+        for loop in selected_loops:
+            flank_left = loop["left"]
+            flank_right = loop["right"]
+            regex_pattern = re.compile(f"{flank_left}([A-Z]+?){flank_right}")
+            match = regex_pattern.search(aa_sequence[current_seq_idx:])
+            if match:
+                match_start = current_seq_idx + match.start()
+                match_end = current_seq_idx + match.end()
+                inserted_seq = match.group(1)
+                loop_start_1idx = match_start + len(flank_left) + 1
+                
+                fixed_positions.extend(range(current_fixed_start, loop_start_1idx))
+                current_fixed_start = loop_start_1idx + len(inserted_seq)
+                current_seq_idx = match_end - len(flank_right)
+        
+        new_total_length = len(aa_sequence)
+        fixed_positions.extend(range(current_fixed_start, new_total_length + 1))
 
         # Freeze all residues except the inpainted region
         fixed_json = {
             f"{output_prefix}_{i}": {
-                str(chain_to_design): [i for i in list(range(1,loop_position+1)) 
-                                    + list(range(loop_position+len(inserted_seq)+1,new_total_length+1))]
+                str(chain_to_design): fixed_positions
             }
         }
         for c in fixed_chains:
@@ -292,15 +316,26 @@ for pdb_complex_file_name in pdb_file_list:
                     entry["design_type"] = p.strip()
             
             # extract loop region between flanks
-            m = re.search(f"{flank_left}(.*?){flank_right}", seq)
-            if m:
-                loop = m.group(1)
-                entry["loop_seq"] = loop
-                entry["loop_length"] = len(loop)
-            else:
-                entry["loop_seq"] = None
-                entry["loop_length"] = None
+            # extract loop region between flanks
+            loop_data = {}
+            curr_idx = 0
             
+            for name_idx, loop in enumerate(selected_loops):
+                loop_name = loop_names[name_idx]
+                f_left = loop["left"]
+                f_right = loop["right"]
+                m = re.search(f"{f_left}(.*?){f_right}", seq[curr_idx:])
+                
+                if m:
+                    extracted_seq = m.group(1)
+                    loop_data[f"loop_{loop_name}_seq"] = extracted_seq
+                    loop_data[f"loop_{loop_name}_length"] = len(extracted_seq)
+                    curr_idx += m.end() - len(f_right)
+                else:
+                    loop_data[f"loop_{loop_name}_seq"] = "MISSING"
+                    loop_data[f"loop_{loop_name}_length"] = 0
+                    
+            entry.update(loop_data)
             records.append(entry)
 
     # ---- MAKE DATAFRAME ----
@@ -312,12 +347,18 @@ for pdb_complex_file_name in pdb_file_list:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # ---- REORDER COLUMNS ----
-    column_order = [
-        "file", "sample", "loop_seq", "loop_length",
+    base_columns = ["file", "sample"]
+    loop_columns = []
+    for ln in loop_names:
+        loop_columns.extend([f"loop_{ln}_seq", f"loop_{ln}_length"])
+    
+    other_columns = [
         "score", "global_score", "seq_recovery",
         "design_type", "full_seq", "fixed_chains", "designed_chains",
         "model_name", "git_hash", "seed", "T"
     ]
+    
+    column_order = base_columns + loop_columns + other_columns
     df = df[[c for c in column_order if c in df.columns]]
 
     # ---- SAVE FULL SUMMARY ----
@@ -325,42 +366,48 @@ for pdb_complex_file_name in pdb_file_list:
     print(f"Saved {len(df)} entries to {output_csv}")
 
     # ---- SUMMARIZE BEST UNIQUE LOOPS ----
-    clean_df = df.dropna(subset=["loop_seq", "score"]).copy()
+    seq_cols = [c for c in df.columns if c.startswith("loop_") and c.endswith("_seq")]
+    len_cols = [c for c in df.columns if c.startswith("loop_") and c.endswith("_length")]
+    
+    clean_df = df.dropna(subset=seq_cols + ["score"]).copy()
 
-    # Keep best (lowest score) per unique loop sequence
-    best_per_loop = (
-        clean_df.sort_values("score")
-        .groupby("loop_seq", as_index=False)
-        .first()
-    )
-
-    # Compute averages per loop length
-    avg_stats = (
-        clean_df.groupby("loop_length", as_index=False)
-        .agg(
-            avg_score=("score", "mean"),
-            avg_seq_recovery=("seq_recovery", "mean"),
-            count=("loop_seq", "count")
+    if not clean_df.empty:
+        # Keep best (lowest score) per unique loop sequence array
+        best_per_loop = (
+            clean_df.sort_values("score")
+            .groupby(seq_cols, as_index=False)
+            .first()
         )
-        .sort_values("loop_length")
-    )
 
-    # Select top N best loops per loop length
-    best_per_length = (
-        best_per_loop.sort_values(["loop_length", "score"])
-        .groupby("loop_length", group_keys=False)
-        .head(top_n)
-    )
+        # Compute averages per loop length array
+        avg_stats = (
+            clean_df.groupby(len_cols, as_index=False)
+            .agg(
+                avg_score=("score", "mean"),
+                avg_seq_recovery=("seq_recovery", "mean"),
+                count=("score", "count")
+            )
+            .sort_values(len_cols)
+        )
 
-    # Merge in average stats
-    best_per_length = best_per_length.merge(avg_stats, on="loop_length", how="left")
+        # Select top N best loops per length configuration
+        best_per_length = (
+            best_per_loop.sort_values(len_cols + ["score"], ascending=[True]*len(len_cols) + [True])
+            .groupby(len_cols, group_keys=False)
+            .head(top_n)
+        )
 
-    # Sort final summary
-    best_per_length = best_per_length.sort_values(["loop_length", "score"], ascending=[True, True])
+        # Merge in average stats
+        best_per_length = best_per_length.merge(avg_stats, on=len_cols, how="left")
 
-    # ---- SAVE SUMMARIES ----
-    best_per_length.to_csv(os.path.join(pmpnn_out_dir_full, "best_loops_per_length.csv"), index=False)
-    avg_stats.to_csv(os.path.join(pmpnn_out_dir_full, "loop_length_averages.csv"), index=False)
+        # Sort final summary
+        best_per_length = best_per_length.sort_values(len_cols + ["score"], ascending=[True]*len(len_cols) + [True])
 
-    print(f"Saved best {top_n} unique loops per length to best_loops_per_length.csv")
-    print("Saved loop length averages to loop_length_averages.csv")
+        # ---- SAVE SUMMARIES ----
+        best_per_length.to_csv(os.path.join(pmpnn_out_dir_full, "best_loops_per_length.csv"), index=False)
+        avg_stats.to_csv(os.path.join(pmpnn_out_dir_full, "loop_length_averages.csv"), index=False)
+
+        print(f"Saved best {top_n} unique loops per length to best_loops_per_length.csv")
+        print("Saved loop length averages to loop_length_averages.csv")
+    else:
+        print("No valid scores generated, summaries skipped.")

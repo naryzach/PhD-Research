@@ -1,0 +1,10 @@
+plotly
+fcsparser
+scipy
+requests
+streamlit
+pandas
+numpy
+matplotlib
+s3fs
+boto3
