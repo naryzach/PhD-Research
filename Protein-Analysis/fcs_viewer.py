@@ -87,7 +87,8 @@ def get_fs():
             key=r2_config["access_key_id"],
             secret=r2_config["secret_access_key"],
             endpoint_url=r2_config["endpoint_url"],
-            client_kwargs={'region_name': 'auto'}
+            client_kwargs={'region_name': 'auto'},
+            use_listings_cache=False
         )
         return fs, r2_config.get("bucket_name", "Unknown")
     except ImportError:
@@ -789,8 +790,8 @@ if selected_file and df is not None:
             st.markdown("---")
             
     # TABS
-    tab_main, tab_pos, tab_folder, tab_agg, tab_custom, tab_raw, tab_meta = st.tabs([
-        "Main Analysis", "Pos Control Analytics", "Folder Analysis", "Aggregate Analysis", "Custom Plots", "Raw Data", "Metadata"
+    tab_main, tab_pos, tab_folder, tab_agg, tab_selectivity, tab_custom, tab_raw, tab_meta = st.tabs([
+        "Main Analysis", "Pos Control Analytics", "Folder Analysis", "Aggregate Analysis", "Selectivity Analysis", "Custom Plots", "Raw Data", "Metadata"
     ])
     
     with tab_main:
@@ -1247,10 +1248,10 @@ if selected_file and df is not None:
                     with qc_c1:
                         target_choice = st.selectbox("🎯 Filter by Target", ["All Targets"] + list(available_targets), key="global_target_sel")
                     with qc_c2:
-                        pc_keywords = st.text_input("PC Keywords (Comma separated)", value="Positive Control, PC, TIMP", help="Keywords to identify which rows are positive controls.")
+                        pc_keywords = st.text_input("PC Keywords (Comma separated)", value="Positive Control, TIMP", help="Keywords to identify which rows are positive controls.")
                         pc_pattern = "|".join([k.strip().upper() for k in pc_keywords.split(",") if k.strip()])
                     
-                    pc_thresh = st.slider("QC Threshold: Min PC Double+ %", 0.0, 10.0, 1.0, step=0.1, help="Exclude trials where the identified positive control performed poorly.")
+                    pc_thresh = st.slider("QC Threshold: Min PC Double+ %", 0.0, 10.0, 2.0, step=0.1, help="Exclude trials where the identified positive control performed poorly.")
                     
                     st.divider()
                     metric_options = {
@@ -1384,6 +1385,155 @@ if selected_file and df is not None:
                 st.info(f"Global directory found at '{global_agg_dir}', but no summary CSVs were detected.")
         else:
             st.info(f"Global aggregate directory not found at: {global_agg_dir}")
+
+    with tab_selectivity:
+        if st.button("🔄 Refresh Selectivity Data", key="refresh_selectivity"):
+             st.rerun()
+             
+        if fs and BUCKET:
+            global_agg_dir = os.path.join(BUCKET, "Aggregate_FCS_Analysis")
+        else:
+            # Try multiple relative paths to be safe
+            potential_paths = [
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Local", "Aggregate_FCS_Analysis")),
+                os.path.abspath(os.path.join(os.getcwd(), "..", "Local", "Aggregate_FCS_Analysis")),
+                os.path.abspath(os.path.join(os.getcwd(), "Local", "Aggregate_FCS_Analysis")),
+            ]
+            global_agg_dir = potential_paths[0]
+            for p in potential_paths:
+                if os.path.exists(p):
+                    global_agg_dir = p
+                    break
+            
+        selectivity_dir = os.path.join(global_agg_dir, "Selectivity_Analysis")
+        
+        # Robust cloud_exists for prefixes
+        dir_exists = cloud_exists(selectivity_dir)
+        if not dir_exists and fs and BUCKET and selectivity_dir.startswith(BUCKET):
+            # In S3, a prefix exists if there are keys under it
+            try:
+                test_ls = fs.ls(selectivity_dir, detail=False)
+                if test_ls:
+                    dir_exists = True
+            except:
+                pass
+
+        if dir_exists:
+            st.subheader("🎯 Selectivity Analysis")
+            
+            # Find available metrics (subdirectories)
+            metric_dirs = []
+            if fs and selectivity_dir.startswith(BUCKET):
+                try:
+                    # Robust listing for R2/S3
+                    items = fs.ls(selectivity_dir, detail=False)
+                    for i in items:
+                        # Normalize path by removing the parent prefix
+                        name = i.rstrip("/").split("/")[-1]
+                        # If it's a directory (no extension) and not empty
+                        if "." not in name and name != "Selectivity_Analysis":
+                            metric_dirs.append(name)
+                    metric_dirs = sorted(list(set(metric_dirs)))
+                except Exception as e:
+                    st.error(f"Error listing selectivity metrics: {e}")
+            else:
+                if os.path.exists(selectivity_dir):
+                    metric_dirs = sorted([d for d in os.listdir(selectivity_dir) if os.path.isdir(os.path.join(selectivity_dir, d))])
+            
+            if metric_dirs:
+                selected_metric = st.selectbox("Select Metric to View", metric_dirs, key="selectivity_tab_metric_sel")
+                metric_subdir = os.path.join(selectivity_dir, selected_metric)
+                
+                sum_csv = os.path.join(metric_subdir, "selectivity_summary.csv")
+                all_comp_plot = os.path.join(metric_subdir, "selectivity_comparison_all.png")
+                
+                # --- NEW: Read CSV data first to drive the individual viewer ---
+                df_sel = None
+                if cloud_exists(sum_csv):
+                    df_sel = cloud_read_csv(sum_csv)
+                
+                # Visualizations
+                if df_sel is not None:
+                    st.markdown(f"### Selectivity Comparison: {selected_metric}")
+                    
+                    # Create Dynamic Plotly Chart
+                    import plotly.express as px
+                    
+                    # Sort by construct for consistent viewing
+                    df_plot = df_sel.sort_values(["Construct", "Target"])
+                    
+                    fig_sel = px.bar(
+                        df_plot, 
+                        x="Construct", 
+                        y="Mean", 
+                        color="Target",
+                        barmode="group",
+                        error_y="StdDev",
+                        template="plotly_dark",
+                        title=f"{selected_metric} Across Targets",
+                        labels={"Mean": selected_metric}
+                    )
+                    fig_sel.update_layout(height=600, xaxis_tickangle=-45)
+                    st.plotly_chart(fig_sel, width='stretch', key="selectivity_main_plotly")
+                    
+                    # Data Table (Optional but helpful)
+                    with st.expander("📊 View Summary Data Table"):
+                        st.dataframe(df_sel, hide_index=True, width='stretch')
+                else:
+                    st.info(f"Selectivity summary CSV not found: {os.path.basename(sum_csv)}")
+                
+                # Individual Comparisons (Driven by CSV Variants)
+                st.divider()
+                st.subheader("🔍 Individual Construct Selectivity")
+                
+                if df_sel is not None:
+                    available_variants = sorted(list(df_sel['Construct'].unique()))
+                    if available_variants:
+                        selected_variant = st.selectbox("Select Construct", available_variants, 
+                                                       key="selectivity_tab_variant_sel")
+                        
+                        # Filter data for this variant
+                        df_var = df_sel[df_sel['Construct'] == selected_variant].sort_values("Target")
+                        
+                        # Create individual bar chart
+                        fig_var = px.bar(
+                            df_var,
+                            x="Target",
+                            y="Mean",
+                            color="Target",
+                            error_y="StdDev",
+                            template="plotly_dark",
+                            title=f"Selectivity Profile: {selected_variant} ({selected_metric})",
+                            labels={"Mean": selected_metric}
+                        )
+                        fig_var.update_layout(height=450, showlegend=False)
+                        st.plotly_chart(fig_var, width='stretch', key="selectivity_variant_plotly")
+                    else:
+                        st.info("No unique constructs found in the summary CSV.")
+                else:
+                    st.info("Summary CSV missing; cannot load individual variant list.")
+            else:
+                st.warning("No metric directories found in Selectivity_Analysis.")
+                with st.expander("🛠️ Debug Info"):
+                    st.write(f"Looking in: `{selectivity_dir}`")
+                    if fs and selectivity_dir.startswith(BUCKET):
+                         try:
+                             raw_items = fs.ls(selectivity_dir, detail=False)
+                             st.write(f"Raw items found ({len(raw_items)}):")
+                             st.json(raw_items)
+                         except Exception as e:
+                             st.write(f"Listing Error: {e}")
+        else:
+            st.info(f"Selectivity directory not found: {selectivity_dir}")
+            with st.expander("🛠️ Debug Info"):
+                 mode = st.session_state.get("data_mode", "Unknown")
+                 st.write(f"Mode: {mode}")
+                 st.write(f"Path searched: `{selectivity_dir}`")
+                 st.write(f"Bucket: `{BUCKET}`")
+                 st.write(f"FS Connected: `{fs is not None}`")
+
+
+
 
 else:
     if selected_file is None:

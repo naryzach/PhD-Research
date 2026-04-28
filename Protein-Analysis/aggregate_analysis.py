@@ -125,6 +125,26 @@ def main():
     output_dir = os.path.join(local_dir, "Aggregate_FCS_Analysis")
     reference_csv = os.path.join(base_dir, "TIMP3_variants_names.csv")
     
+    # 0. Define metrics and control patterns
+    # Metrics list controls both aggregate plots and selectivity analysis
+    metrics = [
+        {
+            "y_col": "Norm Median Ratio",
+            "y_label": "Normalized Median Binding Ratio (vs Pos Ctrl)",
+            "title_prefix": "Binding to Expression Ratio",
+            "folder": "Norm_Median_Ratio"
+        },
+        {
+            "y_col": "Norm Bind Med (Expr+)",
+            "y_label": "Normalized Median APC for FITC+ Cells",
+            "title_prefix": "Binding of Expressed Cells",
+            "folder": "Norm_Bind_Med_Expr_Positive"
+        }
+    ]
+
+    POS_CTRL_PATTERNS = ["POSITIVE CONTROL", "TIMP 3"]
+    NEG_CTRL_PATTERNS = ["NC", "NEGATIVE CONTROL"]
+
     # Ensure output directory exists
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -176,20 +196,30 @@ def main():
             continue
             
         trial_failed = False
+        trial_failed_reason = ""
         try:
             with open(csv_path, 'r') as f:
                 reader = csv.DictReader(f)
                 pos_ctrl_dps = []
                 for row in reader:
                     raw_name = row['Filename']
-                    if any(ctrl in raw_name.upper() for ctrl in ["POSITIVE CONTROL", "TIMP"]):
+                    # Strict PC identification using patterns
+                    is_pc = any(ctrl in raw_name.upper() for ctrl in POS_CTRL_PATTERNS)
+                    
+                    if is_pc:
                         pos_ctrl_dps.append(float(row.get('Double+ %', 0)))
                 
                 # If no positive controls exist or max is < 2.0%, fail trial
-                if not pos_ctrl_dps or max(pos_ctrl_dps) < 2.0:
+                if not pos_ctrl_dps:
                     trial_failed = True
+                    trial_failed_reason = "No Positive Control found"
+                elif max(pos_ctrl_dps) < 2.0:
+                    trial_failed = True
+                    trial_failed_reason = f"Pos Ctrl Double+ % too low ({max(pos_ctrl_dps):.1f}%)"
         except Exception as e:
             print(f"  Error checking Pos Ctrls for {csv_path}: {e}", flush=True)
+            trial_failed = True
+            trial_failed_reason = f"Error reading stats: {e}"
             
         try:
             with open(csv_path, 'r') as f:
@@ -197,18 +227,17 @@ def main():
                 for row in reader:
                     raw_name = row['Filename']
                     # Filter out negative controls, keep constructs and positive controls
-                    is_nc = any(ctrl in raw_name.upper() for ctrl in ["NC", "NEGATIVE CONTROL"])
-                    is_pc = any(ctrl in raw_name.upper() for ctrl in ["POSITIVE CONTROL", "PC"])
+                    is_nc = any(ctrl in raw_name.upper() for ctrl in NEG_CTRL_PATTERNS)
+                    is_pc = any(ctrl in raw_name.upper() for ctrl in POS_CTRL_PATTERNS)
                     
                     if is_nc:
                         continue
                     
                     standard_name = standardize_construct(raw_name)
                     
-                    # If it's a known PC pattern or "TIMP" (exactly), and not a variant, include it
-                    if not standard_name:
-                        if is_pc or raw_name.upper() == "TIMP":
-                             standard_name = raw_name
+                    # If it's a positive control but not a variant, use its raw name as the identifier
+                    if not standard_name and is_pc:
+                        standard_name = raw_name
                     
                     if standard_name:
                         try:
@@ -248,7 +277,8 @@ def main():
                                 'Gated Events': gated_events,
                                 'Low Expression': low_expression,
                                 'Low Events': low_events,
-                                'Trial Failed': trial_failed
+                                'Trial Failed': trial_failed,
+                                'Trial Failed Reason': trial_failed_reason
                             })
                         except (ValueError, KeyError):
                             continue
@@ -264,7 +294,7 @@ def main():
 
     # Save aggregate CSV
     output_csv = os.path.join(output_dir, "aggregate_summary.csv")
-    fieldnames = ['Target', 'Date', 'Construct', 'Raw Name', 'Norm Median Ratio', 'Norm Mean Ratio', 'Double+ %', 'Expr+ %', 'Gated Events', 'Norm Bind Med (Expr+)', 'Norm Bind Mean (Expr+)', 'Norm Expr Med (Bind+)', 'Low Expression', 'Low Events', 'Trial Failed']
+    fieldnames = ['Target', 'Date', 'Construct', 'Raw Name', 'Norm Median Ratio', 'Norm Mean Ratio', 'Double+ %', 'Expr+ %', 'Gated Events', 'Norm Bind Med (Expr+)', 'Norm Bind Mean (Expr+)', 'Norm Expr Med (Bind+)', 'Low Expression', 'Low Events', 'Trial Failed', 'Trial Failed Reason']
     with open(output_csv, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -272,29 +302,13 @@ def main():
             writer.writerow({k: d[k] for k in fieldnames})
     print(f"Saved aggregate summary to {output_csv}", flush=True)
 
-    # 1. Plotting
     print("Generating plots...", flush=True)
     global_df = pd.DataFrame(all_data)
     
     # Use only valid trials and samples with sufficient expression/events for the generated bar graphs
     global_df_filtered = global_df[(global_df['Trial Failed'] == False) & (global_df['Low Expression'] == False) & (global_df['Low Events'] == False)]
     
-    metrics_to_plot = [
-        {
-            "y_col": "Norm Median Ratio",
-            "y_label": "Normalized Median Binding Ratio (vs Pos Ctrl)",
-            "title_prefix": "Binding to Expression Ratio",
-            "folder": "Norm_Median_Ratio"
-        },
-        {
-            "y_col": "Norm Bind Med (Expr+)",
-            "y_label": "Normalized Median APC for FITC+ Cells",
-            "title_prefix": "Binding of Expressed Cells",
-            "folder": "Norm_Bind_Med_Expr_Positive"
-        }
-    ]
-
-    for metric in metrics_to_plot:
+    for metric in metrics:
         metric_dir = os.path.join(output_dir, metric["folder"])
         if not os.path.exists(metric_dir):
             os.makedirs(metric_dir)
@@ -352,7 +366,8 @@ def main():
         if not failed_subset.empty:
             for _, row in failed_subset.drop_duplicates(['Date', 'Target']).iterrows():
                 if row['Trial Failed']:
-                    comments.append(f"Excluded {row['Date']} ({row['Target']}) due to invalid Pos Ctrl")
+                    reason = row.get('Trial Failed Reason', 'invalid Pos Ctrl')
+                    comments.append(f"Excluded {row['Date']} ({row['Target']}): {reason}")
                 if row['Low Expression']:
                     comments.append(f"Excluded {row['Date']} ({row['Target']}) due to low expression ({row['Expr+ %']:.1f}%)")
                 if row['Low Events']:
@@ -397,101 +412,110 @@ def main():
     print(f"Saved cross-target summary to {output_cross_csv}", flush=True)
 
     # 3. Selectivity Analysis
-    # Pass the filtered global dataframe (valid trials only)
-    perform_selectivity_analysis(global_df_filtered, output_dir)
+    # Pass the filtered global dataframe (valid trials only) and the metrics list
+    perform_selectivity_analysis(global_df_filtered, output_dir, metrics)
 
-def perform_selectivity_analysis(df, output_dir):
+def perform_selectivity_analysis(df, output_dir, metrics):
     """
     Identifies constructs tested against multiple targets and generates
-    comparison plots and summaries.
+    comparison plots and summaries for each specified metric.
     """
     print("Performing selectivity analysis...", flush=True)
     
-    selectivity_dir = os.path.join(output_dir, "Selectivity_Analysis")
-    if not os.path.exists(selectivity_dir):
-        os.makedirs(selectivity_dir)
-        print(f"  Created selectivity directory: {selectivity_dir}", flush=True)
+    base_selectivity_dir = os.path.join(output_dir, "Selectivity_Analysis")
+    if not os.path.exists(base_selectivity_dir):
+        os.makedirs(base_selectivity_dir)
+        print(f"  Created selectivity directory: {base_selectivity_dir}", flush=True)
         
-    # 1. Aggregate data by Construct and Target
-    # We use "Norm Median Ratio" as the primary metric
-    metric = "Norm Median Ratio"
-    
-    # Calculate Mean, StdDev, and Count for each (Construct, Target) pair
-    stats_df = df.groupby(['Construct', 'Target'])[metric].agg(['mean', 'std', 'count']).reset_index()
-    stats_df.columns = ['Construct', 'Target', 'Mean', 'StdDev', 'Count']
-    
-    # Calculate SEM (Standard Error of the Mean) for error bars
-    stats_df['SEM'] = stats_df.apply(lambda row: row['StdDev'] / (row['Count']**0.5) if row['Count'] > 1 else 0, axis=1)
-    
-    # 2. Identify multi-target constructs
-    target_counts = stats_df.groupby('Construct')['Target'].count()
-    multi_target_constructs = target_counts[target_counts > 1].index.tolist()
-    
-    if not multi_target_constructs:
-        print("  No constructs found with multiple targets for comparison.", flush=True)
-        return
+    for metric_info in metrics:
+        metric = metric_info["y_col"]
+        folder = metric_info["folder"]
+        label = metric_info.get("y_label", metric)
+        title_prefix = metric_info.get("title_prefix", "Selectivity Analysis")
+        
+        print(f"  Analyzing selectivity for: {metric}...", flush=True)
+        
+        metric_dir = os.path.join(base_selectivity_dir, folder)
+        if not os.path.exists(metric_dir):
+            os.makedirs(metric_dir)
 
-    # Filter stats for these constructs
-    selectivity_df = stats_df[stats_df['Construct'].isin(multi_target_constructs)].copy()
-    
-    # Save CSV
-    csv_path = os.path.join(selectivity_dir, "selectivity_summary.csv")
-    selectivity_df.to_csv(csv_path, index=False)
-    print(f"  Saved selectivity summary to {csv_path}", flush=True)
-    
-    # 3. Plotting - Grouped Bar Chart
-    # Use pandas plotting for grouped bars
-    pivot_df = selectivity_df.pivot(index='Construct', columns='Target', values='Mean')
-    pivot_sem = selectivity_df.pivot(index='Construct', columns='Target', values='SEM').fillna(0)
-    
-    if not pivot_df.empty:
-        plt.figure(figsize=(16, 10))
-        ax = pivot_df.plot(kind='bar', yerr=pivot_sem, figsize=(16, 10), capsize=4, edgecolor='black', alpha=0.8)
+        # 1. Aggregate data by Construct and Target
+        # Calculate Mean, StdDev, and Count for each (Construct, Target) pair
+        stats_df = df.groupby(['Construct', 'Target'])[metric].agg(['mean', 'std', 'count']).reset_index()
+        stats_df.columns = ['Construct', 'Target', 'Mean', 'StdDev', 'Count']
         
-        plt.title("Selectivity Analysis: Binding Across Targets", fontsize=22, pad=20)
-        plt.xlabel("Construct", fontsize=18)
-        plt.ylabel(f"Mean {metric}", fontsize=18)
-        plt.xticks(rotation=45, ha='right')
-        plt.legend(title="Target", fontsize=12, title_fontsize=14, loc='upper left', bbox_to_anchor=(1, 1))
-        plt.grid(axis='y', linestyle='--', alpha=0.7)
-        plt.tight_layout()
+        # Calculate SEM (Standard Error of the Mean) for error bars
+        stats_df['SEM'] = stats_df.apply(lambda row: row['StdDev'] / (row['Count']**0.5) if row['Count'] > 1 else 0, axis=1)
         
-        plot_path = os.path.join(selectivity_dir, "selectivity_comparison_all.png")
-        plt.savefig(plot_path, dpi=300)
-        plt.close()
-        print(f"  Saved grouped comparison plot to {plot_path}", flush=True)
-    
-    # 4. Individual plots for each multi-target construct
-    indiv_dir = os.path.join(selectivity_dir, "Individual_Comparisons")
-    if not os.path.exists(indiv_dir):
-        os.makedirs(indiv_dir)
+        # 2. Identify multi-target constructs
+        target_counts = stats_df.groupby('Construct')['Target'].count()
+        multi_target_constructs = target_counts[target_counts > 1].index.tolist()
         
-    for construct in multi_target_constructs:
-        c_df = selectivity_df[selectivity_df['Construct'] == construct]
+        if not multi_target_constructs:
+            print(f"    No constructs found with multiple targets for {metric} comparison.", flush=True)
+            continue
+
+        # Filter stats for these constructs
+        selectivity_df = stats_df[stats_df['Construct'].isin(multi_target_constructs)].copy()
         
-        plt.figure(figsize=(10, 6))
-        # Use a consistent color map for targets
-        colors = plt.cm.viridis(np.linspace(0, 0.8, len(c_df)))
-        bars = plt.bar(c_df['Target'], c_df['Mean'], yerr=c_df['SEM'], capsize=5, 
-                       color=colors, edgecolor='black', alpha=0.9)
+        # Save CSV
+        csv_path = os.path.join(metric_dir, "selectivity_summary.csv")
+        selectivity_df.to_csv(csv_path, index=False)
+        print(f"    Saved selectivity summary to {csv_path}", flush=True)
         
-        plt.title(f"Target Selectivity: {construct}", fontsize=20, pad=15)
-        plt.xlabel("Target", fontsize=16)
-        plt.ylabel(f"Mean {metric}", fontsize=16)
-        plt.grid(axis='y', linestyle='--', alpha=0.5)
+        # 3. Plotting - Grouped Bar Chart
+        # Use pandas plotting for grouped bars
+        pivot_df = selectivity_df.pivot(index='Construct', columns='Target', values='Mean')
+        pivot_std = selectivity_df.pivot(index='Construct', columns='Target', values='StdDev').fillna(0)
         
-        # Add value labels on top of bars
-        for bar in bars:
-            height = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width()/2., height + (max(c_df['Mean']) * 0.02),
-                    f'{height:.2f}', ha='center', va='bottom', fontsize=11, fontweight='bold')
+        if not pivot_df.empty:
+            plt.figure(figsize=(16, 10))
+            ax = pivot_df.plot(kind='bar', yerr=pivot_std, figsize=(16, 10), capsize=4, edgecolor='black', alpha=0.8)
             
-        plt.tight_layout()
-        safe_name = construct.replace(" ", "_").replace("/", "-")
-        plt.savefig(os.path.join(indiv_dir, f"selectivity_{safe_name}.png"), dpi=200)
-        plt.close()
-    
-    print(f"  Saved {len(multi_target_constructs)} individual comparison plots to {indiv_dir}", flush=True)
+            plt.title(f"{title_prefix}: Across Targets (Mean ± SD)", fontsize=22, pad=20)
+            plt.xlabel("Construct", fontsize=18)
+            plt.ylabel(f"Mean {label}", fontsize=18)
+            plt.xticks(rotation=45, ha='right')
+            plt.legend(title="Target", fontsize=12, title_fontsize=14, loc='upper left', bbox_to_anchor=(1, 1))
+            plt.grid(axis='y', linestyle='--', alpha=0.7)
+            plt.tight_layout()
+            
+            plot_path = os.path.join(metric_dir, "selectivity_comparison_all.png")
+            plt.savefig(plot_path, dpi=300)
+            plt.close()
+            print(f"    Saved grouped comparison plot to {plot_path}", flush=True)
+        
+        # 4. Individual plots for each multi-target construct
+        indiv_dir = os.path.join(metric_dir, "Individual_Comparisons")
+        if not os.path.exists(indiv_dir):
+            os.makedirs(indiv_dir)
+            
+        for construct in multi_target_constructs:
+            c_df = selectivity_df[selectivity_df['Construct'] == construct]
+            
+            plt.figure(figsize=(10, 6))
+            # Use a consistent color map for targets
+            colors = plt.cm.viridis(np.linspace(0, 0.8, len(c_df)))
+            bars = plt.bar(c_df['Target'], c_df['Mean'], yerr=c_df['StdDev'], capsize=5, 
+                           color=colors, edgecolor='black', alpha=0.9)
+            
+            plt.title(f"{title_prefix}: {construct}", fontsize=20, pad=15)
+            plt.xlabel("Target", fontsize=16)
+            plt.ylabel(f"Mean {label}", fontsize=16)
+            plt.grid(axis='y', linestyle='--', alpha=0.5)
+            
+            # Add value labels on top of bars
+            for bar in bars:
+                height = bar.get_height()
+                plt.text(bar.get_x() + bar.get_width()/2., height + (max(c_df['Mean']) * 0.02),
+                        f'{height:.2f}', ha='center', va='bottom', fontsize=11, fontweight='bold')
+                
+            plt.tight_layout()
+            safe_name = construct.replace(" ", "_").replace("/", "-")
+            plt.savefig(os.path.join(indiv_dir, f"selectivity_{safe_name}.png"), dpi=200)
+            plt.close()
+        
+        print(f"    Saved {len(multi_target_constructs)} individual comparison plots to {indiv_dir}", flush=True)
 
 if __name__ == "__main__":
     main()

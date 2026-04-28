@@ -36,7 +36,7 @@ warnings.filterwarnings("ignore")
 
 # ---- CONFIGURATION ----
 NEG_CONTROL_PATTERNS = ["NC", "Negative Control"] # Starts with any of these
-POS_CONTROL_PATTERNS = ["Positive Control", "TIMP"] # Starts with any of these
+POS_CONTROL_PATTERNS = ["Positive Control", "TIMP 3"] # Starts with any of these
 
 # Channels
 CH_FSC_A = 'FSC-A'
