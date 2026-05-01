@@ -269,12 +269,14 @@ def process_directory(input_dir, output_dir):
     dirs = {
         "His_Tagged": os.path.join(output_dir, "His_Tagged"),
         "Flag_Tagged": os.path.join(output_dir, "Flag_Tagged"),
+        "Controls": os.path.join(output_dir, "Controls"),
         "Combined": os.path.join(output_dir, "Combined")
     }
-    for tag_grp in ["His_Tagged", "Flag_Tagged"]:
+    for tag_grp in ["His_Tagged", "Flag_Tagged", "Controls"]:
         os.makedirs(os.path.join(dirs[tag_grp], "Individual_Plots"), exist_ok=True)
-        os.makedirs(os.path.join(dirs[tag_grp], "Concentration_Comparison"), exist_ok=True)
-        os.makedirs(os.path.join(dirs[tag_grp], "Aggregate_Plots"), exist_ok=True)
+        if tag_grp != "Controls":
+            os.makedirs(os.path.join(dirs[tag_grp], "Concentration_Comparison"), exist_ok=True)
+            os.makedirs(os.path.join(dirs[tag_grp], "Aggregate_Plots"), exist_ok=True)
     os.makedirs(dirs["Combined"], exist_ok=True)
 
     # 1. Gate Learning on NC
@@ -293,6 +295,7 @@ def process_directory(input_dir, output_dir):
         _, d = load_fcs(f)
         if d is not None and CH_FITC in d.columns:
             d_gated = apply_polygon_gate(d, pentagon_path, CH_FSC_A, CH_SSC_A)
+            d_gated = d_gated[(d_gated[CH_FITC] > 0) & (d_gated[CH_APC] > 0) & (d_gated[CH_PE] > 0)]
             nc_dfs.append(d_gated)
     nc_concat = pd.concat(nc_dfs) if nc_dfs else None
     
@@ -305,7 +308,9 @@ def process_directory(input_dir, output_dir):
     for f in his_files:
         _, d = load_fcs(f)
         if d is not None:
-            his_dfs.append(apply_polygon_gate(d, pentagon_path, CH_FSC_A, CH_SSC_A))
+            d_gated = apply_polygon_gate(d, pentagon_path, CH_FSC_A, CH_SSC_A)
+            d_gated = d_gated[(d_gated[CH_FITC] > 0) & (d_gated[CH_APC] > 0) & (d_gated[CH_PE] > 0)]
+            his_dfs.append(d_gated)
             
     alpha = 0.0
     if his_dfs:
@@ -351,7 +356,7 @@ def process_directory(input_dir, output_dir):
     ridge_data_his = []
     ridge_data_flag = []
     
-    sample_files = df_files[df_files["Tag"].isin(["his", "flag"])]
+    sample_files = df_files[df_files["Tag"].isin(["his", "flag", "nc"])]
     
     for idx, row in sample_files.iterrows():
         clean_name = row["CleanName"]
@@ -362,16 +367,28 @@ def process_directory(input_dir, output_dir):
         if df is None: continue
         
         df_sing = apply_polygon_gate(df, pentagon_path, CH_FSC_A, CH_SSC_A)
+        df_sing = df_sing[(df_sing[CH_FITC] > 0) & (df_sing[CH_APC] > 0) & (df_sing[CH_PE] > 0)]
         df_sing[CH_PE_CORR] = df_sing[CH_PE] - alpha * df_sing[CH_FITC]
         
         if len(df_sing) == 0: continue
         
-        ch_bind = CH_APC if tag == "his" else CH_PE_CORR
-        thresh_bind = thresh_apc if tag == "his" else thresh_pe
-        neg_mfi_bind = neg_mfi_apc if tag == "his" else neg_mfi_pe
-        
-        # Only consider positive values for log scaling and accurate mean
-        df_sing = df_sing[(df_sing[CH_FITC] > 0) & (df_sing[ch_bind] > -100)] # allow slight negative PE corr
+        if tag == "his" or tag == "nc":
+            ch_bind = CH_APC
+            thresh_bind = thresh_apc
+            neg_mfi_bind = neg_mfi_apc
+            tag_dir = dirs["Controls"] if tag == "nc" else dirs["His_Tagged"]
+            bind_lbl = "APC-A"
+            tag_name = "NC" if tag == "nc" else "His (APC)"
+        else:
+            ch_bind = CH_PE_CORR
+            thresh_bind = thresh_pe
+            neg_mfi_bind = neg_mfi_pe
+            tag_dir = dirs["Flag_Tagged"]
+            bind_lbl = "PE-A (Corrected)"
+            tag_name = "FLAG (PE)"
+            
+        # Drop <= 0 binding values to prevent a massive spike at 0 on log plots due to clipping
+        df_sing = df_sing[df_sing[ch_bind] > 0]
         
         count_gated = len(df_sing)
         if count_gated == 0: continue
@@ -388,36 +405,36 @@ def process_directory(input_dir, output_dir):
         
         bind_med_expr_pos = df_sing[expr_pos][ch_bind].median() if expr_pos.sum() > 0 else 0
         
-        summary_stats.append({
-            "Filename": clean_name,
-            "Tag": "His (APC)" if tag == "his" else "FLAG (PE)",
-            "Target": row["Target"],
-            "Conc": row["Conc"],
-            "Source": row["Source"],
-            "Gated Events": count_gated,
-            "Expr+ %": expr_pos.mean() * 100,
-            "Bind+ %": bind_pos.mean() * 100,
-            "Double+ %": double_pos.mean() * 100,
-            "Expr MFI": mfi_fitc,
-            "Bind MFI": mfi_bind,
-            "Bind Med (Expr+)": bind_med_expr_pos,
-            "Expr Fold Change": fc_expr,
-            "Bind Fold Change": fc_bind
-        })
-        
-        # Prepare ridgeline data
-        sub = df_sing.sample(n=min(len(df_sing), 2000))
-        for _, s_row in sub.iterrows():
-            d = {
-                "Sample": clean_name,
-                "LogExpression": np.log10(max(s_row[CH_FITC], 1)),
-                "LogBinding": np.log10(max(s_row[ch_bind], 1))
-            }
-            if tag == "his": ridge_data_his.append(d)
-            else: ridge_data_flag.append(d)
+        if tag != "nc":
+            summary_stats.append({
+                "Filename": clean_name,
+                "Tag": tag_name,
+                "Target": row["Target"],
+                "Conc": row["Conc"],
+                "Source": row["Source"],
+                "Gated Events": count_gated,
+                "Expr+ %": expr_pos.mean() * 100,
+                "Bind+ %": bind_pos.mean() * 100,
+                "Double+ %": double_pos.mean() * 100,
+                "Expr MFI": mfi_fitc,
+                "Bind MFI": mfi_bind,
+                "Bind Med (Expr+)": bind_med_expr_pos,
+                "Expr Fold Change": fc_expr,
+                "Bind Fold Change": fc_bind
+            })
+            
+            # Prepare ridgeline data
+            sub = df_sing.sample(n=min(len(df_sing), 2000))
+            for _, s_row in sub.iterrows():
+                d = {
+                    "Sample": clean_name,
+                    "LogExpression": np.log10(max(s_row[CH_FITC], 1)),
+                    "LogBinding": np.log10(max(s_row[ch_bind], 1))
+                }
+                if tag == "his": ridge_data_his.append(d)
+                else: ridge_data_flag.append(d)
             
         # Plotting
-        tag_dir = dirs["His_Tagged"] if tag == "his" else dirs["Flag_Tagged"]
         
         fig, axes = plt.subplots(2, 2, figsize=(12, 10))
         apply_polygon_gate(df, pentagon_path, CH_FSC_A, CH_SSC_A, plot_ax=axes[0,0], title="Gating")
@@ -433,7 +450,6 @@ def process_directory(input_dir, output_dir):
         axes[1,0].hexbin(t_bind, t_expr, gridsize=100, cmap='jet', mincnt=1, bins='log')
         axes[1,0].axvline(np.log10(max(thresh_bind, 1)), color='k', linestyle='--')
         axes[1,0].axhline(np.log10(max(thresh_fitc, 1)), color='k', linestyle='--')
-        bind_lbl = "APC-A" if tag == "his" else f"PE-A (Corrected)"
         axes[1,0].set_xlabel(f"Log10 {bind_lbl} (Binding)")
         axes[1,0].set_ylabel("Log10 FITC-A (Expression)")
         axes[1,0].set_title(f"Double+ {double_pos.mean()*100:.1f}%")
