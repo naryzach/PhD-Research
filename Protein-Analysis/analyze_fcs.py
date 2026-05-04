@@ -547,6 +547,23 @@ def process_directory(input_dir, output_dir):
         expr_m_bind_pos_mean = df_expr_m_bind_pos[CH_EXPR].mean() if len(df_expr_m_bind_pos) > 0 else 0
         expr_m_bind_pos_med = df_expr_m_bind_pos[CH_EXPR].median() if len(df_expr_m_bind_pos) > 0 else 0
 
+        # 3. New Refined Metrics
+        # Binding Efficiency: What fraction of FITC+ cells are also APC+?
+        bind_eff_ratio = pct_double / pct_expr if pct_expr > 0 else 0
+        
+        # Intensity-Weighted Binding Index (IWB): event-by-event ratio for DP events
+        df_dp = df_sing[double_pos]
+        if len(df_dp) > 0:
+            # Subtract thresholds to get signal above background
+            # We use max(1, ...) to avoid division by zero or negative logs if any
+            sig_bind = (df_dp[CH_BIND] - thresh_bind).clip(lower=0.1)
+            sig_expr = (df_dp[CH_EXPR] - thresh_expr).clip(lower=0.1)
+            iwb_vals = sig_bind / sig_expr
+            iwb_index = iwb_vals.median()
+        else:
+            iwb_index = 0
+
+
         summary_stats.append({
             "Filename": clean_name,
             "Total Events": count_total,
@@ -574,7 +591,9 @@ def process_directory(input_dir, output_dir):
             "Bind Mean (Expr+)": bind_m_expr_pos_mean,
             "Bind Med (Expr+)": bind_m_expr_pos_med,
             "Expr Mean (Bind+)": expr_m_bind_pos_mean,
-            "Expr Med (Bind+)": expr_m_bind_pos_med
+            "Expr Med (Bind+)": expr_m_bind_pos_med,
+            "Binding Efficiency (DP/FITC+)": bind_eff_ratio,
+            "Intensity-Weighted Binding Index": iwb_index
         })
         
         log_thresh_bind = np.log10(max(1, thresh_bind))
@@ -822,6 +841,15 @@ def process_directory(input_dir, output_dir):
     df_stats["Norm Expr Mean (Bind+)"] = df_stats["Expr Mean (Bind+)"] / pos_expr_mean_bind_pos_ref
     df_stats["Norm Expr Med (Bind+)"] = df_stats["Expr Med (Bind+)"] / pos_expr_med_bind_pos_ref
     
+    # 5c. Normalize IWB Index
+    if pos_mask.any():
+        pos_iwb_ref = df_stats.loc[pos_mask, "Intensity-Weighted Binding Index"].median()
+    else:
+        pos_iwb_ref = df_stats["Intensity-Weighted Binding Index"].max()
+    pos_iwb_ref = max(pos_iwb_ref, 1e-9)
+    df_stats["Norm Intensity-Weighted Binding Index"] = df_stats["Intensity-Weighted Binding Index"] / pos_iwb_ref
+
+    
     # Save Stats
     df_stats.to_csv(os.path.join(output_dir, "summary_stats.csv"), index=False)
     print(f"\nAnalysis complete. Saved to {os.path.join(output_dir, 'summary_stats.csv')}")
@@ -868,9 +896,10 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
             
             if df_filtered.empty: continue
 
-            # Sort within group
+            # Sort within group - Alphabetical
             group_stats = df_stats[df_stats['Filename'].isin(df_filtered['Sample'].unique())]
-            order_mfi = group_stats.sort_values(m_info["mfi"], ascending=False)["Filename"].tolist()
+            order_mfi = sorted(group_stats["Filename"].tolist())
+
             
             # Dynamic X-limits
             x_min = df_filtered[m_info["col"]].min()
@@ -920,9 +949,10 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
             g.savefig(os.path.join(output_dir, out_name))
             plt.close()
 
-        # All Samples Plot
+        # All Samples Plot - Alphabetical
         out_name = os.path.join(output_dir, f"Aggregate_Ridgeline_{m_name}_All.png")
-        order = df_stats.sort_values(m_info["mfi"], ascending=False)["Filename"].tolist()
+        order = sorted(df_stats["Filename"].tolist())
+
         # Filter Middle 95% PER SAMPLE for All plot to remove empty space
         df_ridge_filtered = pd.DataFrame()
         for sample in df_ridge['Sample'].unique():

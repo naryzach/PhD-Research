@@ -1256,9 +1256,9 @@ if selected_file and df is not None:
                     st.divider()
                     metric_options = {
                         "Norm Median Ratio": "Norm Median Ratio",
-                        "Norm Mean Ratio": "Norm Mean Ratio",
-                        "Norm Median of FITC+": "Norm Bind Med (Expr+)",
-                        "Norm Mean of FITC+": "Norm Bind Mean (Expr+)"
+                        "Binding Efficiency": "Binding Efficiency (DP/FITC+)",
+                        "Intensity-Weighted (IWB)": "Intensity-Weighted Binding Index",
+                        "Norm Median of FITC+": "Norm Bind Med (Expr+)"
                     }
                     sel_metric_label = st.radio("Select Analysis Metric", list(metric_options.keys()), horizontal=True, index=0)
                     sel_metric_col = metric_options[sel_metric_label]

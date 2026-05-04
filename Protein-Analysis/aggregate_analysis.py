@@ -139,6 +139,18 @@ def main():
             "y_label": "Normalized Median APC for FITC+ Cells",
             "title_prefix": "Binding of Expressed Cells",
             "folder": "Norm_Bind_Med_Expr_Positive"
+        },
+        {
+            "y_col": "Binding Efficiency (DP/FITC+)",
+            "y_label": "Binding Efficiency (Double Positive / FITC+)",
+            "title_prefix": "Binding Efficiency",
+            "folder": "Binding_Efficiency"
+        },
+        {
+            "y_col": "Norm Intensity-Weighted Binding Index",
+            "y_label": "Normalized IWB Index (vs Pos Ctrl)",
+            "title_prefix": "IWB Index",
+            "folder": "Norm_IWB_Index"
         }
     ]
 
@@ -261,6 +273,11 @@ def main():
                             norm_bind_mean_expr = float(row.get('Norm Bind Mean (Expr+)', 0))
                             norm_expr_med_bind = float(row.get('Norm Expr Med (Bind+)', 0))
                             
+                            # New Refined Metrics
+                            bind_eff = float(row.get('Binding Efficiency (DP/FITC+)', 0))
+                            norm_iwb_index = float(row.get('Norm Intensity-Weighted Binding Index', 0))
+
+                            
                             all_data.append({
                                 'Target': target,
                                 'Date': date,
@@ -273,6 +290,8 @@ def main():
                                 'Norm Bind Med (Expr+)': norm_bind_med_expr,
                                 'Norm Bind Mean (Expr+)': norm_bind_mean_expr,
                                 'Norm Expr Med (Bind+)': norm_expr_med_bind,
+                                'Binding Efficiency (DP/FITC+)': bind_eff,
+                                'Norm Intensity-Weighted Binding Index': norm_iwb_index,
                                 'Expr+ %': expr_pos,
                                 'Gated Events': gated_events,
                                 'Low Expression': low_expression,
@@ -294,7 +313,7 @@ def main():
 
     # Save aggregate CSV
     output_csv = os.path.join(output_dir, "aggregate_summary.csv")
-    fieldnames = ['Target', 'Date', 'Construct', 'Raw Name', 'Norm Median Ratio', 'Norm Mean Ratio', 'Double+ %', 'Expr+ %', 'Gated Events', 'Norm Bind Med (Expr+)', 'Norm Bind Mean (Expr+)', 'Norm Expr Med (Bind+)', 'Low Expression', 'Low Events', 'Trial Failed', 'Trial Failed Reason']
+    fieldnames = ['Target', 'Date', 'Construct', 'Raw Name', 'Norm Median Ratio', 'Norm Mean Ratio', 'Double+ %', 'Expr+ %', 'Gated Events', 'Norm Bind Med (Expr+)', 'Norm Bind Mean (Expr+)', 'Norm Expr Med (Bind+)', 'Binding Efficiency (DP/FITC+)', 'Norm Intensity-Weighted Binding Index', 'Low Expression', 'Low Events', 'Trial Failed', 'Trial Failed Reason']
     with open(output_csv, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
