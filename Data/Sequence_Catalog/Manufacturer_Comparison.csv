@@ -1,0 +1,7 @@
+Accession,Protein,Species,Manufacturer,Expression_System,Residue_Range,Details
+P14780,MMP9,Homo sapiens,Enzo,E. coli,Phe107-Pro449,"Active recombinant, catalytic/fibronectin domain, Phe107-Pro449, C-terminal purification tag"
+P14780,MMP9,Homo sapiens,Sino Biological,HEK293 Cells,Met1-Asp707,Met1-Asp707
+P08253,MMP2,Homo sapiens,Enzo,Yeast,Tyr110-Asp452,"Active recombinant, catalytic/fibronectin domain, Tyr110-Asp452, C-terminal purification tag"
+P33434,MMP2,Mus musculus,Sino Biological,HEK293 Cells,Met409-Cys662,Met409-Cys662
+P78536,ADAM17,Homo sapiens,Enzo,Insect cells,Pro18-Val477,"Recombinant glycosylated catalytic domain, Pro18-Val477, C-terminal His-tag"
+Q9Z1K9,ADAM17,Rattus norvegicus,Sino Biological,HEK293 Cells,Met1-Asp563,Met1-Asp563
