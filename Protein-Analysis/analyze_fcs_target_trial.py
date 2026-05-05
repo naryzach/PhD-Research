@@ -277,7 +277,10 @@ def process_directory(input_dir, output_dir):
         if tag_grp != "Controls":
             os.makedirs(os.path.join(dirs[tag_grp], "Concentration_Comparison"), exist_ok=True)
             os.makedirs(os.path.join(dirs[tag_grp], "Aggregate_Plots"), exist_ok=True)
+        if tag_grp == "Flag_Tagged":
+            os.makedirs(os.path.join(dirs[tag_grp], "Uncorrected_Plots"), exist_ok=True)
     os.makedirs(dirs["Combined"], exist_ok=True)
+
 
     # 1. Gate Learning on NC
     nc_files = df_files[df_files["Tag"] == "nc"]["DestPath"].tolist()
@@ -463,6 +466,39 @@ def process_directory(input_dir, output_dir):
         plt.tight_layout()
         plt.savefig(os.path.join(tag_dir, "Individual_Plots", f"{clean_name}_analysis.png"))
         plt.close()
+        
+        # 4b. Plot Uncorrected Figures (for FLAG samples to show spillover)
+        if tag == "flag":
+            fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+            apply_polygon_gate(df, pentagon_path, CH_FSC_A, CH_SSC_A, plot_ax=axes[0,0], title="Gating")
+            
+            t_expr = np.log10(np.clip(df_sing[CH_FITC], 1, None))
+            t_bind_raw = np.log10(np.clip(df_sing[CH_PE], 1, None))
+            
+            sns.kdeplot(t_expr, fill=True, ax=axes[0,1], color='purple')
+            axes[0,1].axvline(np.log10(max(thresh_fitc, 1)), color='r', linestyle='--')
+            axes[0,1].set_xlabel("Log10 FITC-A (Expression)")
+            axes[0,1].set_title(f"Expression (FITC+ {expr_pos.mean()*100:.1f}%)")
+            
+            axes[1,0].hexbin(t_bind_raw, t_expr, gridsize=100, cmap='jet', mincnt=1, bins='log')
+            # Use raw threshold for uncorrected plot
+            thresh_pe_raw = np.percentile(nc_concat[CH_PE].dropna(), NC_CUTOFF_PERCENTILE)
+            axes[1,0].axvline(np.log10(max(thresh_pe_raw, 1)), color='k', linestyle='--')
+            axes[1,0].axhline(np.log10(max(thresh_fitc, 1)), color='k', linestyle='--')
+            axes[1,0].set_xlabel("Log10 PE-A (Uncorrected)")
+            axes[1,0].set_ylabel("Log10 FITC-A (Expression)")
+            axes[1,0].set_title("Uncorrected Binding vs Expression")
+            
+            sns.kdeplot(t_bind_raw, fill=True, ax=axes[1,1], color='orange')
+            axes[1,1].axvline(np.log10(max(thresh_pe_raw, 1)), color='r', linestyle='--')
+            axes[1,1].set_xlabel("Log10 PE-A (Uncorrected)")
+            axes[1,1].set_title("Raw PE Signal (Spillover Included)")
+            
+            plt.suptitle(f"{clean_name} (UNCORRECTED)", fontsize=16)
+            plt.tight_layout()
+            plt.savefig(os.path.join(tag_dir, "Uncorrected_Plots", f"{clean_name}_uncorrected.png"))
+            plt.close()
+
         
     df_stats = pd.DataFrame(summary_stats)
     if df_stats.empty:

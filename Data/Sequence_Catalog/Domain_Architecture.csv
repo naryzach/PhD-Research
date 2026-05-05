@@ -2,6 +2,6 @@ Accession,Protein,Species,Manufacturer,Residue_Range,Domain_Type,Production
 P14780,MMP9,Homo sapiens,Enzo,Phe107-Pro449,Catalytic/Fibronectin,E. coli
 P14780,MMP9,Homo sapiens,Sino Biological,Met1-Asp707,Full Length,HEK293 Cells
 P08253,MMP2,Homo sapiens,Enzo,Tyr110-Asp452,Catalytic/Fibronectin,Yeast
-P33434,MMP2,Mus musculus,Sino Biological,Met409-Cys662,Full Length,HEK293 Cells
-P78536,ADAM17,Homo sapiens,Enzo,Pro18-Val477,Catalytic/Fibronectin,Insect cells
-Q9Z1K9,ADAM17,Rattus norvegicus,Sino Biological,Met1-Asp563,Full Length,HEK293 Cells
+P33434,MMP2,Mus musculus,Sino Biological,Met409-Cys662,Hemopexin/Catalytic partial,HEK293 Cells
+P78536,ADAM17,Homo sapiens,Enzo,Pro18-Val477,Pro/Catalytic,Insect cells
+Q9Z1K9,ADAM17,Rattus norvegicus,Sino Biological,Met1-Asp563,Full (Signal/Pro/Cat/Dis),HEK293 Cells

@@ -6,5 +6,17 @@
 MSLWQPLVLVLLVLGCCFAAPRQRQSTLVLFPGDLRTNLTDRQLAEEYLYRYGYTRVAEMRGESKSLGPALLLLQKQLSLPETGELDSATLKAMRTPRCGVPDLGRFQTFEGDLKWHHHNITYWIQNYSEDLPRAVIDDAFARAFALWSAVTPLTFTRVYSRDADIVIQFGVAEHGDGYPFDGKDGLLAHAFPPGPGIQGDAHFDDDELWSLGKGVVVPTRFGNADGAACHFPFIFEGRSYSACTTDGRSDGLPWCSTTANYDTDDRFGFCPSERLYTQDGNADGKPCQFPFIFQGQSYSACTTDGRSDGYRWCATTANYDRDKLFGFCPTRADSTVMGGNSAGELCVFPFTFLGKEYSTCTSEGRGDGRLWCATTSNFDSDKKWGFCPDQGYSLFLVAAHEFGHALGLDHSSVPEALMYPMYRFTEGPPLHKDDVNGIRHLYGPRPEPEPRPPTTTTPQPTAPPTVCPTGPPTVHPSERPTAGPTGPPSAGPTGPPTAGPSTATTVPLSPVDDACNVNIFDAIAEIGNQLYLFKDGKYWRFSEGRGSRPQGPFLIADKWPALPRKLDSVFEERLSKKLFFFSGRQVWVYTGASVLGPRRLDKLGLGADVAQVTGALRSGRGKMLLFSGRRLWRFDVKAQMVDPRSASEVDRMFPGVPLDTHDVFQYREKAYFCQDRFYWRVSSRSELNQVDQVGYVTYDILQCPED
 
 ## Manufacturer Information:
-- **Enzo**: Produced in E. coli. Active recombinant matrix metalloproteinase-9 (MMP-9, gelatinase B, 92 kDa type IV collagenase) cloned from human cDNA. The enzyme consists of residues Phe107-Pro449 (NM_004994), which comprises the catalytic/fibronectin domain of human MMP-9, with a C-terminal purification tag. This represents a naturally-occurring active form of MMP-9 which lacks the C-terminal hemopexin domain. Activity toward its targets, such as gelatin, casein, or peptide substrates, is unaffected.
-- **Sino Biological**: Human, HEK293 Cells, Met1-Asp707
+- **Enzo**: Produced in E. coli. Active recombinant matrix metalloproteinase-9 (MMP-9, gelatinase B, 92kDa type IV collagenase) cloned from human cDNA. The enzyme consists of residues Phe107-Pro449, which comprises the catalytic/fibronectin domain of human MMP-9, with a C-terminal His-tag.
+- **Sino Biological**: Human, HEK293 Cells, Met1-Asp707. Recombinant Human Matrix Metalloproteinase-9 / MMP-9 (Met1-Asp707) is produced by our Mammalian expression system and the target gene encoding Met1-Asp707 is expressed with a 10His tag at the C-terminus.
+
+## Domain Architecture (UniProt P14780):
+- **Cysteine switch**: 97-104
+- **Fibronectin type-II 1**: 225-273
+- **Fibronectin type-II 2**: 283-331
+- **Fibronectin type-II 3**: 342-390
+- **Hemopexin 1**: 518-563
+- **Hemopexin 2**: 564-608
+- **Hemopexin 3**: 610-657
+- **Hemopexin 4**: 658-704
+- **Disordered region**: 431-508
+- **Pro-rich compositional bias**: 452-475, 486-499
