@@ -16,5 +16,12 @@ Protein Analysis/.streamlit/secrets.toml
 # MetalBinder
 MetalBinder/__pycache__/
 
-# Inprogress Articles
-Papers/
+# Inprogress Articles & Presentations
+Demonstrations/Papers/
+Demonstrations/SharedAssets/
+
+# Slidev / Vue generated artifacts
+Demonstrations/Presentations/*/node_modules/
+Demonstrations/Presentations/*/dist/
+Demonstrations/Presentations/*/.slidev/
+Demonstrations/Presentations/*/package-lock.json

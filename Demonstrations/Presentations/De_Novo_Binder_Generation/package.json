@@ -1,0 +1,13 @@
+{
+  "name": "de-novo-binder-generation-presentation",
+  "private": true,
+  "scripts": {
+    "dev": "slidev --open",
+    "build": "slidev build",
+    "export": "slidev export"
+  },
+  "dependencies": {
+    "@slidev/cli": "^51.0.0",
+    "@slidev/theme-seriph": "latest"
+  }
+}
