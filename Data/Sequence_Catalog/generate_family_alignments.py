@@ -25,7 +25,8 @@ domains = {
         (472, 516, 'Hpx 1', '#FFECB3'),
         (517, 563, 'Hpx 2', '#FFECB3'),
         (565, 613, 'Hpx 3', '#FFECB3'),
-        (614, 660, 'Hpx 4', '#FFECB3')
+        (614, 660, 'Hpx 4', '#FFECB3'),
+        (403, 413, 'Catalytic', '#FF5252')
     ],
     'MMP9': [
         (97, 104, 'Cys-Switch', '#E1BEE7'),
@@ -36,13 +37,15 @@ domains = {
         (564, 608, 'Hpx 2', '#FFECB3'),
         (610, 657, 'Hpx 3', '#FFECB3'),
         (658, 704, 'Hpx 4', '#FFECB3'),
-        (431, 508, 'Disordered', '#CFD8DC')
+        (431, 508, 'Disordered', '#CFD8DC'),
+        (401, 411, 'Catalytic', '#FF5252')
     ],
     'ADAM17': [
         (182, 189, 'Cys-Switch', '#E1BEE7'),
         (223, 474, 'Peptidase', '#BBDEFB'),
         (475, 563, 'Disintegrin', '#F8BBD0'),
-        (603, 671, 'Crambin-like', '#E1BEE7')
+        (603, 671, 'Crambin-like', '#E1BEE7'),
+        (405, 415, 'Catalytic', '#FF5252')
     ]
 }
 
@@ -100,9 +103,9 @@ def plot_family_alignment(family_name, reference_seq, ortholog_seq=None, ref_lab
     orth_map = get_map(aln_orth) if aln_orth else None
 
     # Base track positions
-    y_ref = 18
-    y_orth = 14.5 if orth_label else None
-    y_const_start = 10.0
+    y_ref = 0
+    y_orth = -4.0 if orth_label else None
+    y_const_start = -12.0
     
     def add_boundary_label(ax, x, y, label, direction='up', level=1, color='#1A237E', fontsize=18):
         """Adds a massive residue label with a leader line."""
@@ -164,31 +167,33 @@ def plot_family_alignment(family_name, reference_seq, ortholog_seq=None, ref_lab
         # Draw domain rectangle
         ax.add_patch(patches.Rectangle((start_aln, y_ref), end_aln - start_aln + 1, 1.5, color=color))
         
-        # Determine domain tier
-        blocked_levels = set()
-        for s_p, e_p, l_p in assigned_domain_levels:
-            if not (end_aln < s_p - 15 or start_aln > e_p + 15):
-                blocked_levels.add(l_p)
-        
-        if 0 not in blocked_levels: d_tier = 0
-        elif 1 not in blocked_levels: d_tier = 1
-        else: d_tier = 2
-        assigned_domain_levels.append((start_aln, end_aln, d_tier))
-        
-        # Draw domain label and connector
-        y_domain_text = y_ref + domain_base + d_tier * 0.8
-        ax.text(center_aln, y_domain_text, label.upper(), 
-                fontweight='black', fontsize=24, ha='center', color='black',
-                bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=2))
-        ax.plot([start_aln, end_aln], [y_domain_text, y_domain_text], color='#666666', linestyle='-', linewidth=1.5, alpha=0.3, zorder=0)
+        # Determine domain tier - skip for Catalytic (moved below)
+        if label.upper() != "CATALYTIC":
+            blocked_levels = set()
+            for s_p, e_p, l_p in assigned_domain_levels:
+                if not (end_aln < s_p - 15 or start_aln > e_p + 15):
+                    blocked_levels.add(l_p)
+            
+            if 0 not in blocked_levels: d_tier = 0
+            elif 1 not in blocked_levels: d_tier = 1
+            else: d_tier = 2
+            assigned_domain_levels.append((start_aln, end_aln, d_tier))
+            
+            # Draw domain label and connector
+            y_domain_text = y_ref + domain_base + d_tier * 0.8
+            ax.text(center_aln, y_domain_text, label.upper(), 
+                    fontweight='black', fontsize=24, ha='center', color='black',
+                    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=2))
+            ax.plot([start_aln, end_aln], [y_domain_text, y_domain_text], color='#666666', linestyle='-', linewidth=1.5, alpha=0.3, zorder=0)
         
         # Vertical dotted lines at boundaries
         ax.axvline(start_aln, color='#CCCCCC', linestyle=':', linewidth=1.5, alpha=0.4, zorder=-1)
         ax.axvline(end_aln, color='#CCCCCC', linestyle=':', linewidth=1.5, alpha=0.4, zorder=-1)
         
-        # Draw residue labels
-        add_boundary_label(ax, start_aln, y_ref + 1.5, get_aa_label(reference_seq, start), level=assigned_res_labels[i*2][1], fontsize=18)
-        add_boundary_label(ax, end_aln, y_ref + 1.5, get_aa_label(reference_seq, end), level=assigned_res_labels[i*2+1][1], fontsize=18)
+        if label.upper() != "CATALYTIC":
+            # Draw residue labels
+            add_boundary_label(ax, start_aln, y_ref + 1.5, get_aa_label(reference_seq, start), level=assigned_res_labels[i*2][1], fontsize=18)
+            add_boundary_label(ax, end_aln, y_ref + 1.5, get_aa_label(reference_seq, end), level=assigned_res_labels[i*2+1][1], fontsize=18)
 
     # Draw Ortholog Track
     if orth_label:
@@ -206,7 +211,25 @@ def plot_family_alignment(family_name, reference_seq, ortholog_seq=None, ref_lab
             if aln_ref[i] != aln_orth[i] and aln_ref[i] != '-' and aln_orth[i] != '-':
                 ax.add_patch(patches.Rectangle((i, y_orth), 1, y_ref - y_orth + 1.5, color='#FF1744', alpha=0.3))
 
+    # Dynamic offsets for space below primary diagrams - Extra Tight
+    y_after_primary = y_orth if (orth_label and y_orth is not None) else (y_ref - 1.5)
+    y_cat_mid = y_after_primary - 2.5
+    
+    # Space for Catalytic Motif label in the middle
+    for i, (start, end, label, color) in enumerate(domain_list):
+        if label.upper() == "CATALYTIC":
+            start_aln = ref_map[start-1]
+            end_aln = ref_map[min(end-1, len(ref_map)-1)]
+            center_aln = (start_aln + end_aln) / 2
+            ax.text(center_aln, y_cat_mid, "CATALYTIC MOTIF (HEXXHXXGXXH)", fontweight='black', fontsize=22, ha='center', color='#FF5252',
+                    bbox=dict(facecolor='white', alpha=0.9, edgecolor='#FF5252', linewidth=2, boxstyle='round,pad=0.5'))
+            # Connector to all tracks
+            ax.axvline(start_aln, color='#FF5252', linestyle='--', linewidth=1.5, alpha=0.2, zorder=-2)
+            ax.axvline(end_aln, color='#FF5252', linestyle='--', linewidth=1.5, alpha=0.2, zorder=-2)
+            ax.plot([start_aln, end_aln], [y_cat_mid + 1.6, y_cat_mid + 1.6], color='#FF5252', linewidth=3, alpha=0.8)
+
     # Draw Constructs / Isoforms
+    y_const_start = y_cat_mid - 4.0
     for idx, (c_label, c_parent_map, c_range) in enumerate(constructs):
         y_c = y_const_start - idx * 3.5
         start_res, end_res = c_range
@@ -227,10 +250,10 @@ def plot_family_alignment(family_name, reference_seq, ortholog_seq=None, ref_lab
         add_boundary_label(ax, start_aln, y_c, get_aa_label(parent_seq, start_res), direction='down', level=0.4, color='#D32F2F', fontsize=18)
         add_boundary_label(ax, end_aln, y_c, get_aa_label(parent_seq, end_res), direction='down', level=0.4, color='#D32F2F', fontsize=18)
 
-    # Dynamic ylim top based on max level used
+    # Dynamic ylim top/bottom based on max levels
     max_d_tier = max([l for s, e, l in assigned_domain_levels]) if assigned_domain_levels else 0
     y_top = y_ref + domain_base + max_d_tier * 0.8 + 1.2
-    y_bottom = y_const_start - (len(constructs) - 1) * 3.5 - 2.5
+    y_bottom = y_const_start - (len(constructs) - 1) * 3.5 - 3.5
     
     ax.set_xlim(-220, length + 120)
     ax.set_ylim(y_bottom, y_top)
