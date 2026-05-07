@@ -118,6 +118,8 @@ def plot_family_alignment(family_name, reference_seq, ortholog_seq=None, ref_lab
 
     # Draw Reference Track
     ax.text(-60, y_ref + 0.6, f"{ref_label.upper()} FULL", fontweight='black', ha='right', va='center', fontsize=26, color='#333333')
+    ref_mw = calculate_mw(reference_seq)
+    ax.text(length + 20, y_ref + 0.6, f"{ref_mw:.1f} kDa", fontweight='black', ha='left', va='center', fontsize=24, color='#666666')
     ax.add_patch(patches.Rectangle((0, y_ref), length, 1.5, color='#EEEEEE', alpha=0.5))
     
     domain_list = domains.get(family_name, [])
@@ -191,6 +193,8 @@ def plot_family_alignment(family_name, reference_seq, ortholog_seq=None, ref_lab
     # Draw Ortholog Track
     if orth_label:
         ax.text(-60, y_orth + 0.6, f"{orth_label.upper()} FULL", fontweight='black', ha='right', va='center', fontsize=26, color='#333333')
+        orth_mw = calculate_mw(ortholog_seq)
+        ax.text(length + 20, y_orth + 0.6, f"{orth_mw:.1f} kDa", fontweight='black', ha='left', va='center', fontsize=24, color='#666666')
         ax.add_patch(patches.Rectangle((0, y_orth), length, 1.5, color='#EEEEEE', alpha=0.5))
         for start, end, label, color in domain_list:
             if start-1 < len(orth_map):
@@ -205,12 +209,16 @@ def plot_family_alignment(family_name, reference_seq, ortholog_seq=None, ref_lab
     # Draw Constructs / Isoforms
     for idx, (c_label, c_parent_map, c_range) in enumerate(constructs):
         y_c = y_const_start - idx * 3.5
+        start_res, end_res = c_range
+        parent_seq = reference_seq if c_parent_map == "ref" else ortholog_seq
+        
         ax.text(-60, y_c + 0.6, c_label.upper(), fontweight='black', ha='right', va='center', fontsize=24, color='#333333')
+        c_mw = calculate_mw(parent_seq[start_res-1:end_res])
+        ax.text(length + 20, y_c + 0.6, f"{c_mw:.1f} kDa", fontweight='black', ha='left', va='center', fontsize=22, color='#666666')
+        
         ax.add_patch(patches.Rectangle((0, y_c), length, 1.5, color='#EEEEEE', alpha=0.3))
         
-        start_res, end_res = c_range
         parent_map = ref_map if c_parent_map == "ref" else orth_map
-        parent_seq = reference_seq if c_parent_map == "ref" else ortholog_seq
         
         start_aln = parent_map[start_res-1]
         end_aln = parent_map[min(end_res-1, len(parent_map)-1)]
@@ -224,7 +232,7 @@ def plot_family_alignment(family_name, reference_seq, ortholog_seq=None, ref_lab
     y_top = y_ref + domain_base + max_d_tier * 0.8 + 1.2
     y_bottom = y_const_start - (len(constructs) - 1) * 3.5 - 2.5
     
-    ax.set_xlim(-220, length + 40)
+    ax.set_xlim(-220, length + 120)
     ax.set_ylim(y_bottom, y_top)
     ax.set_yticks([])
     ax.tick_params(axis='x', labelsize=24, length=10, width=2)
