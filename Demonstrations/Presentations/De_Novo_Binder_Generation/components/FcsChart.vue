@@ -1,121 +1,161 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import experimentalDataRaw from '../../../SharedAssets/data/De_Novo_Binder_Generation/experimental_binding.json'
 
-const activeTarget = ref('ADAM10')
-const hoveredBar = ref(null)
+const experimentalData: any = (experimentalDataRaw as any).default || experimentalDataRaw || {}
 
-const data = [
-  // ADAM17 Analysis (from summary_stats.csv)
-  { construct: 'TIMP3-WT', target: 'ADAM17', value: 1.0 },
-  { construct: 'ABC 22',   target: 'ADAM17', value: 0.497 },
-  { construct: 'AB 5',     target: 'ADAM17', value: 0.468 },
-  { construct: 'C 14',     target: 'ADAM17', value: 0.731 },
-  { construct: 'AB 1',     target: 'ADAM17', value: 0.530 },
-  { construct: 'AB 7',     target: 'ADAM17', value: 0.753 },
-  
-  // ADAM10 Analysis (from aggregate_summary.csv)
-  { construct: 'TIMP3-WT', target: 'ADAM10', value: 1.0 },
-  { construct: 'V1 (AB)',  target: 'ADAM10', value: 3.4 },
-  { construct: 'V2 (C)',   target: 'ADAM10', value: 2.1 },
-  { construct: 'V3 (EF)',  target: 'ADAM10', value: 4.5 },
+const GROUPS = {
+  'ADAM 10/17': ['ADAM10', 'ADAM17'],
+  'MMP 2/9': ['MMP2', 'MMP9'],
+  'MMP 3': ['MMP3']
+}
 
-  // MMP2 Analysis
-  { construct: 'TIMP3-WT', target: 'MMP2', value: 1.0 },
-  { construct: 'V2',       target: 'MMP2', value: 4.2 },
-  { construct: 'V3',       target: 'MMP2', value: 1.2 },
+const activeGroup = ref('ADAM 10/17')
+const hoveredId = ref<string | null>(null)
 
-  // MMP9 Analysis
-  { construct: 'TIMP3-WT', target: 'MMP9', value: 1.0 },
-  { construct: 'V7',       target: 'MMP9', value: 2.2 },
-  { construct: 'V8',       target: 'MMP9', value: 3.1 },
-]
+const currentData = computed(() => {
+  const targetsInGroup = GROUPS[activeGroup.value] || []
+  let groupedByConstruct = {}
 
-const targets = ['ADAM10', 'ADAM17', 'MMP2', 'MMP9']
-const filteredData = computed(() => data.filter(d => d.target === activeTarget.value))
-const maxVal = computed(() => Math.max(...filteredData.value.map(d => d.value), 5))
+  for (const t of targetsInGroup) {
+    const samples = experimentalData[t] || []
+    for (const s of samples) {
+      if (!groupedByConstruct[s.Construct]) groupedByConstruct[s.Construct] = []
+      groupedByConstruct[s.Construct].push({ ...s, _target: t })
+    }
+  }
 
-const chartHeight = 200
-const chartWidth = 350
-const barWidth = 30
+  const sortedConstructs = Object.keys(groupedByConstruct).sort()
+  return sortedConstructs.map(name => ({
+    name,
+    bars: groupedByConstruct[name].sort((a, b) => a._target.localeCompare(b._target))
+  }))
+})
+
+const maxVal = computed(() => {
+  let max = 1.5
+  currentData.value.forEach(c => {
+    c.bars.forEach(b => {
+      const val = Number(b['Norm Median Ratio'] || 0)
+      const ci = Number(b['Ratio CI'] || 0)
+      if (val + ci > max) max = val + ci
+    })
+  })
+  return max * 1.2
+})
+
+const chartHeight = 210
+const chartWidth = 780
+
+function getBarColor(target: string) {
+  if (target === 'ADAM10') return '#4facfe'
+  if (target === 'ADAM17') return '#00f2fe'
+  if (target === 'MMP2') return '#f093fb'
+  if (target === 'MMP9') return '#f5576c'
+  return '#4facfe'
+}
 </script>
 
 <template>
-  <div class="fcs-chart-container p-6 rounded-xl border border-white border-opacity-10 shadow-2xl backdrop-blur-md">
-    <div class="flex justify-between items-center mb-6">
-      <h3 class="text-lg font-bold">FCS Binding Affinity</h3>
+  <div class="fcs-chart-final p-5 rounded-xl bg-black/90 border border-white/20 shadow-2xl max-w-[900px] mx-auto">
+    <!-- Group Selection -->
+    <div class="flex justify-between items-center mb-6 px-4">
+      <div class="text-blue-400 font-black text-[10px] uppercase tracking-[0.2em]">Cross-Target Binding Analysis</div>
       <div class="flex gap-2">
-        <button 
-          v-for="t in targets" :key="t"
-          @click="activeTarget = t"
-          class="px-3 py-1 rounded-full text-[10px] transition-all border"
-          :class="activeTarget === t ? 'bg-primary border-primary text-white shadow-lg' : 'bg-transparent border-white border-opacity-20 opacity-60 hover:opacity-100'"
+        <button v-for="(targets, label) in GROUPS" :key="label" @click="activeGroup = label"
+          class="px-3 py-1.5 rounded text-[10px] border font-black uppercase transition-all"
+          :class="activeGroup === label ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'"
         >
-          {{ t }}
+          {{ label }}
         </button>
       </div>
     </div>
 
-    <div class="relative h-[250px] w-full flex items-end">
-      <svg :viewBox="`0 0 ${chartWidth + 100} ${chartHeight + 50}`" class="w-full h-full overflow-visible">
-        <!-- Grid Lines -->
-        <line v-for="i in 5" :key="i"
-          x1="50" :y1="chartHeight - ((i-1) * chartHeight / 4)"
-          :x2="chartWidth + 50" :y2="chartHeight - ((i-1) * chartHeight / 4)"
-          stroke="rgba(255,255,255,0.05)" stroke-width="1"
-        />
+    <div class="relative h-[320px] w-full flex items-end">
+      <svg viewBox="0 -20 1000 320" class="w-full h-full overflow-visible">
+        <!-- Axis Titles -->
+        <text x="-105" y="30" class="axis-title" text-anchor="middle" transform="rotate(-90)">NORM. MEDIAN RATIO (X WT)</text>
+        <text :x="100 + chartWidth/2" y="280" class="axis-title" text-anchor="middle">TIMP3 DESIGN VARIANTS</text>
 
-        <!-- Y-Axis Labels -->
-        <text v-for="i in 5" :key="i"
-          x="35" :y="chartHeight - ((i-1) * chartHeight / 4)"
-          fill="rgba(255,255,255,0.4)" font-size="8" text-anchor="end" alignment-baseline="middle"
-        >
-          {{ ((i-1) * maxVal / 4).toFixed(1) }}
-        </text>
+        <!-- Legend - Repositioned and resized -->
+        <g v-if="GROUPS[activeGroup].length > 1" transform="translate(860, 0)">
+           <g v-for="(t, idx) in GROUPS[activeGroup]" :key="t" :transform="`translate(0, ${idx * 12})`">
+             <rect width="6" height="6" :fill="getBarColor(t)" rx="1" />
+             <text x="10" y="5.5" class="legend-text uppercase">{{ t }}</text>
+           </g>
+        </g>
 
-        <!-- Bars -->
-        <g v-for="(d, i) in filteredData" :key="i"
-           @mouseenter="hoveredBar = d"
-           @mouseleave="hoveredBar = null"
-           class="bar-group"
-        >
-          <rect 
-            :x="60 + i * ((chartWidth - 20) / filteredData.length)" 
-            :y="chartHeight - (d.value / maxVal * chartHeight)"
-            :width="barWidth" 
-            :height="d.value / maxVal * chartHeight"
-            :fill="activeTarget.startsWith('MMP') ? '#f093fb' : '#4facfe'"
-            rx="4"
-            class="bar transition-all duration-300"
-            :class="{ 'opacity-100': !hoveredBar || hoveredBar === d, 'opacity-40': hoveredBar && hoveredBar !== d }"
-          />
-          <text 
-            :x="60 + i * ((chartWidth - 20) / filteredData.length) + barWidth / 2" 
-            :y="chartHeight + 15"
-            fill="rgba(255,255,255,0.6)" font-size="8" text-anchor="middle"
-            class="bar-label"
-          >
-            {{ d.construct }}
+        <!-- Grid & Y Labels -->
+        <g v-for="i in 5" :key="'g'+i">
+          <line x1="90" :y1="chartHeight - ((i-1) * chartHeight / 4)" x2="840" :y2="chartHeight - ((i-1) * chartHeight / 4)"
+            stroke="rgba(255,255,255,0.15)" stroke-width="1" />
+          <text x="85" :y="chartHeight - ((i-1) * chartHeight / 4)" class="y-axis-tick" text-anchor="end" alignment-baseline="middle">
+            {{ ((i-1) * maxVal / 4).toFixed(1) }}
           </text>
+        </g>
+
+        <!-- Grouped Bars -->
+        <g v-for="(group, groupIdx) in currentData" :key="group.name" 
+           :transform="`translate(${100 + groupIdx * (chartWidth / currentData.length)}, 0)`">
+          
+          <text 
+            :x="(group.bars.length * Math.min(25, (chartWidth / currentData.length / group.bars.length) - 1)) / 2" 
+            :y="chartHeight + 10"
+            class="x-axis-label" text-anchor="start"
+            :transform="`rotate(45, ${(group.bars.length * 15) / 2}, ${chartHeight + 10})`"
+          >
+            {{ group.name }}
+          </text>
+
+          <g v-for="(b, barIdx) in group.bars" :key="b.Construct + b._target">
+            <rect 
+              :x="barIdx * Math.min(25, (chartWidth / currentData.length / group.bars.length) - 1)" 
+              :y="chartHeight - (Number(b['Norm Median Ratio'] || 0) / maxVal * chartHeight)"
+              :width="Math.min(25, (chartWidth / currentData.length / group.bars.length) - 1)" 
+              :height="Math.max(2, (Number(b['Norm Median Ratio'] || 0) / maxVal) * chartHeight)"
+              :fill="getBarColor(b._target)"
+              stroke="#ffffff"
+              :stroke-width="hoveredId === group.name + b._target ? 1.5 : 0.3"
+              rx="0.5"
+              :style="{ opacity: (!hoveredId || hoveredId === group.name + b._target) ? 1 : 0.3 }"
+              class="cursor-pointer transition-all duration-200"
+              @mouseenter="hoveredId = group.name + b._target" 
+              @mouseleave="hoveredId = null"
+            />
+            
+            <g v-if="Number(b['Ratio CI'] || 0) > 0" class="error-bar" :style="{ opacity: (!hoveredId || hoveredId === group.name + b._target) ? 1 : 0.3 }">
+              <line 
+                :x1="barIdx * Math.min(25, (chartWidth / currentData.length / group.bars.length) - 1) + Math.min(25, (chartWidth / currentData.length / group.bars.length) - 1)/2" 
+                :y1="chartHeight - ((Number(b['Norm Median Ratio']) - Number(b['Ratio CI'])) / maxVal * chartHeight)"
+                :x2="barIdx * Math.min(25, (chartWidth / currentData.length / group.bars.length) - 1) + Math.min(25, (chartWidth / currentData.length / group.bars.length) - 1)/2" 
+                :y2="chartHeight - ((Number(b['Norm Median Ratio']) + Number(b['Ratio CI'])) / maxVal * chartHeight)"
+                stroke="white" stroke-width="1" 
+              />
+            </g>
+          </g>
         </g>
       </svg>
 
       <!-- Tooltip -->
-      <div v-if="hoveredBar" class="absolute top-0 right-0 p-2 bg-black bg-opacity-80 rounded text-[10px] border border-white border-opacity-10">
-        {{ hoveredBar.construct }}: {{ hoveredBar.value.toFixed(2) }}x WT
+      <div v-if="hoveredId" class="absolute top-0 right-0 p-3 bg-blue-900 border border-blue-400 rounded-xl shadow-2xl z-50 min-w-[150px] backdrop-blur-xl">
+        <div class="text-[10px] font-black text-white uppercase mb-1 border-b border-white/20 pb-1">
+          {{ currentData.flatMap(g => g.bars).find(b => (b.Construct + b._target) === hoveredId)?.Construct }}
+        </div>
+        <div class="flex justify-between items-center text-[9px] mb-1">
+          <span class="opacity-50">Target:</span>
+          <span class="font-bold text-blue-200 uppercase">{{ currentData.flatMap(g => g.bars).find(b => (b.Construct + b._target) === hoveredId)?._target }}</span>
+        </div>
+        <div class="text-[10px] text-white font-bold">Ratio: {{ Number(currentData.flatMap(g => g.bars).find(b => (b.Construct + b._target) === hoveredId)?.['Norm Median Ratio'] || 0).toFixed(2) }}x</div>
+        <div class="text-[8px] text-white/50">95% CI: ±{{ Number(currentData.flatMap(g => g.bars).find(b => (b.Construct + b._target) === hoveredId)?.['Ratio CI'] || 0).toFixed(2) }} (n={{ currentData.flatMap(g => g.bars).find(b => (b.Construct + b._target) === hoveredId)?.N }})</div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.fcs-chart-container {
-  background: rgba(255, 255, 255, 0.02);
-}
-.bar:hover {
-  filter: brightness(1.2);
-  transform: translateY(-5px);
-}
-.primary {
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-}
+.axis-title { font-size: 11px !important; fill: rgba(255,255,255,0.4); font-weight: 900; text-transform: uppercase; letter-spacing: 0.15em; }
+.y-axis-tick { font-size: 11px !important; fill: rgba(255,255,255,0.7); font-weight: bold; font-family: monospace; }
+.x-axis-label { font-size: 10px !important; fill: white; font-weight: 800; text-transform: uppercase; }
+.legend-text { font-size: 10px !important; fill: rgba(255,255,255,0.5); font-weight: bold; }
+.error-bar line { pointer-events: none; }
 </style>

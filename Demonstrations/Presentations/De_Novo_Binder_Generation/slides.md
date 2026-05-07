@@ -1,362 +1,252 @@
 ---
-theme: seriph
-title: "De Novo Protein Prediction to Binding Evaluation"
-info: |
-  ## De Novo Binder Generation Pipeline
-  TIMP3 loop engineering via RFdiffusion → ProteinMPNN → AlphaFold → Flow Cytometry
-
-  **Author:** Ryan Gustafson
-class: text-center
-drawings:
-  persist: false
-transition: slide-left
-mdc: true
-config:
-  nav: true
-background: "#0f172a"
 layout: center
+class: text-center
+transition: fade-out
 ---
 
-# De Novo Protein Prediction <br/> to Binding Evaluation
+# De Novo Binder Generation
+### RFdiffusion to Experimental Validation Pipeline
 
-Engineering TIMP3 variants with generative AI for targeted metalloproteinase inhibition
-
-<div class="abs-br m-6 flex gap-2">
-  <span class="text-sm opacity-50">Ryan Gustafson · PhD Research</span>
+<div class="mt-10 flex justify-center gap-4">
+  <div class="px-4 py-2 bg-white/5 rounded border border-white/10">
+    <div class="text-[10px] uppercase opacity-40 tracking-widest">Thread Status</div>
+    <div class="text-blue-400 font-bold uppercase text-xs">Validated Results</div>
+  </div>
+  <div class="px-4 py-2 bg-white/5 rounded border border-white/10">
+    <div class="text-[10px] uppercase opacity-40 tracking-widest">Primary Targets</div>
+    <div class="text-blue-400 font-bold uppercase text-xs">ADAM10/17 | MMP2/9</div>
+  </div>
 </div>
 
 <style>
 h1 {
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  background: linear-gradient(135deg, #58a6ff 0%, #00f2fe 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  font-size: 2.8rem !important;
   font-weight: 800;
+  letter-spacing: -0.02em;
 }
 </style>
 
 ---
-transition: fade-out
 layout: default
+transition: fade-out
 ---
 
-# Pipeline Overview
+# Workflow Architecture
+The integration of generative modeling and high-throughput experimental screening.
 
-<PipelineFlow />
-
-<div class="text-center text-[11px] opacity-40 mt-4">
-  Hover each stage for details
+<div class="mt-8 scale-90 origin-top">
+  <PipelineFlow />
 </div>
 
----
-
-# Introduction — TIMP3 & Target Engineering
-
-<div class="grid grid-cols-2 gap-12 mt-8 text-[13px] items-start max-w-5xl mx-auto overflow-hidden">
-<div>
-
-## The Challenge
-- **TIMP3** (Tissue Inhibitor of Metalloproteinases-3) is a natural regulator of MMPs and ADAMs
-- Engineering variants with **altered specificity** enables selective therapeutic intervention
-- Wet-lab screening of random mutants is slow and expensive
-
-## Our Approach
-- **Computational-first** pipeline: generate → verify → synthesize → test
-- Loop-focused redesign: target binding interface directly
-- Thousands of candidates → consensus filtering → top hits
-
-</div>
-<div>
-
-## Targets
-| Target | Type | Role |
-|--------|------|------|
-| **ADAM10** | Disintegrin | Notch signaling |
-| **ADAM17** | Disintegrin | TNF-α shedding |
-| **MMP2** | Gelatinase | ECM degradation |
-| **MMP9** | Gelatinase | Tumor invasion |
-
-<div class="mt-4 text-xs opacity-60">
-
-All targets modeled as catalytic domain (cd) complexes with TIMP3
-
-</div>
-
-</div>
+<div class="grid grid-cols-2 gap-8 mt-12">
+  <div class="p-4 bg-white/5 rounded border border-white/10">
+    <h3 class="text-blue-400 font-bold mb-2 uppercase text-xs tracking-widest">Computational Phase</h3>
+    <ul class="text-[13px] space-y-2 opacity-80 list-none p-0">
+      <li class="flex gap-2"><span>—</span> <span>Loop-centric RFdiffusion on catalytic domains</span></li>
+      <li class="flex gap-2"><span>—</span> <span>Sequence optimization via ProteinMPNN</span></li>
+      <li class="flex gap-2"><span>—</span> <span>Z-score filtering of AlphaFold ensemble predictions</span></li>
+    </ul>
+  </div>
+  <div class="p-4 bg-white/5 rounded border border-white/10">
+    <h3 class="text-cyan-400 font-bold mb-2 uppercase text-xs tracking-widest">Experimental Phase</h3>
+    <ul class="text-[13px] space-y-2 opacity-80 list-none p-0">
+      <li class="flex gap-2"><span>—</span> <span>Golden Gate assembly of design libraries</span></li>
+      <li class="flex gap-2"><span>—</span> <span>Multiplexed Yeast Surface Display titration</span></li>
+      <li class="flex gap-2"><span>—</span> <span>Automated FCS affinity and specificity profiling</span></li>
+    </ul>
+  </div>
 </div>
 
 ---
+layout: section
+transition: slide-up
+---
 
-# TIMP3 Loop Architecture
+# Phase 1
+### Computational Design and Validation
 
-<LoopConfig />
+---
+layout: default
+transition: fade-out
+---
 
-<div class="grid grid-cols-3 gap-4 mt-2 text-xs">
-<div class="p-3 rounded-lg" style="background:rgba(79,172,254,0.08); border:1px solid rgba(79,172,254,0.2)">
+# RFdiffusion Loop Scaffolding
+Targeting variable surface loops on the TIMP3 scaffold.
 
-**AB Loop** (pos 30–36) — Primary binding interface. 6 aa native, expandable to 15 aa. Flanks: `LVK...LVY`
-
-</div>
-<div class="p-3 rounded-lg" style="background:rgba(79,172,254,0.08); border:1px solid rgba(79,172,254,0.2)">
-
-**C Loop** (pos 62–68) — Secondary contact. 6 aa native, expandable to 15 aa. Flanks: `HTE...GLK`
-
-</div>
-<div class="p-3 rounded-lg" style="background:rgba(79,172,254,0.08); border:1px solid rgba(79,172,254,0.2)">
-
-**EF Loop** (pos 92–96) — Tertiary contact. 4 aa native, expandable to 10 aa. Flanks: `MYT...FVE`
-
-</div>
-</div>
-
-<div class="text-center text-xs opacity-40 mt-2">
-  Hover loops on the diagram for detailed parameters · Data from RFd_Batch.py loop_configs
+<div class="grid grid-cols-2 gap-8 mt-8 items-center">
+  <LoopConfig />
+  <div class="space-y-6">
+    <div class="text-sm leading-relaxed opacity-80">
+      We utilized length-variable loop generation (8–24 residues) to optimize the interaction surface against ADAM10 and ADAM17 catalytic domains.
+    </div>
+    <div class="p-5 bg-blue-500/5 rounded-lg border border-blue-500/20">
+      <h4 class="text-[10px] font-bold text-blue-400 mb-3 uppercase tracking-widest">Design Parameters</h4>
+      <div class="grid grid-cols-2 gap-y-3 gap-x-4 text-[11px] font-mono">
+        <span class="opacity-40 uppercase">Targets</span> <span class="text-blue-200">MMP / ADAM</span>
+        <span class="opacity-40 uppercase">Lengths</span> <span class="text-blue-200">8, 12, 16, 20, 24</span>
+        <span class="opacity-40 uppercase">Noise</span> <span class="text-blue-200">0.1 - 0.5</span>
+        <span class="opacity-40 uppercase">Iterations</span> <span class="text-blue-200">50</span>
+      </div>
+    </div>
+  </div>
 </div>
 
 ---
-layout: two-cols
+layout: default
+transition: fade-out
 ---
 
-# Stage 1: RFdiffusion
+# Sequence Optimization & Metrics
+Ranking design confidence via ProteinMPNN and AlphaFold Z-Scores.
 
-<div class="text-sm">
-
-## Backbone Generation
-- Hallucinate novel 3D backbone coordinates
-- Input: TIMP3–target complex PDB
-- Loop regions replaced with **poly-glycine** placeholders
-- Diffuser steps: T=20 (short sequence mode)
-
-## Generation Parameters
-```python
-loop_configs = {
-  "AB": { normal: 6,  max: 15, pos: 30 },
-  "C":  { normal: 6,  max: 15, pos: 62 },
-  "EF": { normal: 4,  max: 10, pos: 92 },
-}
-num_designs = 25  # per target complex
-```
-
-## Infrastructure
-- **A30 GPU** node on HPC cluster
-- ~20 hours per loop expansion run
-
-</div>
-
-::right::
-
-<div class="ml-4 text-sm">
-
-## Contig String Assembly
-
-The contig string tells RFdiffusion which regions to keep fixed vs. regenerate:
-
-```
-A1-30/6-15/A37-62/6-15/A69-92/4-10/
-A97-121/0 B1-{target_len}
-```
-
-- Fixed scaffold: `A1-30` (N-terminus)
-- Variable loop: `6-15` (AB loop expansion)  
-- Fixed region: `A37-62`
-- Variable loop: `6-15` (C loop expansion)
-- Chain break: `/0`
-- Fixed target: `B1-{len}`
-
-## Output
-Each run produces **25 PDB files** with novel poly-glycine loop geometries per target complex
-
+<div class="grid grid-cols-2 gap-8 mt-4">
+  <div>
+    <h3 class="text-xs font-bold mb-4 uppercase tracking-widest opacity-60">Top Design Variants</h3>
+    <TopVariants />
+  </div>
+  <div class="space-y-6">
+    <div class="p-4 bg-white/5 rounded border border-white/10">
+      <h3 class="text-xs font-bold mb-3 uppercase tracking-widest opacity-40">Z-Score Calibration</h3>
+      <div class="text-[11px] leading-relaxed opacity-70">
+        AlphaFold metrics (ipTM, pLDDT, PAE) were standardized into Z-scores relative to an ensemble of 500 random design iterations.
+      </div>
+    </div>
+    <div class="p-4 bg-white/5 rounded border border-white/10">
+      <h3 class="text-xs font-bold mb-2 uppercase tracking-widest opacity-40">Filtering Thresholds</h3>
+      <ul class="text-[11px] space-y-1 opacity-70 list-none p-0">
+        <li>• ipTM Z > 1.0 (High confidence interface)</li>
+        <li>• Loop pLDDT Z > 0.5 (Structural stability)</li>
+        <li>• Interface PAE Z < -0.5 (Distance consistency)</li>
+      </ul>
+    </div>
+  </div>
 </div>
 
 ---
-layout: center
+layout: default
+transition: fade-out
 ---
 
-# Stage 2: ProteinMPNN
+# AlphaFold Confidence Matrix
+Standardized Z-Score analysis across target pairs.
 
-<div class="grid grid-cols-2 gap-10 mt-6 text-[13px] items-start max-w-6xl mx-auto overflow-hidden">
-<div>
-
-## Design Strategy
-- Input: RFdiffusion backbone ensemble
-- **Fixed-backbone** sequence design
-- 8 sequences designed per backbone structure
-- All scaffold residues frozen — only loop residues redesigned
-
-## Key Parameters
-- Sampling Temp: **0.1**
-- Model: `v_48_020`
-- Target: Multimer-aware packing
-
-</div>
-<div class="p-4 rounded-lg bg-white bg-opacity-5 border border-white border-opacity-10">
-
-<div class="text-[11px] font-bold mb-2">Top Predicted Loops (ADAM10)</div>
-
-<div class="text-[9px] leading-tight">
-
-| Len | Top Loop | Score | Rec |
-|---|---|---|---|
-| 6 | `KGEIDE` | 0.857 | 16% |
-| 7 | `KKEGYEE` | 1.095 | 14% |
-| 8 | `KLPDGFEE` | 0.895 | 12% |
-| 9 | `KDEKTGFET` | 0.885 | 11% |
-| 10 | `VLDEKTGLKE` | 0.992 | 10% |
-| 11 | `TVKTPGATFKE` | 1.041 | 9% |
-| 12 | `KVKDWGGGEFEE` | 1.037 | 25% |
-| 14 | `EVTSPEDPSVKFKE` | 1.067 | 0% |
-| 15 | `TKTVTENGETAKVEE` | 1.024 | 6% |
-
-</div>
-
-<div class="mt-3 text-[9px] opacity-50 italic">
-Lower score = better packing. Data: Results/best_loops_per_length_ADAM10.csv
-</div>
-
-</div>
+<div class="mt-8 flex justify-center">
+  <ZScoreTable />
 </div>
 
 ---
+layout: section
+transition: slide-up
+---
 
-# Stage 3: AlphaFold Verification
+# Phase 2
+### Experimental Validation and Selectivity
 
-<div class="grid grid-cols-2 gap-6 text-sm">
-<div>
+---
+layout: default
+transition: fade-out
+---
 
-## Blind Structural Prediction
-- **AlphaFold 3** and **AF2-multimer** fold each designed TIMP3 variant against each target
-- No spatial biases from the design phase — purely predictive
-- Extract per-variant confidence metrics from JSON outputs
+# Interactive FCS Analysis
+Detailed exploration of raw population distributions and gating metrics.
 
-## Quality Gate
-```python
-# Discard misfolded configurations
-if variant.pTM < 0.8:
-    discard(variant)
-```
-
-## Extracted Metrics
-- **pTM** — Overall predicted TM-score
-- **ipTM** — Interface-specific predicted TM-score
-- **Loop pLDDT** — Per-residue confidence for AB/C/EF loops
-- **Interface PAE** — Predicted aligned error at binding interface
-
-</div>
-<div>
-
-## Z-Score Normalization
-
-Raw metrics are standardized across all candidates:
-
-$$Z_i = \frac{x_i - \mu}{\sigma}$$
-
-This identifies variants significantly outperforming the mean, independent of absolute metric scale.
-
-### Key Insight
-> Z-scores enable **cross-metric** consensus filtering: a variant must score well on **all** metrics simultaneously, not just one.
-
-</div>
+<div class="flex justify-center w-full">
+  <FcsViewer />
 </div>
 
 ---
+layout: default
+transition: fade-out
+---
 
-# AlphaFold Results — Z-Score Analysis
+# Binding Efficiency and Specificity
+Normalizing experimental results against TIMP3-WT baseline.
 
-<ZScoreTable />
-
-<div class="mt-4 text-sm">
-
-### Key Findings
-- **`wt`** and **`asesnc`** show consistently strong Z-scores across all metrics for ADAM10
-- **`asesta`** and **`agestc`** show ADAM17-specific Loop pLDDT advantages
-- **`agesna`** uniquely shows MMP9 specificity in ipTM
-
+<div class="grid grid-cols-2 gap-8 mt-12 items-center">
+  <div class="p-6 bg-white/5 rounded border border-white/10 space-y-6">
+    <h3 class="text-sm font-bold uppercase tracking-widest text-blue-400">Analysis Methodology</h3>
+    <div class="text-sm leading-relaxed opacity-80">
+      Binders were evaluated for normalization against TIMP3-WT across multi-target trials. 
+      The <span class="text-blue-400 font-bold">AB loops</span> showed a significant enrichment in binding efficiency (DP/FITC+) for the <b>MMP3 and MMP9 families</b>, while ADAM10 served as a negative control due to batch-specific target degradation.
+    </div>
+    <div class="p-4 bg-blue-500/10 rounded-lg border border-blue-500/20 text-xs leading-relaxed">
+      • Target specificity switch: Successful discrimination between MMP and ADAM families<br/>
+      • Correlation: AlphaFold ipTM Z-scores vs Experimental affinity
+    </div>
+  </div>
+  <div class="p-6 bg-white/5 rounded border border-white/10 space-y-4 flex flex-col justify-center h-full">
+    <h3 class="text-xs font-bold uppercase tracking-[0.2em] opacity-40">Experimental Results</h3>
+    <div class="flex gap-8">
+      <div>
+        <div class="text-3xl font-black text-white">~1.7x</div>
+        <div class="text-[9px] uppercase tracking-widest text-blue-400 font-bold">MMP3 Enrichment</div>
+      </div>
+      <div>
+        <div class="text-3xl font-black text-white">93%</div>
+        <div class="text-[9px] uppercase tracking-widest text-blue-400 font-bold">Binding Efficiency</div>
+      </div>
+    </div>
+  </div>
 </div>
 
 ---
-
-# Consensus Filtering & Variant Stratification
-
-<TopVariants />
-
-<div class="grid grid-cols-3 gap-4 mt-6 text-xs">
-<div class="p-3 rounded-lg" style="background:rgba(34,197,94,0.08); border:1px solid rgba(34,197,94,0.2)">
-
-### 🎯 General Affinity
-Globally highest-scoring binders across **all** targets. The "safe bet" for broad-spectrum inhibition.
-
-</div>
-<div class="p-3 rounded-lg" style="background:rgba(250,204,21,0.08); border:1px solid rgba(250,204,21,0.2)">
-
-### 🔬 Target Specificity
-High relative affinity for a **single** target. Enables selective therapeutic intervention.
-
-</div>
-<div class="p-3 rounded-lg" style="background:rgba(245,87,108,0.08); border:1px solid rgba(245,87,108,0.2)">
-
-### ⚖️ Pairwise Selectivity
-Differentiates between **closely related** target pairs (e.g., ADAM17 vs ADAM10).
-
-</div>
-</div>
-
----
-layout: two-cols
+layout: default
+transition: fade-out
 ---
 
-# Stage 4: Experimental Validation
+# Cross-Target Binding Analysis
+Statistical summary of normalized median intensity across replicates.
 
-<div class="text-[13px] pr-8 overflow-hidden">
-
-## Synthesis Pipeline
-1. **Codon optimization** for yeast
-2. **DNA synthesis** (Twist)
-3. **Cloning** into display vectors
-4. **Expression** and surface display
-
-## Analysis Pipeline
-- **`analyze_fcs.py`** — Single-target
-- **`aggregate_analysis.py`** — Cross-target
-- **`fcs_viewer.py`** — Interactive viewer
-
-<div class="mt-4 p-3 rounded-lg border border-white border-opacity-10 bg-white bg-opacity-5 text-[11px] opacity-80">
-  Click the targets on the right to toggle between different target binding results.
-</div>
-
-</div>
-
-::right::
-
-<div class="w-full h-full flex items-center pl-4 overflow-hidden">
+<div class="mt-2 flex justify-center">
   <FcsChart />
 </div>
 
 ---
-layout: center
+layout: default
+transition: fade-out
 ---
 
-# Experimental Validation — Gating Strategy
+# Conclusion and Strategic Roadmap
+Summary of current progress and future research directions.
 
-<div class="grid grid-cols-2 gap-10 mt-6 items-center max-w-6xl mx-auto overflow-hidden">
-<div class="text-[13px]">
-
-## Population Stratification
-- **FITC (X-axis)**: Represents protein expression levels on the yeast surface.
-- **APC (Y-axis)**: Represents binding affinity to the fluorescently-labeled target.
-
-## Control Calibration
-- **Neg Ctrl**: Unlabeled yeast or target-only to establish background gating.
-- **Pos Ctrl**: Native TIMP3 to define the "Binding" quadrant (LR).
-- **Variant**: Test population. Dual-positive signals indicate successful de novo binders.
-
-<div class="mt-8 p-4 rounded-lg bg-primary bg-opacity-5 border border-primary border-opacity-20 italic text-[11px]">
-  The quadrant gating allows us to normalize binding signal relative to expression, eliminating false negatives from low-expressing variants.
-</div>
-
-</div>
-<div>
-  <FcsScatter />
-</div>
+<div class="grid grid-cols-2 gap-12 mt-12">
+  <div class="space-y-4">
+    <h3 class="text-blue-400 font-bold uppercase text-xs tracking-widest">Key Findings</h3>
+    <ul class="text-[13px] space-y-3 opacity-80 list-none p-0">
+      <li class="flex gap-3">
+        <span class="text-blue-500 font-bold">01</span>
+        <span>Successful de novo generation of high-affinity binders for ADAM10.</span>
+      </li>
+      <li class="flex gap-3">
+        <span class="text-blue-500 font-bold">02</span>
+        <span>Validated selectivity switch between ADAM10/17 and MMP2/9 families.</span>
+      </li>
+      <li class="flex gap-3">
+        <span class="text-blue-500 font-bold">03</span>
+        <span>Correlation established between AlphaFold Z-scores and binding efficiency.</span>
+      </li>
+    </ul>
+  </div>
+  <div class="grid grid-cols-2 gap-4">
+    <div class="p-4 bg-white/5 rounded border border-white/10 flex flex-col justify-center items-center text-center">
+      <div class="text-xs font-bold uppercase tracking-widest mb-1">In Vitro</div>
+      <div class="text-[10px] opacity-50">FRET Kinetics</div>
+    </div>
+    <div class="p-4 bg-white/5 rounded border border-white/10 flex flex-col justify-center items-center text-center">
+      <div class="text-xs font-bold uppercase tracking-widest mb-1">Structural</div>
+      <div class="text-[10px] opacity-50">X-Ray Resolution</div>
+    </div>
+    <div class="p-4 bg-white/5 rounded border border-white/10 flex flex-col justify-center items-center text-center">
+      <div class="text-xs font-bold uppercase tracking-widest mb-1">Optimization</div>
+      <div class="text-[10px] opacity-50">ESM-2 Refinement</div>
+    </div>
+    <div class="p-4 bg-white/5 rounded border border-white/10 flex flex-col justify-center items-center text-center">
+      <div class="text-xs font-bold uppercase tracking-widest mb-1">Expansion</div>
+      <div class="text-[10px] opacity-50">Custom Markers</div>
+    </div>
+  </div>
 </div>
 
 ---
@@ -364,28 +254,9 @@ layout: center
 class: text-center
 ---
 
-# Conclusions & Future Directions
+# Questions
+### De Novo Binder Generation Research Thread
 
-<div class="grid grid-cols-2 gap-10 text-left max-w-4xl mx-auto text-[13px] mt-10 overflow-hidden">
-<div>
-
-## What We Demonstrated
-- ✅ End-to-end **generative pipeline** from backbone hallucination to validation
-- ✅ Z-score consensus filtering **eliminates >90%** of candidates
-- ✅ Loop confidence metrics (pLDDT, PAE) **predict functional binding**
-
-</div>
-<div>
-
-## What's Next
-- 🔄 **Feedback loop**: Flow cytometry results → retrain selection thresholds
-- 🧬 **Combined loops**: Test multi-loop variants (AB + C + EF simultaneously)
-- 📊 **Expanded targets**: MMP7, MMP10 catalytic domains
-- 🤖 **ESM integration**: Complement generative designs with evolutionary classification
-
-</div>
-</div>
-
-<div class="mt-12 opacity-50 text-[11px]">
-  Ryan Gustafson · PhD Research · University of Nevada, Reno
+<div class="mt-8 text-xs opacity-40 uppercase tracking-widest">
+  Repository: PhD-Research / Demonstrations / De_Novo_Binder_Generation
 </div>

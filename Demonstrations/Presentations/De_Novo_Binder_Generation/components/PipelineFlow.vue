@@ -49,38 +49,38 @@ const activeStage = ref(-1)
 const stages = [
   {
     id: 'rfd',
-    icon: '🧬',
+    icon: 'GEN',
     name: 'Backbone Generation',
     tool: 'RFdiffusion',
     detail: 'Hallucinate novel 3D backbones by expanding AB, C, and EF loops (6–15 aa). Outputs poly-glycine PDB scaffolds.',
-    time: '~20 hrs / target',
+    time: '20 hrs / target',
     output: 'PDB files'
   },
   {
     id: 'pmpnn',
-    icon: '🔬',
+    icon: 'SEQ',
     name: 'Sequence Design',
     tool: 'ProteinMPNN',
     detail: 'Populate poly-glycine scaffolds with amino acid sequences. Generates 25–1000 sequences per backbone at T=0.1–0.2.',
-    time: '~5 min / backbone',
+    time: '5 min / backbone',
     output: 'FASTA files'
   },
   {
     id: 'af',
-    icon: '🏗️',
+    icon: 'VAL',
     name: 'Structure Verification',
     tool: 'AlphaFold 3 / AF2-multimer',
     detail: 'Blind structural prediction of TIMP3–target complexes. Extract pTM, ipTM, Loop pLDDT, and Interface PAE scores.',
-    time: '~2 hrs / variant',
+    time: '2 hrs / variant',
     output: 'JSON scores + PDB'
   },
   {
     id: 'facs',
-    icon: '🧪',
+    icon: 'EXP',
     name: 'Experimental Validation',
     tool: 'Flow Cytometry',
     detail: 'Yeast display expression → quad-gating → binding quantification. Measure double-positive populations per target.',
-    time: '~1 day / assay',
+    time: '1 day / assay',
     output: 'FCS data'
   }
 ]
@@ -118,8 +118,13 @@ const stages = [
 }
 
 .stage-icon {
-  font-size: 2rem;
+  font-size: 0.8rem;
+  font-weight: 800;
   margin-bottom: 0.5rem;
+  color: #4facfe;
+  background: rgba(79, 172, 254, 0.1);
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
 }
 
 .stage-label {

@@ -48,6 +48,23 @@ domains = {
 
 aa_map = {'A':'Ala','R':'Arg','N':'Asn','D':'Asp','C':'Cys','Q':'Gln','E':'Glu','G':'Gly','H':'His','I':'Ile','L':'Leu','K':'Lys','M':'Met','F':'Phe','P':'Pro','S':'Ser','T':'Thr','W':'Trp','Y':'Tyr','V':'Val'}
 
+# Average amino acid weights (isotopic)
+AA_WEIGHTS = {
+    'A': 71.0788, 'R': 156.1875, 'N': 114.1038, 'D': 115.0886,
+    'C': 103.1388, 'Q': 128.1307, 'E': 129.1139, 'G': 57.0519,
+    'H': 137.1411, 'I': 113.1594, 'L': 113.1594, 'K': 128.1741,
+    'M': 131.1926, 'F': 147.1766, 'P': 97.1167, 'S': 87.0782,
+    'T': 101.1051, 'W': 186.2132, 'Y': 163.1760, 'V': 99.1326
+}
+WATER_WEIGHT = 18.01524
+
+def calculate_mw(seq):
+    if not seq: return 0.0
+    weight = sum(AA_WEIGHTS.get(aa, 0) for aa in seq.upper())
+    if weight > 0:
+        weight += WATER_WEIGHT
+    return weight / 1000.0 # Return in kDa
+
 def get_aa_label(seq, pos):
     if 0 <= pos-1 < len(seq):
         aa = seq[pos-1]
