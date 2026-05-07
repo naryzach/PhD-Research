@@ -1,0 +1,47 @@
+.slidev-layout {
+  color: inherit;
+}
+
+/* 1. Hide the navigation bar components (arrows, dividers, tools) */
+.slidev-nav-controls button,
+.slidev-nav-controls .VerticalDivider,
+.slidev-nav-controls .MenuButton,
+.slidev-nav-controls [class*="Divider"] {
+  display: none !important;
+}
+
+/* 2. Keep and style the slide number as a standalone navigator in the bottom left */
+.slidev-nav-controls div.h-40px.flex {
+  display: flex !important;
+  position: fixed;
+  bottom: 12px;
+  left: 12px;
+  z-index: 100;
+  background: rgba(15, 23, 42, 0.5);
+  padding: 4px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: all 0.3s;
+}
+.slidev-nav-controls div.h-40px.flex:hover {
+  background: rgba(15, 23, 42, 0.9);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* 3. Hide the persistent slide list (Navigator) */
+/* We only allow the Go To dialog to show when specifically active (.top-5) */
+#slidev-goto-dialog:not(.top-5),
+.slidev-navigator,
+.slidev-sidebar,
+.slidev-toc {
+  display: none !important;
+}
+
+/* Restore title typography */
+h1 {
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
