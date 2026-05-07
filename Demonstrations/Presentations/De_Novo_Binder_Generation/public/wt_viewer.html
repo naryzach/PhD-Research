@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <title>WT Model Viewer</title>
+    <link rel="stylesheet" type="text/css" href="https://www.ebi.ac.uk/pdbe/pdb-component-library/css/pdbe-molstar-3.1.2.css">
+    <script type="text/javascript" src="https://www.ebi.ac.uk/pdbe/pdb-component-library/js/pdbe-molstar-plugin-3.1.2.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body, html { width: 100%; height: 100%; overflow: hidden; background: #000; }
+        #myViewer { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+
+        .msp-plugin, .msp-plugin-content {
+            width: 100% !important;
+            height: 100% !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="myViewer"></div>
+    <script>
+        let viewerInstance = null;
+        let isReady = false;
+        let controlsVisible = false;
+
+        function loadModel(url) {
+            if (viewerInstance) return;
+            viewerInstance = new PDBeMolstarPlugin();
+            
+            const options = {
+                customData: { url: url, format: 'cif' },
+                alphafoldView: true,
+                bgColor: { r: 0, g: 0, b: 0 },
+                // Start with controls hidden via the plugin's own option
+                hideControls: true,
+                hideCanvasControls: ['selection', 'animation', 'controlHighlight', 'controlSelection', 'help', 'expand'],
+                landscape: true,
+            };
+            
+            viewerInstance.render(document.getElementById('myViewer'), options).then(() => {
+                isReady = true;
+            });
+        }
+
+        function setControlsVisible(visible) {
+            if (!viewerInstance || !viewerInstance.plugin) return;
+            controlsVisible = visible;
+            // Use the Molstar PluginUIContext API to toggle the right panel
+            const p = viewerInstance.plugin;
+            // This is the official Mol* API to set layout regionState
+            p.layout.setProps({
+                regionState: {
+                    top: 'hidden',
+                    left: visible ? 'collapsed' : 'hidden',
+                    right: visible ? 'full' : 'hidden',
+                    bottom: 'hidden'
+                }
+            });
+            setTimeout(() => p.canvas3d.handleResize(), 100);
+        }
+
+        window.addEventListener('message', (event) => {
+            if (event.data.type === 'loadModel') {
+                if (!isReady && !viewerInstance) {
+                    loadModel(event.data.url);
+                } else if (isReady && viewerInstance && viewerInstance.visual) {
+                    viewerInstance.visual.update({
+                        customData: { url: event.data.url, format: 'cif' }
+                    }, true);
+                }
+            } else if (event.data.type === 'toggleControls') {
+                setControlsVisible(event.data.visible);
+            }
+        });
+    </script>
+</body>
+</html>
