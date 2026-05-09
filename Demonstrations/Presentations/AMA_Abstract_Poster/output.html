@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generative Deep Learning Pipeline for the Rapid Design of Patient-Specific Therapeutic Binders</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Outfit:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="poster-container">
+        <!-- Header -->
+        <header class="poster-header glass-panel">
+            <h1 class="poster-title">Generative Deep Learning Pipeline for the Rapid Design of Patient-Specific Therapeutic Binders</h1>
+            <h2 class="poster-author">Ryan Gustafson</h2>
+        </header>
+
+        <!-- Main Content Grid -->
+        <main class="poster-grid">
+            
+            <!-- Left Column -->
+            <div class="column">
+                <section class="poster-section glass-panel">
+                    <h3>Abstract</h3>
+                    <p>In the era of precision medicine, developing therapeutic agents tailored to an individual's unique genomic variations or specific cancer markers remains incredibly computationally expensive and error-prone. There is an urgent need for an accelerated pipeline capable of rapidly generating and validating highly specific target-binding molecules. We have developed an end-to-end computational framework combining RoseTTAFold Diffusion, ProteinMPNN, and AlphaFold verification to rapidly hallucinate de novo structural backbones and validate specific binders.</p>
+                </section>
+
+                <section class="poster-section glass-panel">
+                    <h3>Background: Matrix Metalloproteinases (MMPs) & Specificity</h3>
+                    <p>Matrix Metalloproteinases (MMPs) are a family of zinc-dependent endopeptidases crucial for extracellular matrix (ECM) remodeling, embryonic development, and angiogenesis. Their dysregulation is strongly associated with pathological conditions, notably cancer, where they can facilitate tumor invasion and metastasis (Bonnans et al., 2014; Cathcart et al., 2015). A major challenge in targeting MMPs therapeutically is their highly conserved active site across the ~20 human family members. Broad-spectrum MMP inhibitors failed in clinical trials due to off-target effects and the multifaceted roles of MMPs (some being tumor-suppressive). Therefore, highly specific targeting of distinct MMPs is required. By utilizing structural specificity rather than just active-site binding, protein engineering allows for the development of selective binders (e.g., engineered TIMPs) that can differentiate between highly similar targets (Raeeszadeh-Sarmazdeh et al., 2020).</p>
+                    <figure class="poster-figure">
+                        <img src="../../SharedAssets/figures/AMA_Abstract_Poster/protein_structure_mockup.png" alt="Background Figure">
+                        <figcaption>Figure 1: 3D Visualization of MMP-1 Active Site highlighting the highly conserved zinc-binding motif.</figcaption>
+                    </figure>
+                </section>
+            </div>
+
+            <!-- Right Column -->
+            <div class="column">
+                <section class="poster-section glass-panel">
+                    <h3>Methods: Generative Design Pipeline</h3>
+                    <p>The in silico pipeline bridges generative AI with rigorous structural validation. RoseTTAFold Diffusion (RFdiffusion) hallucinates de novo structural backbones acting as molecular scaffolds against user-specified active sites. Poly-glycine coordinates are populated with specific amino acid identities using ProteinMPNN. High-fidelity structural validation is enforced via AlphaFold 3 and AlphaFold2-multimer, extracting localized confidence metrics (Loop pLDDT and Loop PAE) to natively stratify sequence candidates.</p>
+                </section>
+
+                <section class="poster-section glass-panel">
+                    <h3>Results & Conclusions</h3>
+                    <p>Through Z-score standardizations across localized sequence evaluations, the framework filters theoretical designs into a high-confidence consensus set. Malformed configurations (pTM < 0.8) are seamlessly eliminated. The pipeline successfully isolates de novo variants that analytically out-perform wild-type control scaffolds across multiple cancer-marker domains, drastically reducing the search space required for downstream empirical Flow Cytometry assays.</p>
+                    <div class="figure-row">
+                        
+                        <figure class="poster-figure half-width">
+                            <img src="../../SharedAssets/figures/AMA_Abstract_Poster/aggregate_binding_mockup.png" alt="Result Figure">
+                            <figcaption>Figure 2: Comparative binding affinity of De Novo variants vs Wild-Type baseline.</figcaption>
+                        </figure>
+                        
+                        <figure class="poster-figure half-width">
+                            <img src="../../SharedAssets/figures/AMA_Abstract_Poster/gating_strategy_mockup.png" alt="Result Figure">
+                            <figcaption>Figure 3: Flow cytometry gating strategy for experimental validation.</figcaption>
+                        </figure>
+                        
+                    </div>
+                </section>
+
+                <section class="poster-section glass-panel references">
+                    <h3>References</h3>
+                    <ul>
+                        
+                        <li>Bonnans, C., et al. (2014). Remodelling the extracellular matrix in development and disease. Nature Reviews Molecular Cell Biology.</li>
+                        
+                        <li>Cathcart, J., et al. (2015). The Role of Tumor-Associated Macrophages in Matrix Remodeling and Metastasis. Cancer Research.</li>
+                        
+                        <li>Raeeszadeh-Sarmazdeh, M., et al. (2020). Protein Engineering of Tissue Inhibitors of Metalloproteinases (TIMPs) for Target Specificity. Journal of Biological Chemistry.</li>
+                        
+                    </ul>
+                </section>
+            </div>
+
+        </main>
+    </div>
+</body>
+</html>

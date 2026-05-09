@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ data.title }}</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Outfit:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="poster-container">
+        <!-- Header -->
+        <header class="poster-header glass-panel">
+            <h1 class="poster-title">{{ data.title }}</h1>
+            <h2 class="poster-author">{{ data.author }}</h2>
+        </header>
+
+        <!-- Main Content Grid -->
+        <main class="poster-grid">
+            
+            <!-- Left Column -->
+            <div class="column">
+                <section class="poster-section glass-panel">
+                    <h3>Abstract</h3>
+                    <p>{{ data.abstract }}</p>
+                </section>
+
+                <section class="poster-section glass-panel">
+                    <h3>{{ data.background.title }}</h3>
+                    <p>{{ data.background.content }}</p>
+                    <figure class="poster-figure">
+                        <img src="{{ data.background.figure }}" alt="Background Figure">
+                        <figcaption>{{ data.background.figure_caption }}</figcaption>
+                    </figure>
+                </section>
+            </div>
+
+            <!-- Right Column -->
+            <div class="column">
+                <section class="poster-section glass-panel">
+                    <h3>{{ data.methods.title }}</h3>
+                    <p>{{ data.methods.content }}</p>
+                </section>
+
+                <section class="poster-section glass-panel">
+                    <h3>{{ data.results.title }}</h3>
+                    <p>{{ data.results.content }}</p>
+                    <div class="figure-row">
+                        {% for fig in data.results.figures %}
+                        <figure class="poster-figure half-width">
+                            <img src="{{ fig.path }}" alt="Result Figure">
+                            <figcaption>{{ fig.caption }}</figcaption>
+                        </figure>
+                        {% endfor %}
+                    </div>
+                </section>
+
+                <section class="poster-section glass-panel references">
+                    <h3>References</h3>
+                    <ul>
+                        {% for ref in data.references %}
+                        <li>{{ ref }}</li>
+                        {% endfor %}
+                    </ul>
+                </section>
+            </div>
+
+        </main>
+    </div>
+</body>
+</html>
