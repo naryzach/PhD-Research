@@ -15,10 +15,10 @@
                 <h1 class="poster-title">{{ data.title }}</h1>
                 <h2 class="poster-author">{{ data.author }}</h2>
             </div>
-            <div style="margin-left: 80px; flex-shrink: 0; display: flex; align-items: center; gap: 40px;">
-                <img src="../../SharedAssets/figures/UNR Logo.png" alt="UNR Logo" style="height: 180px; filter: drop-shadow(0 10px 15px rgba(0,0,0,0.5));">
-                <div style="font-family: 'Inter', sans-serif; font-size: 55px; font-weight: 800; color: #f8fafc; line-height: 1.15; text-align: left; border-left: 6px solid #38bdf8; padding-left: 40px;">
-                    University of Nevada,<br>Reno
+            <div style="margin-left: 80px; flex-shrink: 0; display: flex; align-items: center; gap: 30px;">
+                <img src="../../SharedAssets/figures/UNR Logo.png" alt="UNR Logo" style="height: 120px; filter: drop-shadow(0 10px 15px rgba(0,0,0,0.5));">
+                <div style="font-family: 'Inter', sans-serif; font-size: 38px; font-weight: 800; color: #f8fafc; line-height: 1.15; text-align: left; border-left: 6px solid #38bdf8; padding-left: 30px; white-space: nowrap;">
+                    University of Nevada, Reno
                 </div>
             </div>
         </header>
@@ -48,19 +48,19 @@
                             <div class="stage-label">Backbone Generation</div>
                             <div class="stage-tool">RFdiffusion</div>
                         </div>
-                        <div class="workflow-arrow">➜</div>
+                        <div class="workflow-arrow">⬇</div>
                         <div class="workflow-stage">
                             <div class="stage-icon">SEQ</div>
                             <div class="stage-label">Sequence Design</div>
                             <div class="stage-tool">ProteinMPNN</div>
                         </div>
-                        <div class="workflow-arrow">➜</div>
+                        <div class="workflow-arrow">⬇</div>
                         <div class="workflow-stage">
                             <div class="stage-icon">VAL</div>
                             <div class="stage-label">Structure Verification</div>
                             <div class="stage-tool">AlphaFold 3</div>
                         </div>
-                        <div class="workflow-arrow">➜</div>
+                        <div class="workflow-arrow">⬇</div>
                         <div class="workflow-stage">
                             <div class="stage-icon">EXP</div>
                             <div class="stage-label">Experimental Validation</div>
@@ -70,19 +70,23 @@
                 </section>
             </div>
 
-            <!-- Right Column -->
+            <!-- Middle Column -->
             <div class="column">
                 <section class="poster-section glass-panel">
                     <h3>{{ data.results.title }}</h3>
                     <p>{{ data.results.content }}</p>
-                    <div class="figure-row">
+                    <div style="display: flex; flex-direction: column; gap: 40px; margin-top: auto;">
                         {% for fig in data.results.figures %}
-                        <figure class="poster-figure half-width">
-                            <img src="{{ fig.path }}" alt="Result Figure">
+                        <figure class="poster-figure">
+                            <img src="{{ fig.path }}" alt="Result Figure" style="max-height: 800px; width: 100%; object-fit: contain;">
                         </figure>
                         {% endfor %}
                     </div>
                 </section>
+            </div>
+
+            <!-- Right Column -->
+            <div class="column">
 
                 <section class="poster-section glass-panel">
                     <h3>{{ data.conclusions.title }}</h3>

@@ -15,10 +15,10 @@
                 <h1 class="poster-title">Generative Deep Learning Pipeline for the Rapid Design of Patient-Specific Therapeutic Binders</h1>
                 <h2 class="poster-author">Ryan Gustafson</h2>
             </div>
-            <div style="margin-left: 80px; flex-shrink: 0; display: flex; align-items: center; gap: 40px;">
-                <img src="../../SharedAssets/figures/UNR Logo.png" alt="UNR Logo" style="height: 180px; filter: drop-shadow(0 10px 15px rgba(0,0,0,0.5));">
-                <div style="font-family: 'Inter', sans-serif; font-size: 55px; font-weight: 800; color: #f8fafc; line-height: 1.15; text-align: left; border-left: 6px solid #38bdf8; padding-left: 40px;">
-                    University of Nevada,<br>Reno
+            <div style="margin-left: 80px; flex-shrink: 0; display: flex; align-items: center; gap: 30px;">
+                <img src="../../SharedAssets/figures/UNR Logo.png" alt="UNR Logo" style="height: 120px; filter: drop-shadow(0 10px 15px rgba(0,0,0,0.5));">
+                <div style="font-family: 'Inter', sans-serif; font-size: 38px; font-weight: 800; color: #f8fafc; line-height: 1.15; text-align: left; border-left: 6px solid #38bdf8; padding-left: 30px; white-space: nowrap;">
+                    University of Nevada, Reno
                 </div>
             </div>
         </header>
@@ -29,7 +29,7 @@
             <!-- Left Column -->
             <div class="column">
                 <section class="poster-section glass-panel">
-                    <h3>Intro/Background</h3>
+                    <h3>Background: MMPs, Cancer, and the Specificity Bottleneck</h3>
                     <p>Matrix Metalloproteinases (MMPs) are zinc-dependent endopeptidases crucial for extracellular matrix (ECM) remodeling. In oncology, dysregulation of specific MMPs (e.g., MMP2, MMP9) is strongly associated with pathological conditions, facilitating tumor invasion, angiogenesis, and metastasis (Bonnans et al., 2014; Cathcart et al., 2015). A major clinical hurdle in targeting MMPs is their highly conserved active site across ~20 human family members. Previous broad-spectrum MMP inhibitors failed in clinical trials due to severe off-target toxicities and the paradoxical inhibition of tumor-suppressive MMPs (Winer et al., 2018). Therefore, highly specific targeting of distinct MMPs is required. By utilizing structural specificity via protein engineering of endogenous inhibitors like TIMP3, we can develop selective binders capable of discriminating between highly similar targets, paving the way for safe, targeted therapies (Raeeszadeh-Sarmazdeh et al., 2020).</p>
                     <figure class="poster-figure">
                         <img src="mmp2_active_site.png" alt="Background Figure">
@@ -38,7 +38,7 @@
                 </section>
 
                 <section class="poster-section glass-panel">
-                    <h3>Methods</h3>
+                    <h3>Methods: Generative Design Pipeline</h3>
                     <p>Our in silico pipeline bridges generative AI with rigorous structural validation to circumvent traditional high-throughput screening bottlenecks. RoseTTAFold Diffusion (RFdiffusion) hallucinates de novo structural loop backbones acting as molecular scaffolds against user-specified active sites on TIMP3. Poly-glycine coordinates are populated with specific amino acid identities using ProteinMPNN. High-fidelity structural validation is enforced via AlphaFold co-folding, extracting localized confidence metrics (Loop pLDDT and Interface PAE) and using a self-normalized T-score framework to natively stratify target-selective sequence candidates from promiscuous binders.</p>
 
                     <!-- Static Workflow Diagram -->
@@ -48,19 +48,19 @@
                             <div class="stage-label">Backbone Generation</div>
                             <div class="stage-tool">RFdiffusion</div>
                         </div>
-                        <div class="workflow-arrow">➜</div>
+                        <div class="workflow-arrow">⬇</div>
                         <div class="workflow-stage">
                             <div class="stage-icon">SEQ</div>
                             <div class="stage-label">Sequence Design</div>
                             <div class="stage-tool">ProteinMPNN</div>
                         </div>
-                        <div class="workflow-arrow">➜</div>
+                        <div class="workflow-arrow">⬇</div>
                         <div class="workflow-stage">
                             <div class="stage-icon">VAL</div>
                             <div class="stage-label">Structure Verification</div>
                             <div class="stage-tool">AlphaFold 3</div>
                         </div>
-                        <div class="workflow-arrow">➜</div>
+                        <div class="workflow-arrow">⬇</div>
                         <div class="workflow-stage">
                             <div class="stage-icon">EXP</div>
                             <div class="stage-label">Experimental Validation</div>
@@ -70,31 +70,35 @@
                 </section>
             </div>
 
-            <!-- Right Column -->
+            <!-- Middle Column -->
             <div class="column">
                 <section class="poster-section glass-panel">
-                    <h3>Results</h3>
+                    <h3>Results: Experimental Validation of Target Selectivity</h3>
                     <p>Yeast surface display flow cytometry confirmed that the pipeline successfully isolates de novo variants that experimentally out-perform wild-type (WT) TIMP3 across multiple cancer-marker domains. Notably, our top variant, AB 4, achieved a 1.52x binding enrichment at MMP3 compared to the WT baseline.</p>
-                    <div class="figure-row">
+                    <div style="display: flex; flex-direction: column; gap: 40px; margin-top: auto;">
                         
-                        <figure class="poster-figure half-width">
-                            <img src="fig_binding_ratio.png" alt="Result Figure">
+                        <figure class="poster-figure">
+                            <img src="fig_binding_ratio.png" alt="Result Figure" style="max-height: 800px; width: 100%; object-fit: contain;">
                         </figure>
                         
-                        <figure class="poster-figure half-width">
-                            <img src="fig_mmp3_vs_mmp2.png" alt="Result Figure">
+                        <figure class="poster-figure">
+                            <img src="fig_mmp3_vs_mmp2.png" alt="Result Figure" style="max-height: 800px; width: 100%; object-fit: contain;">
                         </figure>
                         
                     </div>
                 </section>
+            </div>
+
+            <!-- Right Column -->
+            <div class="column">
 
                 <section class="poster-section glass-panel">
-                    <h3>Conclusions</h3>
+                    <h3>Conclusions: The Selectivity Switch</h3>
                     <p>Variant C 12 demonstrated a vital 'Selectivity Switch,' exhibiting strong preferential binding to MMP3 over the highly homologous MMP2 target, proving that AI-guided loop engineering can effectively break the cross-reactivity barrier that plagued past clinical candidates.</p>
                 </section>
 
                 <section class="poster-section glass-panel">
-                    <h3>Future Directions</h3>
+                    <h3>Future Clinical Directions</h3>
                     <p>The ability to rapidly generate target-specific binders opens new avenues for personalized medicine. Future clinical applications include developing these variants into targeted therapeutics that neutralize pro-tumorigenic MMPs without off-target toxicity. Additionally, these binders can be conjugated to radioisotopes or fluorophores for precision diagnostic imaging of patient-specific tumor microenvironments. Ultimately, this pipeline could be integrated into clinical workflows where patient biopsies inform the rapid, on-demand generation of custom therapeutic binders.</p>
                 </section>
 

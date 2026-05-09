@@ -2,28 +2,28 @@ title: "Generative Deep Learning Pipeline for the Rapid Design of Patient-Specif
 author: "Ryan Gustafson"
 
 background:
-  title: "Intro/Background"
+  title: "Background: MMPs, Cancer, and the Specificity Bottleneck"
   content: "Matrix Metalloproteinases (MMPs) are zinc-dependent endopeptidases crucial for extracellular matrix (ECM) remodeling. In oncology, dysregulation of specific MMPs (e.g., MMP2, MMP9) is strongly associated with pathological conditions, facilitating tumor invasion, angiogenesis, and metastasis (Bonnans et al., 2014; Cathcart et al., 2015). A major clinical hurdle in targeting MMPs is their highly conserved active site across ~20 human family members. Previous broad-spectrum MMP inhibitors failed in clinical trials due to severe off-target toxicities and the paradoxical inhibition of tumor-suppressive MMPs (Winer et al., 2018). Therefore, highly specific targeting of distinct MMPs is required. By utilizing structural specificity via protein engineering of endogenous inhibitors like TIMP3, we can develop selective binders capable of discriminating between highly similar targets, paving the way for safe, targeted therapies (Raeeszadeh-Sarmazdeh et al., 2020)."
   figure: "mmp2_active_site.png"
   figure_caption: "Figure 1: 3D Visualization of the MMP-2 active site catalytic domain (rendered from AlphaFold structure model)."
 
 methods:
-  title: "Methods"
+  title: "Methods: Generative Design Pipeline"
   content: "Our in silico pipeline bridges generative AI with rigorous structural validation to circumvent traditional high-throughput screening bottlenecks. RoseTTAFold Diffusion (RFdiffusion) hallucinates de novo structural loop backbones acting as molecular scaffolds against user-specified active sites on TIMP3. Poly-glycine coordinates are populated with specific amino acid identities using ProteinMPNN. High-fidelity structural validation is enforced via AlphaFold co-folding, extracting localized confidence metrics (Loop pLDDT and Interface PAE) and using a self-normalized T-score framework to natively stratify target-selective sequence candidates from promiscuous binders."
 
 results:
-  title: "Results"
+  title: "Results: Experimental Validation of Target Selectivity"
   content: "Yeast surface display flow cytometry confirmed that the pipeline successfully isolates de novo variants that experimentally out-perform wild-type (WT) TIMP3 across multiple cancer-marker domains. Notably, our top variant, AB 4, achieved a 1.52x binding enrichment at MMP3 compared to the WT baseline."
   figures:
     - path: "fig_binding_ratio.png"
     - path: "fig_mmp3_vs_mmp2.png"
 
 conclusions:
-  title: "Conclusions"
+  title: "Conclusions: The Selectivity Switch"
   content: "Variant C 12 demonstrated a vital 'Selectivity Switch,' exhibiting strong preferential binding to MMP3 over the highly homologous MMP2 target, proving that AI-guided loop engineering can effectively break the cross-reactivity barrier that plagued past clinical candidates."
 
 future:
-  title: "Future Directions"
+  title: "Future Clinical Directions"
   content: "The ability to rapidly generate target-specific binders opens new avenues for personalized medicine. Future clinical applications include developing these variants into targeted therapeutics that neutralize pro-tumorigenic MMPs without off-target toxicity. Additionally, these binders can be conjugated to radioisotopes or fluorophores for precision diagnostic imaging of patient-specific tumor microenvironments. Ultimately, this pipeline could be integrated into clinical workflows where patient biopsies inform the rapid, on-demand generation of custom therapeutic binders."
 
 references:
