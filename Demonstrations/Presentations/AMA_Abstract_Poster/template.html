@@ -10,9 +10,17 @@
 <body>
     <div class="poster-container">
         <!-- Header -->
-        <header class="poster-header glass-panel">
-            <h1 class="poster-title">{{ data.title }}</h1>
-            <h2 class="poster-author">{{ data.author }}</h2>
+        <header class="poster-header glass-panel" style="display: flex; align-items: center; justify-content: space-between;">
+            <div style="flex: 1; text-align: left;">
+                <h1 class="poster-title">{{ data.title }}</h1>
+                <h2 class="poster-author">{{ data.author }}</h2>
+            </div>
+            <div style="margin-left: 80px; flex-shrink: 0; display: flex; align-items: center; gap: 40px;">
+                <img src="../../SharedAssets/figures/UNR Logo.png" alt="UNR Logo" style="height: 180px; filter: drop-shadow(0 10px 15px rgba(0,0,0,0.5));">
+                <div style="font-family: 'Inter', sans-serif; font-size: 55px; font-weight: 800; color: #f8fafc; line-height: 1.15; text-align: left; border-left: 6px solid #38bdf8; padding-left: 40px;">
+                    University of Nevada,<br>Reno
+                </div>
+            </div>
         </header>
 
         <!-- Main Content Grid -->
@@ -21,11 +29,6 @@
             <!-- Left Column -->
             <div class="column">
                 <section class="poster-section glass-panel">
-                    <h3>Abstract</h3>
-                    <p>{{ data.abstract }}</p>
-                </section>
-
-                <section class="poster-section glass-panel">
                     <h3>{{ data.background.title }}</h3>
                     <p>{{ data.background.content }}</p>
                     <figure class="poster-figure">
@@ -33,15 +36,42 @@
                         <figcaption>{{ data.background.figure_caption }}</figcaption>
                     </figure>
                 </section>
+
+                <section class="poster-section glass-panel">
+                    <h3>{{ data.methods.title }}</h3>
+                    <p>{{ data.methods.content }}</p>
+
+                    <!-- Static Workflow Diagram -->
+                    <div class="workflow-diagram">
+                        <div class="workflow-stage">
+                            <div class="stage-icon">GEN</div>
+                            <div class="stage-label">Backbone Generation</div>
+                            <div class="stage-tool">RFdiffusion</div>
+                        </div>
+                        <div class="workflow-arrow">➜</div>
+                        <div class="workflow-stage">
+                            <div class="stage-icon">SEQ</div>
+                            <div class="stage-label">Sequence Design</div>
+                            <div class="stage-tool">ProteinMPNN</div>
+                        </div>
+                        <div class="workflow-arrow">➜</div>
+                        <div class="workflow-stage">
+                            <div class="stage-icon">VAL</div>
+                            <div class="stage-label">Structure Verification</div>
+                            <div class="stage-tool">AlphaFold 3</div>
+                        </div>
+                        <div class="workflow-arrow">➜</div>
+                        <div class="workflow-stage">
+                            <div class="stage-icon">EXP</div>
+                            <div class="stage-label">Experimental Validation</div>
+                            <div class="stage-tool">Flow Cytometry</div>
+                        </div>
+                    </div>
+                </section>
             </div>
 
             <!-- Right Column -->
             <div class="column">
-                <section class="poster-section glass-panel">
-                    <h3>{{ data.methods.title }}</h3>
-                    <p>{{ data.methods.content }}</p>
-                </section>
-
                 <section class="poster-section glass-panel">
                     <h3>{{ data.results.title }}</h3>
                     <p>{{ data.results.content }}</p>
@@ -49,10 +79,19 @@
                         {% for fig in data.results.figures %}
                         <figure class="poster-figure half-width">
                             <img src="{{ fig.path }}" alt="Result Figure">
-                            <figcaption>{{ fig.caption }}</figcaption>
                         </figure>
                         {% endfor %}
                     </div>
+                </section>
+
+                <section class="poster-section glass-panel">
+                    <h3>{{ data.conclusions.title }}</h3>
+                    <p>{{ data.conclusions.content }}</p>
+                </section>
+
+                <section class="poster-section glass-panel">
+                    <h3>{{ data.future.title }}</h3>
+                    <p>{{ data.future.content }}</p>
                 </section>
 
                 <section class="poster-section glass-panel references">

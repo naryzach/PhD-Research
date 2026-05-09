@@ -1,0 +1,48 @@
+/* Workflow Diagram */
+.workflow-diagram {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 40px;
+    padding: 30px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 20px;
+}
+
+.workflow-stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    flex: 1;
+}
+
+.workflow-arrow {
+    font-size: 50px;
+    color: rgba(56, 189, 248, 0.5);
+    margin: 0 20px;
+}
+
+.stage-icon {
+    font-size: 30px;
+    font-weight: 800;
+    color: #38bdf8;
+    background: rgba(56, 189, 248, 0.1);
+    padding: 10px 20px;
+    border-radius: 12px;
+    margin-bottom: 15px;
+    border: 2px solid rgba(56, 189, 248, 0.3);
+}
+
+.stage-label {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 5px;
+}
+
+.stage-tool {
+    font-size: 24px;
+    font-weight: 500;
+    color: #818cf8;
+}

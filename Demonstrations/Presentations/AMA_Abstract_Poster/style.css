@@ -19,17 +19,17 @@ body {
     font-family: 'Inter', sans-serif;
     background: linear-gradient(135deg, var(--gradient-start) 0%, var(--gradient-end) 100%);
     color: var(--text-primary);
-    width: 1920px;
-    height: 1440px;
+    width: 48in;
+    height: 36in;
     overflow: hidden;
-    padding: 40px;
+    padding: 80px;
 }
 
 .poster-container {
     display: flex;
     flex-direction: column;
     height: 100%;
-    gap: 30px;
+    gap: 60px;
 }
 
 /* Glassmorphism Panel Utility */
@@ -37,32 +37,33 @@ body {
     background: var(--panel-bg);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
-    border: 1px solid var(--panel-border);
-    border-radius: 24px;
-    padding: 40px;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    border: 2px solid var(--panel-border);
+    border-radius: 40px;
+    padding: 60px;
+    box-shadow: 0 40px 80px -20px rgba(0, 0, 0, 0.5);
 }
 
 /* Header */
 .poster-header {
     text-align: center;
-    padding: 40px 60px;
+    padding: 60px 100px;
     flex-shrink: 0;
 }
 
 .poster-title {
     font-family: 'Outfit', sans-serif;
-    font-size: 48px;
+    font-size: 85px;
     font-weight: 700;
     line-height: 1.2;
-    margin-bottom: 15px;
+    margin-bottom: 25px;
     background: linear-gradient(to right, #38bdf8, #818cf8);
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
 }
 
 .poster-author {
-    font-size: 24px;
+    font-size: 45px;
     color: var(--text-secondary);
     font-weight: 500;
 }
@@ -71,7 +72,7 @@ body {
 .poster-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 30px;
+    gap: 60px;
     flex-grow: 1;
     min-height: 0;
 }
@@ -79,7 +80,7 @@ body {
 .column {
     display: flex;
     flex-direction: column;
-    gap: 30px;
+    gap: 50px;
 }
 
 .poster-section {
@@ -90,46 +91,46 @@ body {
 
 .poster-section h3 {
     font-family: 'Outfit', sans-serif;
-    font-size: 28px;
+    font-size: 50px;
     color: var(--accent);
-    margin-bottom: 20px;
-    padding-bottom: 10px;
-    border-bottom: 2px solid rgba(56, 189, 248, 0.3);
+    margin-bottom: 30px;
+    padding-bottom: 15px;
+    border-bottom: 3px solid rgba(56, 189, 248, 0.3);
 }
 
 .poster-section p {
-    font-size: 18px;
+    font-size: 34px;
     line-height: 1.6;
     color: var(--text-secondary);
-    margin-bottom: 20px;
+    margin-bottom: 30px;
 }
 
 /* Figures */
 .poster-figure {
     margin-top: auto;
     background: rgba(0, 0, 0, 0.2);
-    border-radius: 12px;
-    padding: 15px;
+    border-radius: 20px;
+    padding: 25px;
     text-align: center;
 }
 
 .poster-figure img {
     max-width: 100%;
-    max-height: 300px;
+    max-height: 600px;
     object-fit: contain;
-    border-radius: 8px;
-    margin-bottom: 10px;
+    border-radius: 12px;
+    margin-bottom: 15px;
 }
 
 .poster-figure figcaption {
-    font-size: 14px;
+    font-size: 26px;
     color: var(--text-secondary);
     font-style: italic;
 }
 
 .figure-row {
     display: flex;
-    gap: 20px;
+    gap: 40px;
     margin-top: auto;
 }
 
@@ -143,12 +144,12 @@ body {
 }
 
 .references li {
-    font-size: 14px;
+    font-size: 24px;
     color: var(--text-secondary);
-    margin-bottom: 10px;
+    margin-bottom: 15px;
     line-height: 1.4;
     position: relative;
-    padding-left: 15px;
+    padding-left: 30px;
 }
 
 .references li::before {
@@ -156,4 +157,53 @@ body {
     color: var(--accent);
     position: absolute;
     left: 0;
+}
+
+/* Workflow Diagram */
+.workflow-diagram {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 40px;
+    padding: 30px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 20px;
+}
+
+.workflow-stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    flex: 1;
+}
+
+.workflow-arrow {
+    font-size: 50px;
+    color: rgba(56, 189, 248, 0.5);
+    margin: 0 20px;
+}
+
+.stage-icon {
+    font-size: 30px;
+    font-weight: 800;
+    color: #38bdf8;
+    background: rgba(56, 189, 248, 0.1);
+    padding: 10px 20px;
+    border-radius: 12px;
+    margin-bottom: 15px;
+    border: 2px solid rgba(56, 189, 248, 0.3);
+}
+
+.stage-label {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 5px;
+}
+
+.stage-tool {
+    font-size: 24px;
+    font-weight: 500;
+    color: #818cf8;
 }
