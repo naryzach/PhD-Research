@@ -279,6 +279,8 @@ def process_directory(input_dir, output_dir):
             os.makedirs(os.path.join(dirs[tag_grp], "Aggregate_Plots"), exist_ok=True)
         if tag_grp == "Flag_Tagged":
             os.makedirs(os.path.join(dirs[tag_grp], "Uncorrected_Plots"), exist_ok=True)
+            os.makedirs(os.path.join(dirs[tag_grp], "Uncorrected_Dual_Scatter"), exist_ok=True)
+        os.makedirs(os.path.join(dirs[tag_grp], "Dual_Scatter_Plots"), exist_ok=True)
     os.makedirs(dirs["Combined"], exist_ok=True)
 
 
@@ -466,6 +468,18 @@ def process_directory(input_dir, output_dir):
         plt.tight_layout()
         plt.savefig(os.path.join(tag_dir, "Individual_Plots", f"{clean_name}_analysis.png"))
         plt.close()
+
+        # 4a-2. Standalone Dual Scatter Plot
+        plt.figure(figsize=(7, 6))
+        plt.hexbin(t_bind, t_expr, gridsize=100, cmap='jet', mincnt=1, bins='log')
+        plt.axvline(np.log10(max(thresh_bind, 1)), color='k', linestyle='--')
+        plt.axhline(np.log10(max(thresh_fitc, 1)), color='k', linestyle='--')
+        plt.xlabel(f"Log10 {bind_lbl} (Binding)")
+        plt.ylabel("Log10 FITC-A (Expression)")
+        plt.title(f"{clean_name}\nDouble+ {double_pos.mean()*100:.1f}%")
+        plt.tight_layout()
+        plt.savefig(os.path.join(tag_dir, "Dual_Scatter_Plots", f"{clean_name}_dual_scatter.png"), dpi=300)
+        plt.close()
         
         # 4b. Plot Uncorrected Figures (for FLAG samples to show spillover)
         if tag == "flag":
@@ -497,6 +511,18 @@ def process_directory(input_dir, output_dir):
             plt.suptitle(f"{clean_name} (UNCORRECTED)", fontsize=16)
             plt.tight_layout()
             plt.savefig(os.path.join(tag_dir, "Uncorrected_Plots", f"{clean_name}_uncorrected.png"))
+            plt.close()
+
+            # 4b-2. Standalone Uncorrected Dual Scatter Plot
+            plt.figure(figsize=(7, 6))
+            plt.hexbin(t_bind_raw, t_expr, gridsize=100, cmap='jet', mincnt=1, bins='log')
+            plt.axvline(np.log10(max(thresh_pe_raw, 1)), color='k', linestyle='--')
+            plt.axhline(np.log10(max(thresh_fitc, 1)), color='k', linestyle='--')
+            plt.xlabel("Log10 PE-A (Uncorrected)")
+            plt.ylabel("Log10 FITC-A (Expression)")
+            plt.title(f"{clean_name} (UNCORRECTED)\nBinding vs Expression")
+            plt.tight_layout()
+            plt.savefig(os.path.join(tag_dir, "Uncorrected_Dual_Scatter", f"{clean_name}_uncorrected_dual_scatter.png"), dpi=300)
             plt.close()
 
         
