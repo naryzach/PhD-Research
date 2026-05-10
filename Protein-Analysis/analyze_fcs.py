@@ -9,16 +9,17 @@ def install(package):
     import subprocess
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
-required_packages = ['fcsparser', 'seaborn', 'scipy', 'matplotlib', 'pandas', 'numpy', 'scikit-image']
-for pkg in required_packages:
+required_packages = ['fcsparser', 'seaborn', 'scipy', 'matplotlib', 'pandas<3', 'numpy<2.0', 'scikit-image']
+for pkg_spec in required_packages:
+    pkg_base = pkg_spec.split('<')[0].split('>')[0].split('=')[0]
     try:
-        if pkg == 'scikit-image':
+        if pkg_base == 'scikit-image':
             __import__('skimage')
         else:
-            __import__(pkg)
+            __import__(pkg_base)
     except ImportError:
-        print(f"Installing {pkg}...")
-        install(pkg)
+        print(f"Installing {pkg_spec}...")
+        install(pkg_spec)
 
 import fcsparser
 import numpy as np
@@ -38,13 +39,15 @@ warnings.filterwarnings("ignore")
 NEG_CONTROL_PATTERNS = ["NC", "Negative Control"] # Starts with any of these
 POS_CONTROL_PATTERNS = ["Positive Control", "TIMP 3"] # Starts with any of these
 
-# Channels
+# Default Channels
+DEFAULT_EXPR_CH = 'FITC-A' # Usually Expression
+DEFAULT_BIND_CH = 'APC-A'  # Usually Binding
+
+# Scatter Channels (Standard)
 CH_FSC_A = 'FSC-A'
 CH_SSC_A = 'SSC-A'
 CH_FSC_H = 'FSC-H'
 CH_SSC_H = 'SSC-H'
-CH_FITC = 'FITC-A' # Expression
-CH_APC = 'APC-A'   # Binding
 
 # Origin Debris Filter
 MIN_FSC = 500000
@@ -261,7 +264,7 @@ def transform_logicle(data, channels):
         df_trans[ch] = np.log10(np.clip(df_trans[ch], 1, None))
     return df_trans
 
-def process_directory(input_dir, output_dir):
+def process_directory(input_dir, output_dir, expr_ch=DEFAULT_EXPR_CH, bind_ch=DEFAULT_BIND_CH):
     # 1. Setup
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -314,8 +317,12 @@ def process_directory(input_dir, output_dir):
         return
 
     # Semantic Channel Mapping
-    CH_EXPR = CH_FITC # Expression (Y-axis)
-    CH_BIND = CH_APC  # Binding (X-axis)
+    CH_EXPR = expr_ch # Expression (Y-axis)
+    CH_BIND = bind_ch # Binding (X-axis)
+
+    # Label Mapping for Plots
+    LBL_EXPR = CH_EXPR.replace("-A", "")
+    LBL_BIND = CH_BIND.replace("-A", "")
 
     # 2. Process Controls
     # Negative Controls
@@ -393,8 +400,8 @@ def process_directory(input_dir, output_dir):
             ax2.hexbin(t_bind_nc, t_expr_nc, gridsize=100, cmap='jet', mincnt=1, bins='log')
             ax2.axvline(np.log10(max(thresh_bind, 1)), color='r', linestyle='--', label=f'{NC_CUTOFF_PERCENTILE}% Bind Thresh')
             ax2.axhline(np.log10(max(thresh_expr, 1)), color='r', linestyle='--', label=f'{NC_CUTOFF_PERCENTILE}% Expr Thresh')
-            ax2.set_xlabel("Log10 APC-A (Binding)")
-            ax2.set_ylabel("Log10 FITC-A (Expression)")
+            ax2.set_xlabel(f"Log10 {CH_BIND} (Binding)")
+            ax2.set_ylabel(f"Log10 {CH_EXPR} (Expression)")
             ax2.set_title(f"{NC_CUTOFF_PERCENTILE}% Thresholds on Negative Control")
             ax2.legend(loc='lower left')
             plt.tight_layout()
@@ -405,7 +412,7 @@ def process_directory(input_dir, output_dir):
             fig_ex, ax_ex = plt.subplots(1, 1, figsize=(6, 4))
             sns.kdeplot(t_expr_nc, fill=True, ax=ax_ex, color='purple')
             ax_ex.axvline(np.log10(max(thresh_expr, 1)), color='r', linestyle='--', label=f'{NC_CUTOFF_PERCENTILE}% Thresh: {thresh_expr:.0f}')
-            ax_ex.set_xlabel("Log10 FITC-A (Expression)")
+            ax_ex.set_xlabel(f"Log10 {CH_EXPR} (Expression)")
             ax_ex.set_title("Negative Control Expression Density")
             ax_ex.legend()
             plt.tight_layout()
@@ -416,7 +423,7 @@ def process_directory(input_dir, output_dir):
             fig_bi, ax_bi = plt.subplots(1, 1, figsize=(6, 4))
             sns.kdeplot(t_bind_nc, fill=True, ax=ax_bi, color='g')
             ax_bi.axvline(np.log10(max(thresh_bind, 1)), color='r', linestyle='--', label=f'{NC_CUTOFF_PERCENTILE}% Thresh: {thresh_bind:.0f}')
-            ax_bi.set_xlabel("Log10 APC-A (Binding)")
+            ax_bi.set_xlabel(f"Log10 {CH_BIND} (Binding)")
             ax_bi.set_title("Negative Control Binding Density")
             ax_bi.legend()
             plt.tight_layout()
@@ -445,7 +452,7 @@ def process_directory(input_dir, output_dir):
         pos_concat = pd.concat(pos_dfs)
         pos_mfi_expr = pos_concat[CH_EXPR].median()
         pos_mfi_bind = pos_concat[CH_BIND].median()
-        print(f"Pos Ctrl Stats: Binding (APC) Median={pos_mfi_bind:.2f}")
+        print(f"Pos Ctrl Stats: Binding ({CH_BIND}) Median={pos_mfi_bind:.2f}")
 
     # 3. Analyze All Samples
     summary_stats = []
@@ -537,18 +544,17 @@ def process_directory(input_dir, output_dir):
         pos_med_ratio = pos_med_bind / pos_med_expr if pos_med_expr > 0 else 0
 
         # --- NEW FILTERED METRICS (User Requested) ---
-        # 1. APC (Binding) stats for Expressed events (FITC > threshold)
+        # 1. Binding stats for Expressed events
         df_bind_m_expr_pos = df_sing[expr_pos]
         bind_m_expr_pos_mean = df_bind_m_expr_pos[CH_BIND].mean() if len(df_bind_m_expr_pos) > 0 else 0
         bind_m_expr_pos_med = df_bind_m_expr_pos[CH_BIND].median() if len(df_bind_m_expr_pos) > 0 else 0
-        
-        # 2. FITC (Expression) stats for Bound events (APC > threshold)
+        # 2. Expression stats for Bound events
         df_expr_m_bind_pos = df_sing[bind_pos]
         expr_m_bind_pos_mean = df_expr_m_bind_pos[CH_EXPR].mean() if len(df_expr_m_bind_pos) > 0 else 0
         expr_m_bind_pos_med = df_expr_m_bind_pos[CH_EXPR].median() if len(df_expr_m_bind_pos) > 0 else 0
 
         # 3. New Refined Metrics
-        # Binding Efficiency: What fraction of FITC+ cells are also APC+?
+        # Binding Efficiency: What fraction of Expressed cells are also Bound?
         bind_eff_ratio = pct_double / pct_expr if pct_expr > 0 else 0
         
         # Intensity-Weighted Binding Index (IWB): event-by-event ratio for DP events
@@ -592,7 +598,7 @@ def process_directory(input_dir, output_dir):
             "Bind Med (Expr+)": bind_m_expr_pos_med,
             "Expr Mean (Bind+)": expr_m_bind_pos_mean,
             "Expr Med (Bind+)": expr_m_bind_pos_med,
-            "Binding Efficiency (DP/FITC+)": bind_eff_ratio,
+            f"Binding Efficiency (DP/{LBL_EXPR}+)": bind_eff_ratio,
             "Intensity-Weighted Binding Index": iwb_index
         })
         
@@ -600,7 +606,7 @@ def process_directory(input_dir, output_dir):
         log_thresh_expr = np.log10(max(1, thresh_expr))
         
         # --- NEW FILTERED HISTOGRAMS (User Requested) ---
-        # 1. APC Histogram for Expressed Cells
+        # 1. Binding Histogram for Expressed Cells
         if len(df_bind_m_expr_pos) > 0:
             plt.figure(figsize=(8, 6))
             t_vals = np.log10(np.clip(df_bind_m_expr_pos[CH_BIND], 1, None))
@@ -615,13 +621,13 @@ def process_directory(input_dir, output_dir):
             plt.axvline(log_thresh_bind, color='black', linestyle='-', alpha=0.5, label='Bind Thresh')
             
             plt.title(f"Binding of Expressed Cells: {clean_name}")
-            plt.xlabel("Log10 APC (Binding)")
+            plt.xlabel(f"Log10 {CH_BIND} (Binding)")
             plt.legend()
             plt.tight_layout()
             plt.savefig(os.path.join(filtered_bind_dir, f"{clean_name}_Bind_Filtered.png"), dpi=200)
             plt.close()
             
-        # 2. FITC Histogram for Bound Cells
+        # 2. Expression Histogram for Bound Cells
         if len(df_expr_m_bind_pos) > 0:
             plt.figure(figsize=(8, 6))
             t_vals = np.log10(np.clip(df_expr_m_bind_pos[CH_EXPR], 1, None))
@@ -636,7 +642,7 @@ def process_directory(input_dir, output_dir):
             plt.axvline(log_thresh_expr, color='black', linestyle='-', alpha=0.5, label='Expr Thresh')
             
             plt.title(f"Expression of Bound Cells: {clean_name}")
-            plt.xlabel("Log10 FITC (Expression)")
+            plt.xlabel(f"Log10 {CH_EXPR} (Expression)")
             plt.legend()
             plt.tight_layout()
             plt.savefig(os.path.join(filtered_expr_dir, f"{clean_name}_Expr_Filtered.png"), dpi=200)
@@ -657,7 +663,7 @@ def process_directory(input_dir, output_dir):
                 axes[0].axvline(m_mean_ex, color='k', linestyle='--', label=f'Mean: {pos_mean_expr:.0f}')
                 axes[0].axvline(m_med_ex, color='b', linestyle=':', label=f'Median: {pos_med_expr:.0f}')
                 axes[0].set_title("Positive Expression Dist")
-                axes[0].set_xlabel("Log10 FITC-A (Expression)")
+                axes[0].set_xlabel(f"Log10 {CH_EXPR} (Expression)")
                 axes[0].legend()
             
             if len(df_pos_bind) > 0:
@@ -670,7 +676,7 @@ def process_directory(input_dir, output_dir):
                 axes[1].axvline(m_mean_bi, color='k', linestyle='--', label=f'Mean: {pos_mean_bind:.0f}')
                 axes[1].axvline(m_med_bi, color='b', linestyle=':', label=f'Median: {pos_med_bind:.0f}')
                 axes[1].set_title("Positive Binding Dist")
-                axes[1].set_xlabel("Log10 APC-A (Binding)")
+                axes[1].set_xlabel(f"Log10 {CH_BIND} (Binding)")
                 axes[1].legend()
                 
             plt.suptitle(f"{clean_name} - Positive Events Distributions")
@@ -692,7 +698,7 @@ def process_directory(input_dir, output_dir):
         log_thresh_bind = np.log10(max(1, thresh_bind))
         log_thresh_expr = np.log10(max(1, thresh_expr))
         
-        # Panel 2: Expression Distribution (FITC Histogram)
+        # Panel 2: Expression Distribution (Histogram)
         sns.kdeplot(t_expr, fill=True, ax=axes[0,1], color='purple', label='Sample')
         if neg_log_expr is not None:
             sns.kdeplot(neg_log_expr, fill=True, ax=axes[0,1], color='gray', alpha=0.3, label='Neg Ctrl')
@@ -701,7 +707,7 @@ def process_directory(input_dir, output_dir):
         axes[0,1].text(0.05, 0.95, f"Unexpressed: {pct_expr_left:.1f}%\nExpressed: {pct_expr:.1f}%", 
                        transform=axes[0,1].transAxes, fontsize=10, verticalalignment='top',
                        bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-        axes[0,1].set_xlabel("Log10 FITC (Expression)")
+        axes[0,1].set_xlabel(f"Log10 {CH_EXPR} (Expression)")
         axes[0,1].set_title(f"Expression Dist (FC: {fc_expr:.1f}x)")
         axes[0,1].legend()
 
@@ -709,8 +715,8 @@ def process_directory(input_dir, output_dir):
         axes[1,0].hexbin(t_bind, t_expr, gridsize=100, cmap='jet', mincnt=1, bins='log')
         axes[1,0].axvline(log_thresh_bind, color='k', linestyle='--')
         axes[1,0].axhline(log_thresh_expr, color='k', linestyle='--')
-        axes[1,0].set_xlabel("Log10 APC (Binding)")
-        axes[1,0].set_ylabel("Log10 FITC (Expression)")
+        axes[1,0].set_xlabel(f"Log10 {CH_BIND} (Binding)")
+        axes[1,0].set_ylabel(f"Log10 {CH_EXPR} (Expression)")
         pct_ll = 100 - pct_expr - pct_bind + pct_double # roughly, or explicitly calculated:
         expr_pos_only = (df_sing[CH_EXPR] >= thresh_expr) & (df_sing[CH_BIND] < thresh_bind)
         bind_pos_only = (df_sing[CH_EXPR] < thresh_expr) & (df_sing[CH_BIND] >= thresh_bind)
@@ -724,7 +730,7 @@ def process_directory(input_dir, output_dir):
         quadrant_str = f"Q1 (UL): {pct_ul_v:.1f}% | Q2 (UR): {pct_ur_v:.1f}%\nQ3 (LL): {pct_ll_v:.1f}% | Q4 (LR): {pct_lr_v:.1f}%"
         axes[1,0].set_title(f"Quadrant Plot\n{quadrant_str}")
         
-        # Panel 4: Binding Distribution (APC Histogram)
+        # Panel 4: Binding Distribution (Histogram)
         sns.kdeplot(t_bind, fill=True, ax=axes[1,1], color='g', label='Sample')
         if neg_log_bind is not None:
             sns.kdeplot(neg_log_bind, fill=True, ax=axes[1,1], color='gray', alpha=0.3, label='Neg Ctrl')
@@ -733,7 +739,7 @@ def process_directory(input_dir, output_dir):
         axes[1,1].text(0.05, 0.95, f"Unbound: {pct_bind_left:.1f}%\nBound: {pct_bind:.1f}%", 
                        transform=axes[1,1].transAxes, fontsize=10, verticalalignment='top',
                        bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-        axes[1,1].set_xlabel("Log10 APC (Binding)")
+        axes[1,1].set_xlabel(f"Log10 {CH_BIND} (Binding)")
         axes[1,1].set_title(f"Binding Dist (FC: {fc_bind:.1f}x)")
         axes[1,1].legend()
         
@@ -748,8 +754,8 @@ def process_directory(input_dir, output_dir):
             plt.hexbin(t_bind, t_expr, gridsize=100, cmap='jet', mincnt=1, bins='log')
             plt.axvline(log_thresh_bind, color='k', linestyle='--')
             plt.axhline(log_thresh_expr, color='k', linestyle='--')
-            plt.xlabel("Log10 APC-A (Binding)")
-            plt.ylabel("Log10 FITC-A (Expression)")
+            plt.xlabel(f"Log10 {CH_BIND} (Binding)")
+            plt.ylabel(f"Log10 {CH_EXPR} (Expression)")
             plt.title(f"{clean_name}")
             
             textstr = '\n'.join((
@@ -775,7 +781,7 @@ def process_directory(input_dir, output_dir):
             sns.kdeplot(t_bind, fill=True, color='green', label=clean_name, alpha=0.4)
             plt.axvline(log_thresh_bind, color='r', linestyle='--', label=f'{NC_CUTOFF_PERCENTILE}% NC Thresh')
             
-            plt.xlabel("Log10 APC-A (Binding)")
+            plt.xlabel(f"Log10 {CH_BIND} (Binding)")
             plt.title(f"Binding Comparison: {clean_name}\n(Ratio vs Pos: {fc_vs_pos:.2f})")
             plt.legend()
             plt.tight_layout()
@@ -792,7 +798,7 @@ def process_directory(input_dir, output_dir):
             sns.kdeplot(t_expr, fill=True, color='purple', label=clean_name, alpha=0.4)
             plt.axvline(log_thresh_expr, color='r', linestyle='--', label=f'{NC_CUTOFF_PERCENTILE}% NC Thresh')
             
-            plt.xlabel("Log10 FITC-A (Expression)")
+            plt.xlabel(f"Log10 {CH_EXPR} (Expression)")
             plt.title(f"Expression Comparison: {clean_name}\n(FC: {fc_expr:.1f}x)")
             plt.legend()
             plt.tight_layout()
@@ -848,19 +854,17 @@ def process_directory(input_dir, output_dir):
         pos_iwb_ref = df_stats["Intensity-Weighted Binding Index"].max()
     pos_iwb_ref = max(pos_iwb_ref, 1e-9)
     df_stats["Norm Intensity-Weighted Binding Index"] = df_stats["Intensity-Weighted Binding Index"] / pos_iwb_ref
-
-    
     # Save Stats
     df_stats.to_csv(os.path.join(output_dir, "summary_stats.csv"), index=False)
     print(f"\nAnalysis complete. Saved to {os.path.join(output_dir, 'summary_stats.csv')}")
     
     # ---- AGGREGATE PLOTS ----
-    generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, agg_dir)
+    generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, agg_dir, expr_ch=CH_EXPR, bind_ch=CH_BIND)
     
     # Report
-    generate_report(df_stats, output_dir)
+    generate_report(df_stats, output_dir, expr_ch=CH_EXPR, bind_ch=CH_BIND)
 
-def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, output_dir):
+def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, output_dir, expr_ch=DEFAULT_EXPR_CH, bind_ch=DEFAULT_BIND_CH):
     # Re-implementing the aggregation plots to ensure they exist
     print("Generating aggregate plots...")
     
@@ -876,8 +880,8 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
     
     # Iterate for both Binding and Expression
     metrics = {
-        "Binding": {"col": "LogBinding", "mfi": "Bind MFI", "thresh": thresh_bind, "color": "cubehelix", "x_lab": "Log10 APC-A (Binding)"},
-        "Expression": {"col": "LogExpression", "mfi": "Expr MFI", "thresh": thresh_expr, "color": "mako", "x_lab": "Log10 FITC-A (Expression)"}
+        "Binding": {"col": "LogBinding", "mfi": "Bind MFI", "thresh": thresh_bind, "color": "cubehelix", "x_lab": f"Log10 {bind_ch} (Binding)"},
+        "Expression": {"col": "LogExpression", "mfi": "Expr MFI", "thresh": thresh_expr, "color": "mako", "x_lab": f"Log10 {expr_ch} (Expression)"}
     }
 
     for m_name, m_info in metrics.items():
@@ -1106,8 +1110,8 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
     plt.axvline(thresh_bind, color='r', linestyle='--', label=f'{NC_CUTOFF_PERCENTILE}% NC Bind Thresh')
     plt.axhline(thresh_expr, color='r', linestyle='--', label=f'{NC_CUTOFF_PERCENTILE}% NC Expr Thresh')
     plt.title("Mean Fluorescence Intensity: Binding vs Expression")
-    plt.xlabel("Binding MFI (APC)")
-    plt.ylabel("Expression MFI (FITC)")
+    plt.xlabel(f"Binding MFI ({bind_ch.replace('-A', '')})")
+    plt.ylabel(f"Expression MFI ({expr_ch.replace('-A', '')})")
     plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "Aggregate_MFI_Scatter.png"))
@@ -1143,10 +1147,10 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
                          ("Pos Med Ratio", "Raw Pos Median Ratio (Bind/Expr)"),
                          ("Norm Pos Mean Ratio", "Normalized Pos Mean Ratio (Bind/Expr vs PosCtrl)"), 
                          ("Norm Pos Med Ratio", "Normalized Pos Median Ratio (Bind/Expr vs PosCtrl)"),
-                         ("Bind Med (Expr+)", "Median APC for FITC+ Cells"),
-                         ("Expr Med (Bind+)", "Median FITC for APC+ Cells"),
-                         ("Norm Bind Med (Expr+)", "Normalized Median APC for FITC+ Cells (vs PosCtrl)"),
-                         ("Norm Expr Med (Bind+)", "Normalized Median FITC for APC+ Cells (vs PosCtrl)")]:
+                         ("Bind Med (Expr+)", f"Median {bind_ch.replace('-A', '')} for {expr_ch.replace('-A', '')}+ Cells"),
+                         ("Expr Med (Bind+)", f"Median {expr_ch.replace('-A', '')} for {bind_ch.replace('-A', '')}+ Cells"),
+                         ("Norm Bind Med (Expr+)", f"Normalized Median {bind_ch.replace('-A', '')} for {expr_ch.replace('-A', '')}+ Cells (vs PosCtrl)"),
+                         ("Norm Expr Med (Bind+)", f"Normalized Median {expr_ch.replace('-A', '')} for {bind_ch.replace('-A', '')}+ Cells (vs PosCtrl)")]:
                          
         if df_valid_ratio.empty:
             continue
@@ -1190,7 +1194,7 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
         plt.savefig(os.path.join(pos_ratio_dir, f"Aggregate_{m_col.replace(' ', '_')}.png"), bbox_inches="tight")
         plt.close()
 
-def generate_report(df, output_dir):
+def generate_report(df, output_dir, expr_ch=DEFAULT_EXPR_CH, bind_ch=DEFAULT_BIND_CH):
     """Generates a text report summarizing the findings."""
     
     report_path = os.path.join(output_dir, "Analysis_Report.md")
@@ -1211,8 +1215,8 @@ def generate_report(df, output_dir):
         f.write("\n> **Note**: All analyses are performed on **Singlet** events only. The Singlet Gate removes doublets (clumps of cells) to ensure accurate MFI quantification per cell.\n\n")
         
         f.write("## 1. Executive Summary\n")
-        f.write(f"- **Highest Binding (APC)**: {top_binding['Filename']} (MFI: {top_binding['Bind MFI']:.0f}, Ratio vs Pos: {top_binding['Bind FC vs Pos Ctrl']:.2f})\n")
-        f.write(f"- **Highest Expression (FITC)**: {top_expr['Filename']} (MFI: {top_expr['Expr MFI']:.0f}, %+: {top_expr['Expr+ %']:.1f}%)\n")
+        f.write(f"- **Highest Binding ({bind_ch.replace('-A', '')})**: {top_binding['Filename']} (MFI: {top_binding['Bind MFI']:.0f}, Ratio vs Pos: {top_binding['Bind FC vs Pos Ctrl']:.2f})\n")
+        f.write(f"- **Highest Expression ({expr_ch.replace('-A', '')})**: {top_expr['Filename']} (MFI: {top_expr['Expr MFI']:.0f}, %+: {top_expr['Expr+ %']:.1f}%)\n")
         
         # Best Ratio Effectiveness
         top_ratio = df.sort_values("Norm Pos Med Ratio", ascending=False).iloc[0]
@@ -1249,9 +1253,9 @@ def generate_report(df, output_dir):
         f.write(f"- **Pos Mean / Median Ratio (Raw)**: For events strictly above the {NC_CUTOFF_PERCENTILE}% Negative Control threshold, this is the ratio of their Binding level to their Expression level (`Pos Bind / Pos Expr`). Validates how effectively the expressed protein binds the target.\n")
         f.write("- **Normalized Pos Mean / Median Ratio**: The Raw Ratio scaled against the Positive Control's ratio. A value of `1.0` means the sample's binding-to-expression effectiveness perfectly matches the Positive Control. `>1.0` is better than Pos Ctrl, `<1.0` is worse.\n")
         f.write(f"- **Double+ %**: The percentage of *all* events in the sample that fell into the upper-right quadrant (i.e., they expressed *and* bound above the {NC_CUTOFF_PERCENTILE}% Negative Control thresholds).\n")
-        f.write("- **Bind Med (Expr+)**: The median binding level (APC) of the population that is successfully expressing the protein (FITC > NC boundary).\n")
-        f.write("- **Norm Bind Med (Expr+)**: The above metric, but normalized to the same metric in the Positive Control. A value of 1.0 means the binding effectiveness per expressing cell matches the Positive Control.\n")
-        f.write("- **Expr Med (Bind+)**: The median expression level (FITC) of the population that shows a binding signal (APC > NC boundary).\n")
+        f.write(f"- **Bind Med (Expr+)**: The median binding level ({bind_ch.replace('-A', '')}) of the population that is successfully expressing the protein ({expr_ch.replace('-A', '')} > NC boundary).\n")
+        f.write(f"- **Norm Bind Med (Expr+)**: The above metric, but normalized to the same metric in the Positive Control. A value of 1.0 means the binding effectiveness per expressing cell matches the Positive Control.\n")
+        f.write(f"- **Expr Med (Bind+)**: The median expression level ({expr_ch.replace('-A', '')}) of the population that shows a binding signal ({bind_ch.replace('-A', '')} > NC boundary).\n")
 
 def stats_observation(fc_bind, fc_expr, efficiency, vs_pos=0):
     obs = []
@@ -1303,7 +1307,23 @@ def main():
     parser.add_argument("-i", "--input", required=True, help="Path to input directory containing .fcs files, or parent directory if using --batch.")
     parser.add_argument("-o", "--output", default=None, help="Path to output directory. Defaults to '<input>_Analysis'. Ignored if using --batch.")
     parser.add_argument("--batch", action="store_true", help="Batch mode: Treat the input directory as a parent folder containing multiple dataset subfolders. Processes each subfolder independently.")
+    
+    # Channel configuration
+    parser.add_argument("--expr_channel", default=DEFAULT_EXPR_CH, help=f"Expression channel (default: {DEFAULT_EXPR_CH})")
+    parser.add_argument("--bind_channel", default=DEFAULT_BIND_CH, help=f"Binding channel (default: {DEFAULT_BIND_CH})")
+    parser.add_argument("--tag", choices=['his', 'flag'], help="Shortcut for common tags. 'his' (FITC/APC), 'flag' (APC/PE)")
+
     args = parser.parse_args()
+
+    # Handle tag shortcuts
+    expr_ch = args.expr_channel
+    bind_ch = args.bind_channel
+    if args.tag == 'his':
+        expr_ch = 'FITC-A'
+        bind_ch = 'APC-A'
+    elif args.tag == 'flag':
+        expr_ch = 'APC-A'
+        bind_ch = 'PE-A'
 
     input_dir = os.path.abspath(args.input)
     
@@ -1331,7 +1351,7 @@ def main():
                 
             out_name = f"{os.path.basename(subdir)}_Analysis"
             out_dir = os.path.join(input_dir, out_name)
-            process_directory(subdir, out_dir)
+            process_directory(subdir, out_dir, expr_ch=expr_ch, bind_ch=bind_ch)
             
         print("\nBatch Processing Complete!")
             
@@ -1343,7 +1363,7 @@ def main():
             base = os.path.basename(os.path.normpath(input_dir))
             output_dir = os.path.join(os.path.dirname(input_dir), f"{base}_Analysis")
             
-        process_directory(input_dir, output_dir)
+        process_directory(input_dir, output_dir, expr_ch=expr_ch, bind_ch=bind_ch)
 
 if __name__ == "__main__":
     main()
