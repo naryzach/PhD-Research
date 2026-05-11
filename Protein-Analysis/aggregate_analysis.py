@@ -10,7 +10,9 @@ def install(package):
     import subprocess
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
-required_packages = ['matplotlib', 'pandas', 'numpy']
+required_packages = ['matplotlib', 'pandas', 'numpy', 'scipy', 'statsmodels']
+
+
 for pkg in required_packages:
     try:
         __import__(pkg)
@@ -24,6 +26,56 @@ import numpy as np
 
 # Use non-interactive backend for headless execution
 plt.switch_backend('Agg')
+
+from scipy import stats
+
+def run_anova_p(df, group_col, value_col):
+    """Returns the ANOVA p-value for a given value_col grouped by group_col."""
+    if df.empty: return np.nan
+    groups = [group[value_col].values for name, group in df.groupby(group_col)]
+    # Filter out groups with < 1 data point
+    groups = [g for g in groups if len(g) > 0]
+    if len(groups) < 2:
+        return np.nan
+    try:
+        f_stat, p_val = stats.f_oneway(*groups)
+        return p_val
+    except:
+        return np.nan
+
+def run_tukey_posthoc(df, group_col, value_col):
+    """Runs Tukey HSD post-hoc test and returns the summary as a string."""
+    from statsmodels.stats.multicomp import pairwise_tukeyhsd
+    if df.empty: return "No data"
+    
+    # Filter groups with < 1 data point
+    counts = df.groupby(group_col)[value_col].count()
+    valid_groups = counts[counts > 0].index.tolist()
+    if len(valid_groups) < 2:
+        return "Insufficient groups for Post-hoc"
+    
+    df_f = df[df[group_col].isin(valid_groups)]
+    
+    try:
+        tukey = pairwise_tukeyhsd(endog=df_f[value_col], groups=df_f[group_col], alpha=0.05)
+        return tukey
+    except Exception as e:
+        return None
+
+def format_tukey_sig_only(tukey, context_label):
+    """Returns a string listing only significant pairs from a Tukey result."""
+    if tukey is None: return ""
+    import pandas as pd
+    df = pd.DataFrame(data=tukey._results_table.data[1:], columns=tukey._results_table.data[0])
+    sig = df[df['reject'] == True]
+    if sig.empty: return ""
+    
+    out = [f"--- {context_label} ---"]
+    for _, row in sig.iterrows():
+        out.append(f"  {row['group1']} vs {row['group2']}: diff={row['meandiff']:.4f}, p-adj={row['p-adj']:.4f}")
+    return "\n".join(out) + "\n"
+
+
 
 def standardize_construct(name):
     """
@@ -66,13 +118,20 @@ def plot_stats(df, title, output_path, y_col='Binding Ratio', y_label='Binding E
     
     for c in sorted_constructs:
         ratios = stats[c]
-        mean = sum(ratios) / len(ratios)
+        n = len(ratios)
+        mean = sum(ratios) / n
         means.append(mean)
-        if len(ratios) > 1:
-            variance = sum((x - mean) ** 2 for x in ratios) / (len(ratios) - 1)
-            stds.append(variance ** 0.5)
+        if n > 1:
+            variance = sum((x - mean) ** 2 for x in ratios) / (n - 1)
+            sd = variance ** 0.5
+            sem = sd / (n ** 0.5)
+            # 95% Confidence Interval (approx 1.96 * SEM)
+            # Using 1.96 for large N, but could use t-distribution if preferred.
+            # Here we use 1.96 as a standard approximation.
+            stds.append(1.96 * sem)
         else:
             stds.append(0)
+
             
         if color_col:
             c_vals = color_stats[c]
@@ -340,7 +399,11 @@ def main():
     # Use only valid trials and samples with sufficient expression/events for the generated bar graphs
     global_df_filtered = global_df[(global_df['Trial Failed'] == False) & (global_df['Low Expression'] == False) & (global_df['Low Events'] == False)]
     
+    # Initialize master log
+    master_sig_log = []
+
     for metric in metrics:
+
         metric_dir = os.path.join(output_dir, metric["folder"])
         if not os.path.exists(metric_dir):
             os.makedirs(metric_dir)
@@ -369,6 +432,27 @@ def main():
                 color_col='Double+ %',
                 color_label='Double Positive % (QC)'
             )
+            
+            # RUN ANOVA across constructs for this target
+            p_val = run_anova_p(target_df, 'Construct', metric['y_col'])
+            if not np.isnan(p_val):
+                print(f"    ANOVA (All Constructs for {t}): p = {p_val:.4e}", flush=True)
+                # We can save this to a log or a specific CSV
+                anova_log_path = os.path.join(metric_dir, f"anova_results_{t}.txt")
+                with open(anova_log_path, 'w') as f:
+                    f.write(f"Target: {t}\nMetric: {metric['y_col']}\nANOVA p-value: {p_val:.4e}\n")
+                    
+                    if p_val < 0.05:
+                        f.write("\nPost-hoc (Tukey HSD) Analysis:\n")
+                        tukey_res = run_tukey_posthoc(target_df, 'Construct', metric['y_col'])
+                        if tukey_res:
+                            f.write(str(tukey_res))
+                            sig_str = format_tukey_sig_only(tukey_res, f"Target: {t} | Metric: {metric['y_col']}")
+                            if sig_str:
+                                master_sig_log.append(sig_str)
+
+
+
 
     # 2. Cross-Target Comparison Table
     print("Generating cross-target summary...", flush=True)
@@ -445,11 +529,13 @@ def main():
 
     # 3. Selectivity Analysis
     # Pass the filtered global dataframe (valid trials only) and the metrics list
-    perform_selectivity_analysis(global_df_filtered, output_dir, metrics)
+    perform_selectivity_analysis(global_df_filtered, output_dir, metrics, master_sig_log)
 
-def perform_selectivity_analysis(df, output_dir, metrics):
+
+def perform_selectivity_analysis(df, output_dir, metrics, master_sig_log):
     """
     Identifies constructs tested against multiple targets and generates
+
     comparison plots and summaries for each specified metric.
     """
     print("Performing selectivity analysis...", flush=True)
@@ -476,8 +562,21 @@ def perform_selectivity_analysis(df, output_dir, metrics):
         stats_df = df.groupby(['Construct', 'Target'])[metric].agg(['mean', 'std', 'count']).reset_index()
         stats_df.columns = ['Construct', 'Target', 'Mean', 'StdDev', 'Count']
         
-        # Calculate SEM (Standard Error of the Mean) for error bars
+        # Calculate SEM and 95% CI
         stats_df['SEM'] = stats_df.apply(lambda row: row['StdDev'] / (row['Count']**0.5) if row['Count'] > 1 else 0, axis=1)
+        stats_df['95% CI'] = stats_df['SEM'] * 1.96
+
+        
+        # Calculate ANOVA p-value for each construct across targets
+        anova_results = []
+        for construct in stats_df['Construct'].unique():
+            c_df = df[df['Construct'] == construct]
+            p = run_anova_p(c_df, 'Target', metric)
+            anova_results.append({'Construct': construct, 'ANOVA_p': p})
+        
+        anova_df = pd.DataFrame(anova_results)
+        stats_df = stats_df.merge(anova_df, on='Construct', how='left')
+
         
         # 2. Identify multi-target constructs
         target_counts = stats_df.groupby('Construct')['Target'].count()
@@ -501,10 +600,12 @@ def perform_selectivity_analysis(df, output_dir, metrics):
         pivot_std = selectivity_df.pivot(index='Construct', columns='Target', values='StdDev').fillna(0)
         
         if not pivot_df.empty:
+            pivot_ci = selectivity_df.pivot(index='Construct', columns='Target', values='95% CI').fillna(0)
             plt.figure(figsize=(16, 10))
-            ax = pivot_df.plot(kind='bar', yerr=pivot_std, figsize=(16, 10), capsize=4, edgecolor='black', alpha=0.8)
+            ax = pivot_df.plot(kind='bar', yerr=pivot_ci, figsize=(16, 10), capsize=4, edgecolor='black', alpha=0.8)
             
-            plt.title(f"{title_prefix}: Across Targets (Mean ± SD)", fontsize=22, pad=20)
+            plt.title(f"{title_prefix}: Across Targets (Mean ± 95% CI)", fontsize=22, pad=20)
+
             plt.xlabel("Construct", fontsize=18)
             plt.ylabel(f"Mean {label}", fontsize=18)
             plt.xticks(rotation=45, ha='right')
@@ -528,10 +629,11 @@ def perform_selectivity_analysis(df, output_dir, metrics):
             plt.figure(figsize=(10, 6))
             # Use a consistent color map for targets
             colors = plt.cm.viridis(np.linspace(0, 0.8, len(c_df)))
-            bars = plt.bar(c_df['Target'], c_df['Mean'], yerr=c_df['StdDev'], capsize=5, 
+            bars = plt.bar(c_df['Target'], c_df['Mean'], yerr=c_df['95% CI'], capsize=5, 
                            color=colors, edgecolor='black', alpha=0.9)
             
-            plt.title(f"{title_prefix}: {construct}", fontsize=20, pad=15)
+            plt.title(f"{title_prefix}: {construct}\n(Error Bars: 95% CI)", fontsize=20, pad=15)
+
             plt.xlabel("Target", fontsize=16)
             plt.ylabel(f"Mean {label}", fontsize=16)
             plt.grid(axis='y', linestyle='--', alpha=0.5)
@@ -546,8 +648,47 @@ def perform_selectivity_analysis(df, output_dir, metrics):
             safe_name = construct.replace(" ", "_").replace("/", "-")
             plt.savefig(os.path.join(indiv_dir, f"selectivity_{safe_name}.png"), dpi=200)
             plt.close()
+
+            
+            # SAVE ANOVA + Tukey HSD text output for this construct
+            anova_dir = os.path.join(metric_dir, "ANOVA_Results")
+            if not os.path.exists(anova_dir):
+                os.makedirs(anova_dir)
+            
+            p_val = c_df['ANOVA_p'].iloc[0]
+            anova_txt_path = os.path.join(anova_dir, f"anova_{safe_name}.txt")
+            with open(anova_txt_path, 'w') as f:
+                f.write(f"Construct: {construct}\n")
+                f.write(f"Metric: {metric}\n")
+                f.write(f"ANOVA p-value (Across Targets): {p_val:.4e}\n")
+                
+                if not np.isnan(p_val) and p_val < 0.05:
+                    f.write("\nPost-hoc (Tukey HSD) Analysis across Targets:\n")
+                    # Get raw trials for this construct
+                    c_trials = df[df['Construct'] == construct]
+                    tukey_res = run_tukey_posthoc(c_trials, 'Target', metric)
+                    if tukey_res:
+                        f.write(str(tukey_res))
+                        sig_str = format_tukey_sig_only(tukey_res, f"Construct: {construct} | Metric: {metric}")
+                        if sig_str:
+                            master_sig_log.append(sig_str)
+
+
         
         print(f"    Saved {len(multi_target_constructs)} individual comparison plots to {indiv_dir}", flush=True)
 
+    # 4. Save Master Significant Results
+    master_log_path = os.path.join(output_dir, "significant_tukey_summary.txt")
+    with open(master_log_path, 'w') as f:
+        f.write("==================================================\n")
+        f.write("   MASTER SUMMARY OF SIGNIFICANT DIFFERENCES\n")
+        f.write("==================================================\n\n")
+        if master_sig_log:
+            f.write("\n".join(master_sig_log))
+        else:
+            f.write("No statistically significant pairwise differences found across any analysis.\n")
+    print(f"Saved master significant results to {master_log_path}", flush=True)
+
 if __name__ == "__main__":
+
     main()

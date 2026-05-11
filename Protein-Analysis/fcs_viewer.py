@@ -108,7 +108,45 @@ if "data_mode" not in st.session_state:
 # ---- HELPER FUNCTIONS ----
 
 @st.cache_data
+def run_anova_p(df, group_col, value_col):
+    """Returns the ANOVA p-value for a given value_col grouped by group_col."""
+    if df.empty: return np.nan
+    groups = [group[value_col].values for name, group in df.groupby(group_col)]
+    groups = [g for g in groups if len(g) > 0]
+    if len(groups) < 2:
+        return np.nan
+    try:
+        f_stat, p_val = stats.f_oneway(*groups)
+        return p_val
+    except:
+        return np.nan
+
+def run_tukey_summary(df, group_col, value_col):
+    """Runs Tukey HSD post-hoc test and returns a dataframe of significant pairs."""
+    from statsmodels.stats.multicomp import pairwise_tukeyhsd
+    if df.empty: return None
+    
+    df_f = df.dropna(subset=[value_col])
+    # Tukey HSD requires groups with > 1 data point for variance estimation
+    counts = df_f.groupby(group_col)[value_col].count()
+    valid_groups = counts[counts > 1].index.tolist()
+    
+    if len(valid_groups) < 2:
+        return None
+        
+    df_f = df_f[df_f[group_col].isin(valid_groups)]
+    
+    try:
+        tukey = pairwise_tukeyhsd(endog=df_f[value_col], groups=df_f[group_col], alpha=0.05)
+        summary_df = pd.DataFrame(data=tukey._results_table.data[1:], columns=tukey._results_table.data[0])
+        significant = summary_df[summary_df['reject'] == True]
+        return significant
+    except:
+        return None
+
 def load_fcs(file_path):
+
+
     """Loads an FCS file and returns metadata and dataframe."""
     try:
         # Check if this is an R2 path
@@ -655,6 +693,31 @@ else:
     def_expr_ch = "FITC-A"
     def_bind_ch = "APC-A"
 
+# --- GLOBAL QC & METRIC SETTINGS ---
+with st.sidebar.expander("🛠️ Global QC & Metric Settings", expanded=False):
+    pc_keywords = st.text_input("PC Keywords (Comma separated)", value="Positive Control, TIMP", help="Keywords to identify which rows are positive controls.", key="sidebar_pc_keywords")
+    pc_pattern = "|".join([k.strip().upper() for k in pc_keywords.split(",") if k.strip()])
+    pc_thresh = st.slider("QC Threshold: Min PC Double+ %", 0.0, 10.0, 2.0, step=0.1, help="Exclude trials where the identified positive control performed poorly.", key="sidebar_pc_thresh")
+    
+    st.divider()
+    metric_options = {
+        "Norm Median Ratio": "Norm Median Ratio",
+        "Binding Efficiency": "Binding Efficiency (DP/FITC+)",
+        "Intensity-Weighted (IWB)": "Norm Intensity-Weighted Binding Index",
+        "Norm Median of FITC+": "Norm Bind Med (Expr+)"
+    }
+
+    sel_metric_label = st.radio("Select Analysis Metric", list(metric_options.keys()), horizontal=True, index=0, key="sidebar_metric_radio")
+    sel_metric_col = metric_options[sel_metric_label]
+
+# --- MANUAL THRESHOLD SETTINGS ---
+# Note: Values will be populated later once file/controls are loaded
+thresh_expander = st.sidebar.expander("🎯 Manual Threshold Settings", expanded=False)
+with thresh_expander:
+    thresh_expr_placeholder = st.empty()
+    thresh_bind_placeholder = st.empty()
+
+
 
 with st.sidebar.expander("🛠️ Advanced Gating Settings"):
     g_min_fsc = st.number_input("Min FSC-A (Singlets)", value=500000, step=50000)
@@ -731,8 +794,6 @@ if selected_file:
         
     if ctrls["has_pc"]:
         st.sidebar.info("Global Positive Control data available.")
-        
-    st.sidebar.subheader("Threshold Settings")
     
     # meta, df = load_fcs(selected_file) # Already loaded above
     
@@ -747,11 +808,14 @@ if selected_file:
             def_thresh_expr = float(np.percentile(df[expr_col], g_nc_pct))
             def_thresh_bind = float(np.percentile(df[bind_col], g_nc_pct))
 
-        thresh_expr_val = st.sidebar.number_input("Expression Thresh", value=def_thresh_expr)
-        thresh_bind_val = st.sidebar.number_input("Binding Thresh", value=def_thresh_bind)
+        with thresh_expr_placeholder:
+            thresh_expr_val = st.number_input("Expression Thresh", value=def_thresh_expr, key="input_thresh_expr")
+        with thresh_bind_placeholder:
+            thresh_bind_val = st.number_input("Binding Thresh", value=def_thresh_bind, key="input_thresh_bind")
 
         log_thresh_expr = np.log10(max(1, thresh_expr_val))
         log_thresh_bind = np.log10(max(1, thresh_bind_val))
+
 
 st.sidebar.divider()
 st.sidebar.subheader("📊 Data Selection")
@@ -826,7 +890,58 @@ if selected_file and df is not None:
             cc3.metric("% of PC MFI", f"{pct_of_pos:.1f}%")
             st.markdown("---")
             
+    # --- GLOBAL DATA LOADING (for tab_agg and tab_selectivity) ---
+    if fs and BUCKET:
+        global_agg_dir = os.path.join(BUCKET, "Aggregate_FCS_Analysis")
+    else:
+        global_agg_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../Local/Aggregate_FCS_Analysis"))
+    
+    g_agg_csv = os.path.join(global_agg_dir, "aggregate_summary.csv")
+    df_global_trials = None
+    if cloud_exists(g_agg_csv):
+        df_global_trials = cloud_read_csv(g_agg_csv)
+
+    # --- GLOBAL DATA FILTERING ---
+    df_global_filtered = None
+    df_pc_status = pd.DataFrame()
+    if df_global_trials is not None:
+        df_f = df_global_trials.copy()
+        
+        # 1. Internal QC Columns (from individual folder analysis)
+        if 'Trial Failed' in df_f.columns:
+            df_f = df_f[df_f['Trial Failed'] == False]
+        if 'Low Expression' in df_f.columns:
+            df_f = df_f[df_f['Low Expression'] == False]
+        if 'Low Events' in df_f.columns:
+            df_f = df_f[df_f['Low Events'] == False]
+            
+        # 2. Dynamic PC QC (based on sidebar threshold)
+        df_f["IsPC"] = df_f["Construct"].str.upper().str.contains(pc_pattern) | \
+                       df_f["Raw Name"].str.upper().str.contains(pc_pattern)
+        
+        trial_groups = df_f.groupby(["Target", "Date"])
+        valid_trial_ids = []
+        pc_info = []
+        for (tgt, dt), group in trial_groups:
+            pcs = group[group["IsPC"]]
+            if not pcs.empty:
+                best_pc_dp = pcs["Double+ %"].max()
+                pc_row = pcs[pcs["Double+ %"] == best_pc_dp].iloc[0]
+                pc_name = pc_row["Raw Name"]
+                if best_pc_dp >= pc_thresh:
+                    valid_trial_ids.append(f"{tgt}_{dt}")
+            else:
+                best_pc_dp = 0
+                pc_name = "None Found"
+            pc_info.append({"Target": tgt, "Date": dt, "PC Name": pc_name, "PC Double+ %": best_pc_dp})
+        
+        df_pc_status = pd.DataFrame(pc_info)
+        df_f["TrialID"] = df_f["Target"].astype(str) + "_" + df_f["Date"].astype(str)
+        df_global_filtered = df_f[df_f["TrialID"].isin(valid_trial_ids)].copy()
+
     # TABS
+
+
     tab_main, tab_pos, tab_folder, tab_agg, tab_selectivity, tab_custom, tab_raw, tab_meta = st.tabs([
         "Main Analysis", "Pos Control Analytics", "Folder Analysis", "Aggregate Analysis", "Selectivity Analysis", "Custom Plots", "Raw Data", "Metadata"
     ])
@@ -1277,160 +1392,141 @@ if selected_file and df is not None:
                     st.warning("Could not compute aggregate stats on the fly.")
 
     with tab_agg:
-        if fs and BUCKET:
-            # Look for global aggregates in the R2 bucket
-            global_agg_dir = os.path.join(BUCKET, "Aggregate_FCS_Analysis")
-        else:
-            global_agg_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../Local/Aggregate_FCS_Analysis"))
-            
-        if cloud_exists(global_agg_dir):
+        if df_global_filtered is not None:
             st.subheader("📊 Global Aggregate Analysis")
+
             g_cross_csv = os.path.join(global_agg_dir, "cross_target_summary.csv")
-            g_agg_csv = os.path.join(global_agg_dir, "aggregate_summary.csv")
             
-            found_g = False
-            if cloud_exists(g_agg_csv):
-                found_g = True
-                df_agg = cloud_read_csv(g_agg_csv)
-                
-                # Filter by Target Dropdown
-                available_targets = sorted(df_agg["Target"].unique())
-                
-                with st.expander("🛠️ Advanced Aggregate Settings"):
-                    qc_c1, qc_c2 = st.columns([1, 1])
-                    with qc_c1:
-                        target_choice = st.selectbox("🎯 Filter by Target", ["All Targets"] + list(available_targets), key="global_target_sel")
-                    with qc_c2:
-                        pc_keywords = st.text_input("PC Keywords (Comma separated)", value="Positive Control, TIMP", help="Keywords to identify which rows are positive controls.")
-                        pc_pattern = "|".join([k.strip().upper() for k in pc_keywords.split(",") if k.strip()])
-                    
-                    pc_thresh = st.slider("QC Threshold: Min PC Double+ %", 0.0, 10.0, 2.0, step=0.1, help="Exclude trials where the identified positive control performed poorly.")
-                    
-                    st.divider()
-                    metric_options = {
-                        "Norm Median Ratio": "Norm Median Ratio",
-                        "Binding Efficiency": "Binding Efficiency (DP/FITC+)",
-                        "Intensity-Weighted (IWB)": "Intensity-Weighted Binding Index",
-                        "Norm Median of FITC+": "Norm Bind Med (Expr+)"
-                    }
-                    sel_metric_label = st.radio("Select Analysis Metric", list(metric_options.keys()), horizontal=True, index=0)
-                    sel_metric_col = metric_options[sel_metric_label]
+            found_g = True
+            available_targets = sorted(df_global_filtered["Target"].unique())
+            target_choice = st.selectbox("🎯 Filter by Target", ["All Targets"] + list(available_targets), key="global_target_sel")
+            
+            df_agg_f = df_global_filtered.copy()
+            if target_choice != "All Targets":
+                df_agg_f = df_agg_f[df_agg_f["Target"] == target_choice]
+            
+            # Separate Constructs from PCs for plotting
+            df_constructs = df_agg_f[~df_agg_f["IsPC"]].copy()
 
-                # 1. Identify Positive Controls on the fly
-                df_agg_all = df_agg.copy()
+            
+            # --- NEW: Aggregated Summary View (Mean/SD) ---
+            st.markdown("### 🏆 Combined Variant Performance (Mean/SD)")
+            if not df_constructs.empty:
+                # Ensure alphabetical sorting here
+                df_constructs = df_constructs.sort_values("Construct")
                 
-                # Categorize as PC or Construct
-                df_agg_all["IsPC"] = df_agg_all["Construct"].str.upper().str.contains(pc_pattern) | \
-                                     df_agg_all["Raw Name"].str.upper().str.contains(pc_pattern)
+                # Update grouping to use selected metric
+                df_grouped = df_constructs.groupby("Construct").agg({
+                    sel_metric_col: ["mean", "std", "count"],
+                    "Double+ %": "mean"
+                }).reset_index()
+                df_grouped.columns = ["Construct", "Mean Val", "SD Val", "n", "Avg Double+ %"]
+                
+                # Calculate SEM and 95% CI
+                df_grouped['SEM'] = df_grouped.apply(lambda row: row['SD Val'] / (row['n']**0.5) if row['n'] > 1 else 0, axis=1)
+                df_grouped['95% CI'] = df_grouped['SEM'] * 1.96
+                
+                # User requested alphabetical order
+                df_grouped = df_grouped.sort_values("Construct")
+                
+                fig_sum = px.bar(
+                    df_grouped, x="Construct", y="Mean Val", error_y="95% CI",
+                    color="Avg Double+ %", color_continuous_scale="Viridis",
+                    template="plotly_dark", title=f"{sel_metric_label} by Construct (Error Bars: 95% CI)",
+                    text_auto='.2f',
+                    hover_data={"n": True, "95% CI": ":.2f"}
+                )
 
-                # 2. For each Trial (Target + Date), find the best PC value
-                trial_groups = df_agg_all.groupby(["Target", "Date"])
-                valid_trials = []
-                pc_info = []
 
-                for (tgt, dt), group in trial_groups:
-                    pcs = group[group["IsPC"]]
-                    # If multiple PCs, take the one with highest Double+ %
-                    if not pcs.empty:
-                        best_pc_dp = pcs["Double+ %"].max()
-                        pc_row = pcs[pcs["Double+ %"] == best_pc_dp].iloc[0]
-                        pc_name = pc_row["Raw Name"]
+                fig_sum.update_layout(height=550)
+                st.plotly_chart(fig_sum, width='stretch', key="agg_mean_sd_bar")
+                
+                # DYNAMIC ANOVA: Across Constructs for this Target
+                p_val_agg = run_anova_p(df_constructs, 'Construct', sel_metric_col)
+                if not np.isnan(p_val_agg):
+                    msg = f"📊 **Statistical Analysis (ANOVA)**: Comparing all constructs for **{target_choice}** using **{sel_metric_label}**.  \n**p-value**: `{p_val_agg:.4e}` ({'Significant' if p_val_agg < 0.05 else 'Not Significant'})"
+                    if p_val_agg < 0.05:
+                        st.success(msg)
                     else:
-                        best_pc_dp = 0
-                        pc_name = "None Found"
-                        
-                    pc_info.append({"Target": tgt, "Date": dt, "PC Name": pc_name, "PC Double+ %": best_pc_dp})
+                        st.info(msg)
                     
-                    if best_pc_dp >= pc_thresh:
-                        valid_trials.append((tgt, dt))
+                    if p_val_agg < 0.05:
 
-                df_pc_status = pd.DataFrame(pc_info)
-                
-                # Apply Filters (Target + QC)
-                df_agg_f = df_agg_all.copy()
-                if target_choice != "All Targets":
-                    df_agg_f = df_agg_f[df_agg_f["Target"] == target_choice]
-                
-                # Filter by valid trials (QC)
-                # Convert TrialID to string to avoid PyArrow conversion issues in st.dataframe
-                df_agg_all["TrialID"] = df_agg_all["Target"].astype(str) + "_" + df_agg_all["Date"].astype(str)
-                valid_trial_ids = [f"{tgt}_{dt}" for tgt, dt in valid_trials]
-                
-                df_agg_f = df_agg_all.copy()
-                if target_choice != "All Targets":
-                    df_agg_f = df_agg_f[df_agg_f["Target"] == target_choice]
-                
-                df_agg_f = df_agg_f[df_agg_f["TrialID"].isin(valid_trial_ids)]
-                
-                # 3. Separate Constructs from PCs for plotting
-                df_constructs = df_agg_f[~df_agg_f["IsPC"]].copy()
-                
-                # --- NEW: Aggregated Summary View (Mean/SD) ---
-                st.markdown("### 🏆 Combined Variant Performance (Mean/SD)")
-                if not df_constructs.empty:
-                    # Ensure alphabetical sorting here
-                    df_constructs = df_constructs.sort_values("Construct")
-                    
-                    # Update grouping to use selected metric
-                    df_grouped = df_constructs.groupby("Construct").agg({
-                        sel_metric_col: ["mean", "std", "count"],
-                        "Double+ %": "mean"
-                    }).reset_index()
-                    df_grouped.columns = ["Construct", "Mean Val", "SD Val", "n", "Avg Double+ %"]
-
-                    # User requested alphabetical order
-                    df_grouped = df_grouped.sort_values("Construct")
-                    
-                    fig_sum = px.bar(
-                        df_grouped, x="Construct", y="Mean Val", error_y="SD Val",
-                        color="Avg Double+ %", color_continuous_scale="Viridis",
-                        template="plotly_dark", title=f"{sel_metric_label} by Construct (Aggregated Across Valid Trials)",
-                        text_auto='.2f',
-                        hover_data={"n": True}
-                    )
-
-                    fig_sum.update_layout(height=550)
-                    st.plotly_chart(fig_sum, width='stretch', key="agg_mean_sd_bar")
+                        sig_pairs = run_tukey_summary(df_constructs, 'Construct', sel_metric_col)
+                        if sig_pairs is not None and not sig_pairs.empty:
+                            with st.expander("🔍 View Significant Pairwise Differences (Tukey HSD)"):
+                                st.dataframe(sig_pairs[['group1', 'group2', 'meandiff', 'p-adj']], hide_index=True, width='stretch')
                 else:
-                    st.info("No constructs match current filters or QC criteria.")
+                    st.caption("ANOVA could not be calculated (requires multiple trials per construct).")
 
-                with st.expander("📋 Review Identified Positive Controls"):
-                    st.dataframe(df_pc_status, hide_index=True, width='stretch')
 
-                # Visualizations
-                st.markdown(f"### 📅 Trial-by-Trial Analytics: {target_choice}")
+            else:
+                st.info("No constructs match current filters or QC criteria.")
+
+            with st.expander("📋 Review Identified Positive Controls"):
+                st.dataframe(df_pc_status, hide_index=True, width='stretch')
+
+            # --- NEW: COMPREHENSIVE STATISTICAL SUMMARY (ALL METRICS) ---
+            st.divider()
+            with st.expander("📊 Comprehensive Statistical Summary (All Metrics)", expanded=False):
+                st.markdown(f"Running pairwise comparisons for **{target_choice}** across all metrics...")
+                all_sig_findings = []
                 
-                # Sort for alphabetical order in trial plots
-                df_agg_f = df_agg_f.sort_values("Construct")
+                for m_label, m_col in metric_options.items():
+                    p_val = run_anova_p(df_constructs, 'Construct', m_col)
+                    if not np.isnan(p_val) and p_val < 0.05:
+                        sig_pairs = run_tukey_summary(df_constructs, 'Construct', m_col)
+                        if sig_pairs is not None and not sig_pairs.empty:
+                            for _, row in sig_pairs.iterrows():
+                                all_sig_findings.append({
+                                    "Metric": m_label,
+                                    "Pair": f"{row['group1']} vs {row['group2']}",
+                                    "Diff": f"{row['meandiff']:.4f}",
+                                    "p-adj": f"{row['p-adj']:.4f}"
+                                })
                 
-                v_col1, v_col2 = st.columns(2)
+                if all_sig_findings:
+                    st.dataframe(pd.DataFrame(all_sig_findings), hide_index=True, width='stretch')
+                else:
+                    st.info("No significant differences found across any metrics for this target at the current QC threshold.")
+
+
+            # Visualizations
+            st.markdown(f"### 📅 Trial-by-Trial Analytics: {target_choice}")
+            
+            # Sort for alphabetical order in trial plots
+            df_agg_f = df_agg_f.sort_values("Construct")
+            
+            v_col1, v_col2 = st.columns(2)
+            
+            with v_col1:
+                # Adaptive Bar Chart based on selected metric
+                fig_agg_ratio = px.bar(
+                    df_agg_f, x="Construct", y=sel_metric_col, color="Date",
+                    template="plotly_dark", title=f"{sel_metric_label} by Construct",
+                    text=sel_metric_col
+                )
+                fig_agg_ratio.update_traces(texttemplate='%{text:.2f}', textposition='outside')
+                fig_agg_ratio.add_hline(y=1, line_dash="dash", line_color="white", annotation_text="Pos Ctrl")
+                fig_agg_ratio.update_layout(height=500)
+                st.plotly_chart(fig_agg_ratio, width='stretch', key="agg_ratio_global_bar")
                 
-                with v_col1:
-                    # Adaptive Bar Chart based on selected metric
-                    fig_agg_ratio = px.bar(
-                        df_agg_f, x="Construct", y=sel_metric_col, color="Date",
-                        template="plotly_dark", title=f"{sel_metric_label} by Construct",
-                        text=sel_metric_col
-                    )
-                    fig_agg_ratio.update_traces(texttemplate='%{text:.2f}', textposition='outside')
-                    fig_agg_ratio.add_hline(y=1, line_dash="dash", line_color="white", annotation_text="Pos Ctrl")
-                    fig_agg_ratio.update_layout(height=500)
-                    st.plotly_chart(fig_agg_ratio, width='stretch', key="agg_ratio_global_bar")
-                    
-                with v_col2:
-                    # Double+ % Bar Chart
-                    fig_agg_dp = px.bar(
-                        df_agg_f, x="Construct", y="Double+ %", color="Date",
-                        template="plotly_dark", title="Double Positive Percentage (%)",
-                        text="Double+ %"
-                    )
-                    fig_agg_dp.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
-                    fig_agg_dp.update_layout(height=500)
-                    st.plotly_chart(fig_agg_dp, width='stretch', key="agg_dp_global_bar")
-                
-                st.markdown("**Global Aggregate Data Table**")
-                st.dataframe(df_agg_f, width='stretch', hide_index=True)
-                st.markdown("---")
+            with v_col2:
+                # Double+ % Bar Chart
+                fig_agg_dp = px.bar(
+                    df_agg_f, x="Construct", y="Double+ %", color="Date",
+
+                    template="plotly_dark", title="Double Positive Percentage (%)",
+                    text="Double+ %"
+                )
+                fig_agg_dp.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+                fig_agg_dp.update_layout(height=500)
+                st.plotly_chart(fig_agg_dp, width='stretch', key="agg_dp_global_bar")
+            
+            st.markdown("**Global Aggregate Data Table**")
+            st.dataframe(df_agg_f, width='stretch', hide_index=True)
+            st.markdown("---")
+
 
             if cloud_exists(g_cross_csv):
                 found_g = True
@@ -1445,6 +1541,7 @@ if selected_file and df is not None:
     with tab_selectivity:
         if st.button("🔄 Refresh Selectivity Data", key="refresh_selectivity"):
              st.rerun()
+
              
         if fs and BUCKET:
             global_agg_dir = os.path.join(BUCKET, "Aggregate_FCS_Analysis")
@@ -1518,18 +1615,24 @@ if selected_file and df is not None:
                     # Sort by construct for consistent viewing
                     df_plot = df_sel.sort_values(["Construct", "Target"])
                     
+                    # Calculate 95% CI for display
+                    if '95% CI' not in df_plot.columns:
+                        df_plot['SEM'] = df_plot.apply(lambda row: row['StdDev'] / (row['Count']**0.5) if row['Count'] > 1 else 0, axis=1)
+                        df_plot['95% CI'] = df_plot['SEM'] * 1.96
+
                     fig_sel = px.bar(
                         df_plot, 
                         x="Construct", 
                         y="Mean", 
                         color="Target",
                         barmode="group",
-                        error_y="StdDev",
+                        error_y="95% CI",
                         template="plotly_dark",
-                        title=f"{selected_metric} Across Targets",
+                        title=f"{selected_metric} Across Targets (Error Bars: 95% CI)",
                         labels={"Mean": selected_metric},
-                        hover_data={"Count": True}
+                        hover_data={"Count": True, "95% CI": ":.2f"}
                     )
+
 
                     fig_sel.update_layout(height=600, xaxis_tickangle=-45)
                     st.plotly_chart(fig_sel, width='stretch', key="selectivity_main_plotly")
@@ -1540,9 +1643,42 @@ if selected_file and df is not None:
                 else:
                     st.info(f"Selectivity summary CSV not found: {os.path.basename(sum_csv)}")
                 
+                # --- NEW: MASTER SELECTIVITY SUMMARY (ALL VARIANTS & METRICS) ---
+                if df_global_filtered is not None:
+                    st.divider()
+                    with st.expander("📜 Master Selectivity Summary (All Variants & Metrics)", expanded=False):
+                        st.markdown("Scanning all constructs tested against multiple targets for significant selectivity findings...")
+                        master_sel_findings = []
+                        
+                        # Identify constructs with multiple targets
+                        c_target_counts = df_global_filtered.groupby('Construct')['Target'].nunique()
+                        multi_target_vars = sorted(c_target_counts[c_target_counts > 1].index.tolist())
+                        
+                        for construct in multi_target_vars:
+                            c_trials = df_global_filtered[df_global_filtered['Construct'] == construct]
+                            for m_label, m_col in metric_options.items():
+                                p_val = run_anova_p(c_trials, 'Target', m_col)
+                                if not np.isnan(p_val) and p_val < 0.05:
+                                    sig_targets = run_tukey_summary(c_trials, 'Target', m_col)
+                                    if sig_targets is not None and not sig_targets.empty:
+                                        for _, row in sig_targets.iterrows():
+                                            master_sel_findings.append({
+                                                "Construct": construct,
+                                                "Metric": m_label,
+                                                "Targets": f"{row['group1']} vs {row['group2']}",
+                                                "Diff": f"{row['meandiff']:.4f}",
+                                                "p-adj": f"{row['p-adj']:.4f}"
+                                            })
+                        
+                        if master_sel_findings:
+                            st.dataframe(pd.DataFrame(master_sel_findings), hide_index=True, width='stretch')
+                        else:
+                            st.info("No significant selectivity findings discovered across any constructs/metrics.")
+
                 # Individual Comparisons (Driven by CSV Variants)
                 st.divider()
                 st.subheader("🔍 Individual Construct Selectivity")
+
                 
                 if df_sel is not None:
                     available_variants = sorted(list(df_sel['Construct'].unique()))
@@ -1553,21 +1689,64 @@ if selected_file and df is not None:
                         # Filter data for this variant
                         df_var = df_sel[df_sel['Construct'] == selected_variant].sort_values("Target")
                         
+                        # Ensure 95% CI is available
+                        if '95% CI' not in df_var.columns:
+                            df_var['SEM'] = df_var.apply(lambda row: row['StdDev'] / (row['Count']**0.5) if row['Count'] > 1 else 0, axis=1)
+                            df_var['95% CI'] = df_var['SEM'] * 1.96
+
                         # Create individual bar chart
                         fig_var = px.bar(
                             df_var,
                             x="Target",
                             y="Mean",
                             color="Target",
-                            error_y="StdDev",
+                            error_y="95% CI",
                             template="plotly_dark",
-                            title=f"Selectivity Profile: {selected_variant} ({selected_metric})",
+                            title=f"Selectivity Profile: {selected_variant} (Error Bars: 95% CI)",
                             labels={"Mean": selected_metric},
-                            hover_data={"Count": True}
+                            hover_data={"Count": True, "95% CI": ":.2f"}
                         )
+
 
                         fig_var.update_layout(height=450, showlegend=False)
                         st.plotly_chart(fig_var, width='stretch', key="selectivity_variant_plotly")
+                        
+                        # DYNAMIC ANOVA: For this construct across targets
+                        if df_global_filtered is not None:
+                            # Use the metric mapping to get the correct column
+                            metric_map = {
+                                "Norm_Median_Ratio": "Norm Pos Med Ratio",
+                                "Norm_Bind_Med_Expr_Positive": "Norm Bind Med (Expr+)",
+                                "Binding_Efficiency": "Binding Efficiency (DP/FITC+)",
+                                "Norm_IWB_Index": "Norm Intensity-Weighted Binding Index"
+                            }
+                            raw_metric_col = metric_map.get(selected_metric, selected_metric)
+                            
+                            # USE FILTERED DATA (QC Applied)
+                            c_trials = df_global_filtered[df_global_filtered['Construct'] == selected_variant]
+                            p_val_sel = run_anova_p(c_trials, 'Target', raw_metric_col)
+
+                            
+                            if not np.isnan(p_val_sel):
+                                 msg_sel = f"📊 **Selectivity ANOVA**: Comparing **{selected_variant}** across targets using **{raw_metric_col}**.  \n**p-value**: `{p_val_sel:.4e}` ({'Significant' if p_val_sel < 0.05 else 'Not Significant'})"
+                                 if p_val_sel < 0.05:
+                                     st.success(msg_sel)
+                                 else:
+                                     st.info(msg_sel)
+                                 
+                                 if p_val_sel < 0.05:
+
+                                     sig_targets = run_tukey_summary(c_trials, 'Target', raw_metric_col)
+                                     if sig_targets is not None and not sig_targets.empty:
+                                         with st.expander(f"🔍 Significant Target Differences for {selected_variant}"):
+                                             st.dataframe(sig_targets[['group1', 'group2', 'meandiff', 'p-adj']], hide_index=True, width='stretch')
+                            else:
+                                 st.caption("ANOVA could not be calculated for this variant across targets (requires multiple trials).")
+
+                        else:
+                             st.caption("Raw trial data missing; cannot calculate ANOVA.")
+
+
                     else:
                         st.info("No unique constructs found in the summary CSV.")
                 else:
