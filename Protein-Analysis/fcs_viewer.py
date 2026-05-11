@@ -809,9 +809,9 @@ if selected_file:
             def_thresh_bind = float(np.percentile(df[bind_col], g_nc_pct))
 
         with thresh_expr_placeholder:
-            thresh_expr_val = st.number_input(f"Expression Thresh ({expr_col})", value=def_thresh_expr, key=f"input_thresh_expr_{expr_col}")
+            thresh_expr_val = st.number_input(f"Expression Thresh ({expr_col})", value=def_thresh_expr, key=f"input_thresh_expr_{expr_col}_{g_nc_pct}_{search_path}")
         with thresh_bind_placeholder:
-            thresh_bind_val = st.number_input(f"Binding Thresh ({bind_col})", value=def_thresh_bind, key=f"input_thresh_bind_{bind_col}")
+            thresh_bind_val = st.number_input(f"Binding Thresh ({bind_col})", value=def_thresh_bind, key=f"input_thresh_bind_{bind_col}_{g_nc_pct}_{search_path}")
 
         log_thresh_expr = np.log10(max(1, thresh_expr_val))
         log_thresh_bind = np.log10(max(1, thresh_bind_val))
