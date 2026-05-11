@@ -3,6 +3,7 @@ import sys
 import csv
 import glob
 import re
+import argparse
 
 # ---- INSTALL DEPENDENCIES IF MISSING ----
 def install(package):
@@ -120,6 +121,14 @@ def plot_stats(df, title, output_path, y_col='Binding Ratio', y_label='Binding E
 
 def main():
     # Paths
+    parser = argparse.ArgumentParser(description="Aggregate FCS Analysis Results")
+    parser.add_argument("--exclude_dates", help="Comma-separated list of dates to exclude (e.g., 20240510,20240511)")
+    args = parser.parse_args()
+
+    exclude_dates = []
+    if args.exclude_dates:
+        exclude_dates = [d.strip() for d in args.exclude_dates.split(",")]
+
     base_dir = os.path.dirname(os.path.abspath(__file__))
     local_dir = os.path.abspath(os.path.join(base_dir, "../Local"))
     output_dir = os.path.join(local_dir, "Aggregate_FCS_Analysis")
@@ -202,6 +211,10 @@ def main():
         target = match.group(1).upper()
         date = match.group(2)
         
+        if date in exclude_dates:
+            print(f"  Skipping {dir_name}: Date {date} is in exclude list.", flush=True)
+            continue
+            
         csv_path = os.path.join(d, "summary_stats.csv")
         if not os.path.exists(csv_path):
             print(f"  Skipping {dir_name}: summary_stats.csv not found.", flush=True)

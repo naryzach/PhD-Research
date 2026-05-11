@@ -636,16 +636,51 @@ else:
 
 base_path = st.sidebar.text_input("Data Root (Path or Bucket)", value=default_path)
 
-# (Rest of the sidebar and processing logic...)
-# (Skipping identical lines to reach the TABS section correctly)
-
-
 with st.sidebar.expander("🛠️ Advanced Gating Settings"):
     g_min_fsc = st.number_input("Min FSC-A (Singlets)", value=500000, step=50000)
     g_min_ssc = st.number_input("Min SSC-A (Singlets)", value=20000, step=5000)
     g_upper_pct = st.slider("Upper Filter Percentile", 50, 100, 95)
     g_gate_frac = st.slider("Gate Target Fraction", 0.5, 1.0, 0.9)
     g_nc_pct = st.slider("NC Cutoff Percentile", 90.0, 100.0, 99.5, step=0.1)
+
+with st.sidebar.expander("🏷️ Tag Configuration", expanded=False):
+    tag_type = st.selectbox("Protein Tag Type", ["His (FITC/APC)", "FLAG (APC/PE)", "Custom"], index=0)
+    
+    # Pre-fetch dates for global exclusion
+    if fs and BUCKET:
+        g_agg_path = os.path.join(BUCKET, "Aggregate_FCS_Analysis", "aggregate_summary.csv")
+    else:
+        g_agg_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../Local/Aggregate_FCS_Analysis", "aggregate_summary.csv"))
+    
+    global_dates = []
+    if cloud_exists(g_agg_path):
+        try:
+            df_dates = cloud_read_csv(g_agg_path)
+            if "Date" in df_dates.columns:
+                # Robust date string conversion to avoid .0 suffix
+                global_dates = sorted(df_dates["Date"].astype(str).str.split('.').str[0].unique())
+        except:
+            pass
+            
+    exclude_dates = st.multiselect("🗓️ Exclude Dates", options=global_dates, key="global_exclude_dates", help="Exclude specific experiment trials globally.")
+
+    # Placeholders for custom channels if tag_type is Custom
+    custom_expr = None
+    custom_bind = None
+    if tag_type == "Custom":
+        # We'll populate these later once df is loaded
+        custom_expr_placeholder = st.empty()
+        custom_bind_placeholder = st.empty()
+
+if tag_type == "His (FITC/APC)":
+    def_expr_ch = "FITC-A"
+    def_bind_ch = "APC-A"
+elif tag_type == "FLAG (APC/PE)":
+    def_expr_ch = "APC-A"
+    def_bind_ch = "PE-A"
+else:
+    def_expr_ch = "FITC-A"
+    def_bind_ch = "APC-A"
 
 is_cloud = fs and base_path.startswith(BUCKET)
 
@@ -683,8 +718,29 @@ else:
 st.sidebar.markdown("---")
 
 if selected_file:
+    # 1. Preliminary Load to get columns for Custom selection if needed
+    meta, df = load_fcs(selected_file)
+    
+    if df is not None:
+        expr_col = def_expr_ch if def_expr_ch in df.columns else df.columns[0]
+        bind_col = def_bind_ch if def_bind_ch in df.columns else df.columns[1]
+        
+        if tag_type == "Custom":
+            with custom_expr_placeholder:
+                expr_col = st.selectbox("Expression Channel (Y-Axis)", df.columns, index=list(df.columns).index(expr_col) if expr_col in df.columns else 0)
+            with custom_bind_placeholder:
+                bind_col = st.selectbox("Binding Channel (X-Axis)", df.columns, index=list(df.columns).index(bind_col) if bind_col in df.columns else 1)
+
     with st.spinner("Analyzing folder controls..."):
-        ctrls = analyze_folder_controls(search_path, nc_percentile=g_nc_pct, min_fsc=g_min_fsc, min_ssc=g_min_ssc, upper_pct=g_upper_pct, gate_fraction=g_gate_frac)
+        # CRITICAL: Pass the actual channels to ensure correct NC thresholds
+        ctrls = analyze_folder_controls(search_path, 
+                                      expr_col=expr_col, 
+                                      bind_col=bind_col,
+                                      nc_percentile=g_nc_pct, 
+                                      min_fsc=g_min_fsc, 
+                                      min_ssc=g_min_ssc, 
+                                      upper_pct=g_upper_pct, 
+                                      gate_fraction=g_gate_frac)
     
     st.sidebar.subheader("Gating Context")
     if ctrls["has_nc"]:
@@ -697,11 +753,8 @@ if selected_file:
         
     st.sidebar.subheader("Threshold Settings")
     
-    meta, df = load_fcs(selected_file)
-    
     if df is not None:
-        expr_col = "FITC-A" if "FITC-A" in df.columns else df.columns[0]
-        bind_col = "APC-A" if "APC-A" in df.columns else df.columns[1]
+        # expr_col and bind_col already set above in the preliminary load section
         
         if ctrls["has_nc"]:
             def_thresh_expr = float(ctrls["thresh_expr"])
@@ -844,7 +897,7 @@ if selected_file and df is not None:
                 )
                 fig2.add_vline(x=log_thresh_expr, line_dash="dash", line_color="red")
                 fig2.update_layout(
-                    title="Expression Distribution (FITC)",
+                    title=f"Expression Distribution ({expr_col.replace('-A', '')})",
                     xaxis_title=f"Log10 {expr_col}",
                     yaxis_title="Density",
                     height=450, margin=dict(l=0,r=0,b=0),
@@ -1039,23 +1092,23 @@ if selected_file and df is not None:
         # Swapped Order: Expression on Left, Binding on Right
         if len(pos_bind_evts) > 0:
             fig_fe = build_pos_hist(pos_bind_evts[expr_col], nc_sample[expr_col] if nc_sample is not None else None, 
-                                   thresh_expr_val, "Filtered Expression (FITC for APC+)", f"Log10 {expr_col} (APC+ ONLY)", "orange")
+                                   thresh_expr_val, f"Filtered Expression ({expr_col.replace('-A', '')} for {bind_col.replace('-A', '')}+)", f"Log10 {expr_col} ({bind_col.replace('-A', '')}+ ONLY)", "orange")
             f1.plotly_chart(fig_fe, width='stretch', key="filt_expr_hist")
             exp_med = pos_bind_evts[expr_col].median()
             exp_mean = pos_bind_evts[expr_col].mean()
             f1.latex(rf"\text{{Med: }} {exp_med:.1f} \quad \text{{Mean: }} {exp_mean:.1f}")
         else:
-            f1.info("No APC+ events.")
+            f1.info(f"No {bind_col.replace('-A', '')}+ events.")
 
         if len(pos_expr_evts) > 0:
             fig_fb = build_pos_hist(pos_expr_evts[bind_col], nc_sample[bind_col] if nc_sample is not None else None, 
-                                   thresh_bind_val, "Filtered Binding (APC for FITC+)", f"Log10 {bind_col} (FITC+ ONLY)", "cyan")
+                                   thresh_bind_val, f"Filtered Binding ({bind_col.replace('-A', '')} for {expr_col.replace('-A', '')}+)", f"Log10 {bind_col} ({expr_col.replace('-A', '')}+ ONLY)", "cyan")
             f2.plotly_chart(fig_fb, width='stretch', key="filt_bind_hist")
             bin_med = pos_expr_evts[bind_col].median()
             bin_mean = pos_expr_evts[bind_col].mean()
             f2.latex(rf"\text{{Med: }} {bin_med:.1f} \quad \text{{Mean: }} {bin_mean:.1f}")
         else:
-            f2.info("No FITC+ events.")
+            f2.info(f"No {expr_col.replace('-A', '')}+ events.")
             
         st.subheader("Positive Metrics for this file")
         pos_med_expr_v = pos_expr_evts[expr_col].median() if len(pos_expr_evts) > 0 else 0
@@ -1235,49 +1288,49 @@ if selected_file and df is not None:
             g_cross_csv = os.path.join(global_agg_dir, "cross_target_summary.csv")
             g_agg_csv = os.path.join(global_agg_dir, "aggregate_summary.csv")
             
-            found_g = False
+            df_agg = None
             if cloud_exists(g_agg_csv):
-                found_g = True
                 df_agg = cloud_read_csv(g_agg_csv)
                 
-                # Filter by Target Dropdown
-                available_targets = sorted(df_agg["Target"].unique())
+            # --- SHARED GLOBAL SETTINGS ---
+            with st.expander("🛠️ Global Data Settings (Filters & QC)", expanded=False):
+                qc_c1, qc_c2 = st.columns([1, 1])
+                available_targets = sorted(df_agg["Target"].unique()) if df_agg is not None else []
+                with qc_c1:
+                    target_choice = st.selectbox("🎯 Filter by Target", ["All Targets"] + list(available_targets), key="global_target_sel")
+                with qc_c2:
+                    pc_keywords = st.text_input("PC Keywords (Comma separated)", value="Positive Control, TIMP", help="Keywords to identify which rows are positive controls.")
+                    pc_pattern = "|".join([k.strip().upper() for k in pc_keywords.split(",") if k.strip()])
                 
-                with st.expander("🛠️ Advanced Aggregate Settings"):
-                    qc_c1, qc_c2 = st.columns([1, 1])
-                    with qc_c1:
-                        target_choice = st.selectbox("🎯 Filter by Target", ["All Targets"] + list(available_targets), key="global_target_sel")
-                    with qc_c2:
-                        pc_keywords = st.text_input("PC Keywords (Comma separated)", value="Positive Control, TIMP", help="Keywords to identify which rows are positive controls.")
-                        pc_pattern = "|".join([k.strip().upper() for k in pc_keywords.split(",") if k.strip()])
-                    
+                st.divider()
+                qc_c3, qc_c4 = st.columns(2)
+                with qc_c3:
                     pc_thresh = st.slider("QC Threshold: Min PC Double+ %", 0.0, 10.0, 2.0, step=0.1, help="Exclude trials where the identified positive control performed poorly.")
-                    
-                    st.divider()
-                    metric_options = {
-                        "Norm Median Ratio": "Norm Median Ratio",
-                        "Binding Efficiency": "Binding Efficiency (DP/FITC+)",
-                        "Intensity-Weighted (IWB)": "Intensity-Weighted Binding Index",
-                        "Norm Median of FITC+": "Norm Bind Med (Expr+)"
-                    }
-                    sel_metric_label = st.radio("Select Analysis Metric", list(metric_options.keys()), horizontal=True, index=0)
-                    sel_metric_col = metric_options[sel_metric_label]
+                with qc_c4:
+                    st.info("🗓️ Exclude dates in the sidebar.")
 
-                # 1. Identify Positive Controls on the fly
+                st.divider()
+                metric_options = {
+                    "Norm Median Ratio": "Norm Median Ratio",
+                    "Binding Efficiency": f"Binding Efficiency (DP/{def_expr_ch.replace('-A', '')}+)",
+                    "Intensity-Weighted (IWB)": "Intensity-Weighted Binding Index",
+                    "Norm Bind Med (Expr+)": "Norm Bind Med (Expr+)"
+                }
+                sel_metric_label = st.radio("Select Analysis Metric", list(metric_options.keys()), horizontal=True, index=0, key="global_metric_sel")
+                sel_metric_col = metric_options[sel_metric_label]
+
+            # --- DATA FILTERING LOGIC ---
+            df_agg_f = pd.DataFrame()
+            if df_agg is not None:
                 df_agg_all = df_agg.copy()
-                
-                # Categorize as PC or Construct
                 df_agg_all["IsPC"] = df_agg_all["Construct"].str.upper().str.contains(pc_pattern) | \
                                      df_agg_all["Raw Name"].str.upper().str.contains(pc_pattern)
 
-                # 2. For each Trial (Target + Date), find the best PC value
                 trial_groups = df_agg_all.groupby(["Target", "Date"])
                 valid_trials = []
                 pc_info = []
-
                 for (tgt, dt), group in trial_groups:
                     pcs = group[group["IsPC"]]
-                    # If multiple PCs, take the one with highest Double+ %
                     if not pcs.empty:
                         best_pc_dp = pcs["Double+ %"].max()
                         pc_row = pcs[pcs["Double+ %"] == best_pc_dp].iloc[0]
@@ -1285,106 +1338,91 @@ if selected_file and df is not None:
                     else:
                         best_pc_dp = 0
                         pc_name = "None Found"
-                        
                     pc_info.append({"Target": tgt, "Date": dt, "PC Name": pc_name, "PC Double+ %": best_pc_dp})
-                    
                     if best_pc_dp >= pc_thresh:
                         valid_trials.append((tgt, dt))
-
+                
                 df_pc_status = pd.DataFrame(pc_info)
-                
-                # Apply Filters (Target + QC)
-                df_agg_f = df_agg_all.copy()
-                if target_choice != "All Targets":
-                    df_agg_f = df_agg_f[df_agg_f["Target"] == target_choice]
-                
-                # Filter by valid trials (QC)
-                # Convert TrialID to string to avoid PyArrow conversion issues in st.dataframe
-                df_agg_all["TrialID"] = df_agg_all["Target"].astype(str) + "_" + df_agg_all["Date"].astype(str)
-                valid_trial_ids = [f"{tgt}_{dt}" for tgt, dt in valid_trials]
+                # Use robust string conversion for TrialID and Date matching
+                df_agg_all["DateStr"] = df_agg_all["Date"].astype(str).str.split('.').str[0]
+                df_agg_all["TrialID"] = df_agg_all["Target"].astype(str) + "_" + df_agg_all["DateStr"]
+                valid_trial_ids = [f"{tgt}_{str(dt).split('.')[0]}" for tgt, dt in valid_trials]
                 
                 df_agg_f = df_agg_all.copy()
                 if target_choice != "All Targets":
                     df_agg_f = df_agg_f[df_agg_f["Target"] == target_choice]
-                
+                if exclude_dates:
+                    df_agg_f = df_agg_f[~df_agg_f["DateStr"].isin(exclude_dates)]
                 df_agg_f = df_agg_f[df_agg_f["TrialID"].isin(valid_trial_ids)]
-                
-                # 3. Separate Constructs from PCs for plotting
                 df_constructs = df_agg_f[~df_agg_f["IsPC"]].copy()
-                
-                # --- NEW: Aggregated Summary View (Mean/SD) ---
-                st.markdown("### 🏆 Combined Variant Performance (Mean/SD)")
-                if not df_constructs.empty:
-                    # Ensure alphabetical sorting here
-                    df_constructs = df_constructs.sort_values("Construct")
-                    
-                    # Update grouping to use selected metric
-                    df_grouped = df_constructs.groupby("Construct").agg({
-                        sel_metric_col: ["mean", "std"],
-                        "Double+ %": "mean"
-                    }).reset_index()
-                    df_grouped.columns = ["Construct", "Mean Val", "SD Val", "Avg Double+ %"]
-                    # User requested alphabetical order
-                    df_grouped = df_grouped.sort_values("Construct")
-                    
-                    fig_sum = px.bar(
-                        df_grouped, x="Construct", y="Mean Val", error_y="SD Val",
-                        color="Avg Double+ %", color_continuous_scale="Viridis",
-                        template="plotly_dark", title=f"{sel_metric_label} by Construct (Aggregated Across Valid Trials)",
-                        text_auto='.2f'
-                    )
-                    fig_sum.update_layout(height=550)
-                    st.plotly_chart(fig_sum, width='stretch', key="agg_mean_sd_bar")
-                else:
-                    st.info("No constructs match current filters or QC criteria.")
 
-                with st.expander("📋 Review Identified Positive Controls"):
-                    st.dataframe(df_pc_status, hide_index=True, width='stretch')
+            # --- NEW: Aggregated Summary View (Mean/SD) ---
+            st.markdown("### 🏆 Combined Variant Performance (Mean/SD)")
+            if not df_constructs.empty:
+                # Ensure alphabetical sorting here
+                df_constructs = df_constructs.sort_values("Construct")
+                
+                # Update grouping to use selected metric
+                df_grouped = df_constructs.groupby("Construct").agg({
+                    sel_metric_col: ["mean", "std"],
+                    "Double+ %": "mean"
+                }).reset_index()
+                df_grouped.columns = ["Construct", "Mean Val", "SD Val", "Avg Double+ %"]
+                # User requested alphabetical order
+                df_grouped = df_grouped.sort_values("Construct")
+                
+                fig_sum = px.bar(
+                    df_grouped, x="Construct", y="Mean Val", error_y="SD Val",
+                    color="Avg Double+ %", color_continuous_scale="Viridis",
+                    template="plotly_dark", title=f"{sel_metric_label} by Construct (Aggregated Across Valid Trials)",
+                    text_auto='.2f'
+                )
+                fig_sum.update_layout(height=550)
+                st.plotly_chart(fig_sum, width='stretch', key="agg_mean_sd_bar")
+            else:
+                st.info("No constructs match current filters or QC criteria.")
 
-                # Visualizations
-                st.markdown(f"### 📅 Trial-by-Trial Analytics: {target_choice}")
+            with st.expander("📋 Review Identified Positive Controls"):
+                st.dataframe(df_pc_status, hide_index=True, width='stretch')
+
+            # Visualizations
+            st.markdown(f"### 📅 Trial-by-Trial Analytics: {target_choice}")
+            
+            # Sort for alphabetical order in trial plots
+            df_agg_f = df_agg_f.sort_values("Construct")
+            
+            v_col1, v_col2 = st.columns(2)
+            
+            with v_col1:
+                # Adaptive Bar Chart based on selected metric
+                fig_agg_ratio = px.bar(
+                    df_agg_f, x="Construct", y=sel_metric_col, color="Date",
+                    template="plotly_dark", title=f"{sel_metric_label} by Construct",
+                    text=sel_metric_col
+                )
+                fig_agg_ratio.update_traces(texttemplate='%{text:.2f}', textposition='outside')
+                fig_agg_ratio.add_hline(y=1, line_dash="dash", line_color="white", annotation_text="Pos Ctrl")
+                fig_agg_ratio.update_layout(height=500)
+                st.plotly_chart(fig_agg_ratio, width='stretch', key="agg_ratio_global_bar")
                 
-                # Sort for alphabetical order in trial plots
-                df_agg_f = df_agg_f.sort_values("Construct")
-                
-                v_col1, v_col2 = st.columns(2)
-                
-                with v_col1:
-                    # Adaptive Bar Chart based on selected metric
-                    fig_agg_ratio = px.bar(
-                        df_agg_f, x="Construct", y=sel_metric_col, color="Date",
-                        template="plotly_dark", title=f"{sel_metric_label} by Construct",
-                        text=sel_metric_col
-                    )
-                    fig_agg_ratio.update_traces(texttemplate='%{text:.2f}', textposition='outside')
-                    fig_agg_ratio.add_hline(y=1, line_dash="dash", line_color="white", annotation_text="Pos Ctrl")
-                    fig_agg_ratio.update_layout(height=500)
-                    st.plotly_chart(fig_agg_ratio, width='stretch', key="agg_ratio_global_bar")
-                    
-                with v_col2:
-                    # Double+ % Bar Chart
-                    fig_agg_dp = px.bar(
-                        df_agg_f, x="Construct", y="Double+ %", color="Date",
-                        template="plotly_dark", title="Double Positive Percentage (%)",
-                        text="Double+ %"
-                    )
-                    fig_agg_dp.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
-                    fig_agg_dp.update_layout(height=500)
-                    st.plotly_chart(fig_agg_dp, width='stretch', key="agg_dp_global_bar")
-                
-                st.markdown("**Global Aggregate Data Table**")
-                st.dataframe(df_agg_f, width='stretch', hide_index=True)
-                st.markdown("---")
+            with v_col2:
+                # Double+ % Bar Chart
+                fig_agg_dp = px.bar(
+                    df_agg_f, x="Construct", y="Double+ %", color="Date",
+                    template="plotly_dark", title="Double Positive Percentage (%)",
+                    text="Double+ %"
+                )
+                fig_agg_dp.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+                fig_agg_dp.update_layout(height=500)
+                st.plotly_chart(fig_agg_dp, width='stretch', key="agg_dp_global_bar")
+            
+            st.markdown("**Global Aggregate Data Table**")
+            st.dataframe(df_agg_f, width='stretch', hide_index=True)
+            st.markdown("---")
 
             if cloud_exists(g_cross_csv):
-                found_g = True
                 st.markdown("**Global Cross-Target Summary (Experimental Mapping)**")
                 st.dataframe(cloud_read_csv(g_cross_csv), width='stretch', hide_index=True)
-                
-            if not found_g:
-                st.info(f"Global directory found at '{global_agg_dir}', but no summary CSVs were detected.")
-        else:
-            st.info(f"Global aggregate directory not found at: {global_agg_dir}")
 
     with tab_selectivity:
         if st.button("🔄 Refresh Selectivity Data", key="refresh_selectivity"):
@@ -1393,7 +1431,6 @@ if selected_file and df is not None:
         if fs and BUCKET:
             global_agg_dir = os.path.join(BUCKET, "Aggregate_FCS_Analysis")
         else:
-            # Try multiple relative paths to be safe
             potential_paths = [
                 os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Local", "Aggregate_FCS_Analysis")),
                 os.path.abspath(os.path.join(os.getcwd(), "..", "Local", "Aggregate_FCS_Analysis")),
@@ -1407,10 +1444,8 @@ if selected_file and df is not None:
             
         selectivity_dir = os.path.join(global_agg_dir, "Selectivity_Analysis")
         
-        # Robust cloud_exists for prefixes
         dir_exists = cloud_exists(selectivity_dir)
         if not dir_exists and fs and BUCKET and selectivity_dir.startswith(BUCKET):
-            # In S3, a prefix exists if there are keys under it
             try:
                 test_ls = fs.ls(selectivity_dir, detail=False)
                 if test_ls:
@@ -1421,16 +1456,12 @@ if selected_file and df is not None:
         if dir_exists:
             st.subheader("🎯 Selectivity Analysis")
             
-            # Find available metrics (subdirectories)
             metric_dirs = []
             if fs and selectivity_dir.startswith(BUCKET):
                 try:
-                    # Robust listing for R2/S3
                     items = fs.ls(selectivity_dir, detail=False)
                     for i in items:
-                        # Normalize path by removing the parent prefix
                         name = i.rstrip("/").split("/")[-1]
-                        # If it's a directory (no extension) and not empty
                         if "." not in name and name != "Selectivity_Analysis":
                             metric_dirs.append(name)
                     metric_dirs = sorted(list(set(metric_dirs)))
@@ -1445,19 +1476,43 @@ if selected_file and df is not None:
                 metric_subdir = os.path.join(selectivity_dir, selected_metric)
                 
                 sum_csv = os.path.join(metric_subdir, "selectivity_summary.csv")
-                all_comp_plot = os.path.join(metric_subdir, "selectivity_comparison_all.png")
                 
-                # --- NEW: Read CSV data first to drive the individual viewer ---
+                # --- RE-CALCULATE SELECTIVITY ON THE FLY ---
                 df_sel = None
-                if cloud_exists(sum_csv):
-                    df_sel = cloud_read_csv(sum_csv)
+                if df_agg is not None and not df_agg.empty:
+                    # Use ALL data but filtered by exclusions and QC
+                    df_agg_all["DateStr"] = df_agg_all["Date"].astype(str).str.split('.').str[0]
+                    df_agg_all["TrialID"] = df_agg_all["Target"].astype(str) + "_" + df_agg_all["DateStr"]
+                    valid_trial_ids = [f"{tgt}_{str(dt).split('.')[0]}" for tgt, dt in valid_trials]
+                    
+                    df_global_filtered = df_agg_all[df_agg_all["TrialID"].isin(valid_trial_ids)].copy()
+                    if exclude_dates:
+                        df_global_filtered = df_global_filtered[~df_global_filtered["DateStr"].isin(exclude_dates)]
+                    
+                    # Filter for constructs only
+                    df_sel_raw = df_global_filtered[~df_global_filtered["IsPC"]].copy()
+                    
+                    # Group by Construct and Target
+                    df_sel = df_sel_raw.groupby(['Construct', 'Target'])[sel_metric_col].agg(['mean', 'std', 'count']).reset_index()
+                    df_sel.columns = ['Construct', 'Target', 'Mean', 'StdDev', 'Count']
+                    
+                    # Only keep constructs tested against multiple targets
+                    target_counts = df_sel.groupby('Construct')['Target'].count()
+                    multi_target_constructs = target_counts[target_counts > 1].index.tolist()
+                    df_sel = df_sel[df_sel['Construct'].isin(multi_target_constructs)]
+
+                if df_sel is None or df_sel.empty:
+                    # Fallback to pre-computed if re-calculation fails or no exclusions
+                    if cloud_exists(sum_csv):
+                        df_sel = cloud_read_csv(sum_csv)
+                        st.info("Using pre-computed selectivity summary.")
+                else:
+                    st.success(f"Dynamic Selectivity calculated using **{sel_metric_label}**")
                 
                 # Visualizations
                 if df_sel is not None:
                     st.markdown(f"### Selectivity Comparison: {selected_metric}")
                     
-                    # Create Dynamic Plotly Chart
-                    import plotly.express as px
                     
                     # Sort by construct for consistent viewing
                     df_plot = df_sel.sort_values(["Construct", "Target"])
