@@ -638,6 +638,22 @@ base_path = st.sidebar.text_input("Data Root (Path or Bucket)", value=default_pa
 
 # (Rest of the sidebar and processing logic...)
 # (Skipping identical lines to reach the TABS section correctly)
+with st.sidebar.expander("🧬 Channel Configuration", expanded=False):
+    tag_type = st.selectbox("Protein Tag Type", ["His (FITC/APC)", "FLAG (APC/PE)", "Custom"], index=0)
+
+    # Placeholders for custom channels if tag_type is Custom
+    custom_expr_placeholder = st.empty()
+    custom_bind_placeholder = st.empty()
+
+if tag_type == "His (FITC/APC)":
+    def_expr_ch = "FITC-A"
+    def_bind_ch = "APC-A"
+elif tag_type == "FLAG (APC/PE)":
+    def_expr_ch = "APC-A"
+    def_bind_ch = "PE-A"
+else:
+    def_expr_ch = "FITC-A"
+    def_bind_ch = "APC-A"
 
 
 with st.sidebar.expander("🛠️ Advanced Gating Settings"):
@@ -683,8 +699,29 @@ else:
 st.sidebar.markdown("---")
 
 if selected_file:
+    # 1. Preliminary Load to get columns for Custom selection if needed
+    meta, df = load_fcs(selected_file)
+    
+    if df is not None:
+        expr_col = def_expr_ch if def_expr_ch in df.columns else df.columns[0]
+        bind_col = def_bind_ch if def_bind_ch in df.columns else df.columns[1]
+        
+        if tag_type == "Custom":
+            with custom_expr_placeholder:
+                expr_col = st.selectbox("Expression Channel (Y-Axis)", df.columns, index=list(df.columns).index(expr_col) if expr_col in df.columns else 0)
+            with custom_bind_placeholder:
+                bind_col = st.selectbox("Binding Channel (X-Axis)", df.columns, index=list(df.columns).index(bind_col) if bind_col in df.columns else 1)
+
     with st.spinner("Analyzing folder controls..."):
-        ctrls = analyze_folder_controls(search_path, nc_percentile=g_nc_pct, min_fsc=g_min_fsc, min_ssc=g_min_ssc, upper_pct=g_upper_pct, gate_fraction=g_gate_frac)
+        # CRITICAL: Pass the actual channels to ensure correct NC thresholds
+        ctrls = analyze_folder_controls(search_path, 
+                                      expr_col=expr_col, 
+                                      bind_col=bind_col,
+                                      nc_percentile=g_nc_pct, 
+                                      min_fsc=g_min_fsc, 
+                                      min_ssc=g_min_ssc, 
+                                      upper_pct=g_upper_pct, 
+                                      gate_fraction=g_gate_frac)
     
     st.sidebar.subheader("Gating Context")
     if ctrls["has_nc"]:
@@ -697,11 +734,11 @@ if selected_file:
         
     st.sidebar.subheader("Threshold Settings")
     
-    meta, df = load_fcs(selected_file)
+    # meta, df = load_fcs(selected_file) # Already loaded above
     
     if df is not None:
-        expr_col = "FITC-A" if "FITC-A" in df.columns else df.columns[0]
-        bind_col = "APC-A" if "APC-A" in df.columns else df.columns[1]
+        # expr_col = "FITC-A" if "FITC-A" in df.columns else df.columns[0]
+        # bind_col = "APC-A" if "APC-A" in df.columns else df.columns[1]
         
         if ctrls["has_nc"]:
             def_thresh_expr = float(ctrls["thresh_expr"])
@@ -844,7 +881,8 @@ if selected_file and df is not None:
                 )
                 fig2.add_vline(x=log_thresh_expr, line_dash="dash", line_color="red")
                 fig2.update_layout(
-                    title="Expression Distribution (FITC)",
+                    title=f"Expression Distribution ({expr_col.replace('-A', '')})",
+
                     xaxis_title=f"Log10 {expr_col}",
                     yaxis_title="Density",
                     height=450, margin=dict(l=0,r=0,b=0),
@@ -901,7 +939,8 @@ if selected_file and df is not None:
                 )
                 fig4.add_vline(x=log_thresh_bind, line_dash="dash", line_color="red")
                 fig4.update_layout(
-                    title="Binding Distribution (APC)",
+                    title=f"Binding Distribution ({bind_col.replace('-A', '')})",
+
                     xaxis_title=f"Log10 {bind_col}",
                     yaxis_title="Density",
                     height=450, margin=dict(l=0,r=0,b=0),
@@ -970,8 +1009,13 @@ if selected_file and df is not None:
 
     with tab_pos:
         st.subheader("Positive Event Distributions")
+        
+        expr_ch_lbl = expr_col.replace("-A", "")
+        bind_ch_lbl = bind_col.replace("-A", "")
+        
         pos_expr_evts = df_sing[df_sing[expr_col] > thresh_expr_val]
         pos_bind_evts = df_sing[df_sing[bind_col] > thresh_bind_val]
+
         
         # Function to build the styled histogram with overlay and markers
         def build_pos_hist(series, nc_series, thresh, title, x_label, color):
@@ -1039,7 +1083,8 @@ if selected_file and df is not None:
         # Swapped Order: Expression on Left, Binding on Right
         if len(pos_bind_evts) > 0:
             fig_fe = build_pos_hist(pos_bind_evts[expr_col], nc_sample[expr_col] if nc_sample is not None else None, 
-                                   thresh_expr_val, "Filtered Expression (FITC for APC+)", f"Log10 {expr_col} (APC+ ONLY)", "orange")
+                                   thresh_expr_val, f"Filtered Expression ({expr_ch_lbl} for {bind_ch_lbl}+)", f"Log10 {expr_col} ({bind_ch_lbl}+ ONLY)", "orange")
+
             f1.plotly_chart(fig_fe, width='stretch', key="filt_expr_hist")
             exp_med = pos_bind_evts[expr_col].median()
             exp_mean = pos_bind_evts[expr_col].mean()
@@ -1049,21 +1094,24 @@ if selected_file and df is not None:
 
         if len(pos_expr_evts) > 0:
             fig_fb = build_pos_hist(pos_expr_evts[bind_col], nc_sample[bind_col] if nc_sample is not None else None, 
-                                   thresh_bind_val, "Filtered Binding (APC for FITC+)", f"Log10 {bind_col} (FITC+ ONLY)", "cyan")
+                                   thresh_bind_val, f"Filtered Binding ({bind_ch_lbl} for {expr_ch_lbl}+)", f"Log10 {bind_col} ({expr_ch_lbl}+ ONLY)", "cyan")
+
             f2.plotly_chart(fig_fb, width='stretch', key="filt_bind_hist")
             bin_med = pos_expr_evts[bind_col].median()
             bin_mean = pos_expr_evts[bind_col].mean()
             f2.latex(rf"\text{{Med: }} {bin_med:.1f} \quad \text{{Mean: }} {bin_mean:.1f}")
         else:
-            f2.info("No FITC+ events.")
+            f2.info(f"No {expr_ch_lbl}+ events.")
             
         st.subheader("Positive Metrics for this file")
+
         pos_med_expr_v = pos_expr_evts[expr_col].median() if len(pos_expr_evts) > 0 else 0
         pos_med_bind_v = pos_bind_evts[bind_col].median() if len(pos_bind_evts) > 0 else 0
         raw_pos_med_ratio = (pos_med_bind_v / pos_med_expr_v) if pos_med_expr_v > 0 else 0
         
         cmp1, cmp2 = st.columns(2)
-        cmp1.metric("Raw Pos Median Ratio (Bind / Expr)", f"{raw_pos_med_ratio:.3f}")
+        cmp1.metric(f"Raw Pos Median Ratio ({bind_ch_lbl} / {expr_ch_lbl})", f"{raw_pos_med_ratio:.3f}")
+
         
         if ctrls["has_pc"] and ctrls.get("pos_sample") is not None:
             pc_expr_p = ctrls["pos_sample"][expr_col] > thresh_expr_val
@@ -1166,7 +1214,8 @@ if selected_file and df is not None:
                     fig_dp = px.bar(df_stats_sorted, x="Filename", y="Double+ %", color="Norm Pos Med Ratio", template="plotly_dark", title="Double Positive %")
                     row1_c1.plotly_chart(fig_dp, width='stretch', key="agg_dp_bar")
                     
-                    fig_mfi = px.scatter(df_stats, x="Bind MFI", y="Expr MFI", color="Filename", template="plotly_dark", title="MFI Scatter (Bind vs Expr)")
+                    fig_mfi = px.scatter(df_stats, x="Bind MFI", y="Expr MFI", color="Filename", template="plotly_dark", title=f"MFI Scatter ({bind_ch_lbl} vs {expr_ch_lbl})")
+
                     row1_c2.plotly_chart(fig_mfi, width='stretch', key="agg_mfi_scatter")
                     
                     row2_c1, row2_c2 = st.columns(2)
@@ -1181,12 +1230,14 @@ if selected_file and df is not None:
                     if hide_nc_folder:
                         df_ridge_sorted = df_ridge_sorted[~df_ridge_sorted['Sample'].str.upper().str.contains("NC|NEGATIVE CONTROL")]
 
-                    fig_ridge = px.violin(df_ridge_sorted, x="LogBinding", y="Sample", color="Sample", orientation="h", template="plotly_dark", title="Ridgeline: LogBinding", points=False)
+                    fig_ridge = px.violin(df_ridge_sorted, x="LogBinding", y="Sample", color="Sample", orientation="h", template="plotly_dark", title=f"Ridgeline: Log({bind_ch_lbl})", points=False)
+
                     fig_ridge.update_traces(side='positive', width=2.5)
                     fig_ridge.update_layout(xaxis_showgrid=False, xaxis_zeroline=False, showlegend=False)
                     st.plotly_chart(fig_ridge, width='stretch', key="agg_ridge_bind")
                     
-                    fig_ridge_ex = px.violin(df_ridge_sorted, x="LogExpression", y="Sample", color="Sample", orientation="h", template="plotly_dark", title="Ridgeline: LogExpression", points=False)
+                    fig_ridge_ex = px.violin(df_ridge_sorted, x="LogExpression", y="Sample", color="Sample", orientation="h", template="plotly_dark", title=f"Ridgeline: Log({expr_ch_lbl})", points=False)
+
                     fig_ridge_ex.update_traces(side='positive', width=2.5)
                     fig_ridge_ex.update_layout(xaxis_showgrid=False, xaxis_zeroline=False, showlegend=False)
                     st.plotly_chart(fig_ridge_ex, width='stretch', key="agg_ridge_expr")
@@ -1202,10 +1253,12 @@ if selected_file and df is not None:
                         plots = [
                             (f"{pref}Pos Med Ratio", "Pos Median Ratio (Bind/Expr)"),
                             (f"{pref}Pos Mean Ratio", "Pos Mean Ratio (Bind/Expr)"),
-                            (f"{pref}Expr Med (Bind+)", "Median Expr for Positive Binding"),
-                            (f"{pref}Bind Med (Expr+)", "Median Bind for Positive Expression"),
-                            (f"{pref}Expr Mean (Bind+)", "Mean Expr for Positive Binding"),
-                            (f"{pref}Bind Mean (Expr+)", "Mean Bind for Positive Expression")
+                            (f"{pref}Expr Med (Bind+)", f"Median {expr_ch_lbl} for Positive {bind_ch_lbl}"),
+                            (f"{pref}Bind Med (Expr+)", f"Median {bind_ch_lbl} for Positive {expr_ch_lbl}"),
+
+                            (f"{pref}Expr Mean (Bind+)", f"Mean {expr_ch_lbl} for Positive {bind_ch_lbl}"),
+                            (f"{pref}Bind Mean (Expr+)", f"Mean {bind_ch_lbl} for Positive {expr_ch_lbl}")
+
                         ]
                         
                         for i in range(0, len(plots), 2):
@@ -1320,10 +1373,11 @@ if selected_file and df is not None:
                     
                     # Update grouping to use selected metric
                     df_grouped = df_constructs.groupby("Construct").agg({
-                        sel_metric_col: ["mean", "std"],
+                        sel_metric_col: ["mean", "std", "count"],
                         "Double+ %": "mean"
                     }).reset_index()
-                    df_grouped.columns = ["Construct", "Mean Val", "SD Val", "Avg Double+ %"]
+                    df_grouped.columns = ["Construct", "Mean Val", "SD Val", "n", "Avg Double+ %"]
+
                     # User requested alphabetical order
                     df_grouped = df_grouped.sort_values("Construct")
                     
@@ -1331,8 +1385,10 @@ if selected_file and df is not None:
                         df_grouped, x="Construct", y="Mean Val", error_y="SD Val",
                         color="Avg Double+ %", color_continuous_scale="Viridis",
                         template="plotly_dark", title=f"{sel_metric_label} by Construct (Aggregated Across Valid Trials)",
-                        text_auto='.2f'
+                        text_auto='.2f',
+                        hover_data={"n": True}
                     )
+
                     fig_sum.update_layout(height=550)
                     st.plotly_chart(fig_sum, width='stretch', key="agg_mean_sd_bar")
                 else:
@@ -1471,8 +1527,10 @@ if selected_file and df is not None:
                         error_y="StdDev",
                         template="plotly_dark",
                         title=f"{selected_metric} Across Targets",
-                        labels={"Mean": selected_metric}
+                        labels={"Mean": selected_metric},
+                        hover_data={"Count": True}
                     )
+
                     fig_sel.update_layout(height=600, xaxis_tickangle=-45)
                     st.plotly_chart(fig_sel, width='stretch', key="selectivity_main_plotly")
                     
@@ -1504,8 +1562,10 @@ if selected_file and df is not None:
                             error_y="StdDev",
                             template="plotly_dark",
                             title=f"Selectivity Profile: {selected_variant} ({selected_metric})",
-                            labels={"Mean": selected_metric}
+                            labels={"Mean": selected_metric},
+                            hover_data={"Count": True}
                         )
+
                         fig_var.update_layout(height=450, showlegend=False)
                         st.plotly_chart(fig_var, width='stretch', key="selectivity_variant_plotly")
                     else:
