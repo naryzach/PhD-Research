@@ -1354,6 +1354,13 @@ if selected_file and df is not None:
                 if exclude_dates:
                     df_agg_f = df_agg_f[~df_agg_f["DateStr"].isin(exclude_dates)]
                 df_agg_f = df_agg_f[df_agg_f["TrialID"].isin(valid_trial_ids)]
+                
+                # Apply secondary QC filters (matches batch script logic)
+                if "Low Expression" in df_agg_f.columns:
+                    df_agg_f = df_agg_f[df_agg_f["Low Expression"] == False]
+                if "Low Events" in df_agg_f.columns:
+                    df_agg_f = df_agg_f[df_agg_f["Low Events"] == False]
+                    
                 df_constructs = df_agg_f[~df_agg_f["IsPC"]].copy()
 
             # --- NEW: Aggregated Summary View (Mean/SD) ---
@@ -1489,8 +1496,13 @@ if selected_file and df is not None:
                     if exclude_dates:
                         df_global_filtered = df_global_filtered[~df_global_filtered["DateStr"].isin(exclude_dates)]
                     
-                    # Filter for constructs only
+                    # Filter for constructs only and apply secondary QC filters
                     df_sel_raw = df_global_filtered[~df_global_filtered["IsPC"]].copy()
+                    
+                    if "Low Expression" in df_sel_raw.columns:
+                        df_sel_raw = df_sel_raw[df_sel_raw["Low Expression"] == False]
+                    if "Low Events" in df_sel_raw.columns:
+                        df_sel_raw = df_sel_raw[df_sel_raw["Low Events"] == False]
                     
                     # Group by Construct and Target
                     df_sel = df_sel_raw.groupby(['Construct', 'Target'])[sel_metric_col].agg(['mean', 'std', 'count']).reset_index()
