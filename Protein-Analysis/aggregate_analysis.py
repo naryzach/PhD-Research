@@ -209,8 +209,8 @@ def main():
             "folder": "Norm_Bind_Med_Expr_Positive"
         },
         {
-            "y_col": "Binding Efficiency (DP/FITC+)",
-            "y_label": "Binding Efficiency (Double Positive / FITC+)",
+            "y_col": "Binding Efficiency",
+            "y_label": "Binding Efficiency (Double Positive / Expr+)",
             "title_prefix": "Binding Efficiency",
             "folder": "Binding_Efficiency"
         },
@@ -346,7 +346,11 @@ def main():
                             norm_expr_med_bind = float(row.get('Norm Expr Med (Bind+)', 0))
                             
                             # New Refined Metrics
-                            bind_eff = float(row.get('Binding Efficiency (DP/FITC+)', 0))
+                            bind_eff = 0
+                            for col in row:
+                                if "Binding Efficiency (DP/" in col:
+                                    bind_eff = float(row.get(col, 0))
+                                    break
                             norm_iwb_index = float(row.get('Norm Intensity-Weighted Binding Index', 0))
 
                             
@@ -362,7 +366,7 @@ def main():
                                 'Norm Bind Med (Expr+)': norm_bind_med_expr,
                                 'Norm Bind Mean (Expr+)': norm_bind_mean_expr,
                                 'Norm Expr Med (Bind+)': norm_expr_med_bind,
-                                'Binding Efficiency (DP/FITC+)': bind_eff,
+                                'Binding Efficiency': bind_eff,
                                 'Norm Intensity-Weighted Binding Index': norm_iwb_index,
                                 'Expr+ %': expr_pos,
                                 'Gated Events': gated_events,
@@ -385,7 +389,7 @@ def main():
 
     # Save aggregate CSV
     output_csv = os.path.join(output_dir, "aggregate_summary.csv")
-    fieldnames = ['Target', 'Date', 'Construct', 'Raw Name', 'Norm Median Ratio', 'Norm Mean Ratio', 'Double+ %', 'Expr+ %', 'Gated Events', 'Norm Bind Med (Expr+)', 'Norm Bind Mean (Expr+)', 'Norm Expr Med (Bind+)', 'Binding Efficiency (DP/FITC+)', 'Norm Intensity-Weighted Binding Index', 'Low Expression', 'Low Events', 'Trial Failed', 'Trial Failed Reason']
+    fieldnames = ['Target', 'Date', 'Construct', 'Raw Name', 'Norm Median Ratio', 'Norm Mean Ratio', 'Double+ %', 'Expr+ %', 'Gated Events', 'Norm Bind Med (Expr+)', 'Norm Bind Mean (Expr+)', 'Norm Expr Med (Bind+)', 'Binding Efficiency', 'Norm Intensity-Weighted Binding Index', 'Low Expression', 'Low Events', 'Trial Failed', 'Trial Failed Reason']
     with open(output_csv, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()

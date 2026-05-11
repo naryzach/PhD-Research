@@ -702,9 +702,9 @@ with st.sidebar.expander("🛠️ Global QC & Metric Settings", expanded=False):
     st.divider()
     metric_options = {
         "Norm Median Ratio": "Norm Median Ratio",
-        "Binding Efficiency": "Binding Efficiency (DP/FITC+)",
+        "Binding Efficiency": "Binding Efficiency",
         "Intensity-Weighted (IWB)": "Norm Intensity-Weighted Binding Index",
-        "Norm Median of FITC+": "Norm Bind Med (Expr+)"
+        "Norm Median of Expr+": "Norm Bind Med (Expr+)"
     }
 
     sel_metric_label = st.radio("Select Analysis Metric", list(metric_options.keys()), horizontal=True, index=0, key="sidebar_metric_radio")
@@ -809,9 +809,9 @@ if selected_file:
             def_thresh_bind = float(np.percentile(df[bind_col], g_nc_pct))
 
         with thresh_expr_placeholder:
-            thresh_expr_val = st.number_input("Expression Thresh", value=def_thresh_expr, key="input_thresh_expr")
+            thresh_expr_val = st.number_input(f"Expression Thresh ({expr_col})", value=def_thresh_expr, key=f"input_thresh_expr_{expr_col}")
         with thresh_bind_placeholder:
-            thresh_bind_val = st.number_input("Binding Thresh", value=def_thresh_bind, key="input_thresh_bind")
+            thresh_bind_val = st.number_input(f"Binding Thresh ({bind_col})", value=def_thresh_bind, key=f"input_thresh_bind_{bind_col}")
 
         log_thresh_expr = np.log10(max(1, thresh_expr_val))
         log_thresh_bind = np.log10(max(1, thresh_bind_val))
@@ -907,6 +907,14 @@ if selected_file and df is not None:
     if df_global_trials is not None:
         df_f = df_global_trials.copy()
         
+        # Robust column renaming for Binding Efficiency
+        rename_map = {}
+        for col in df_f.columns:
+            if "Binding Efficiency (DP/" in col:
+                rename_map[col] = "Binding Efficiency"
+        if rename_map:
+            df_f = df_f.rename(columns=rename_map)
+            
         # 1. Internal QC Columns (from individual folder analysis)
         if 'Trial Failed' in df_f.columns:
             df_f = df_f[df_f['Trial Failed'] == False]
@@ -1717,7 +1725,7 @@ if selected_file and df is not None:
                             metric_map = {
                                 "Norm_Median_Ratio": "Norm Pos Med Ratio",
                                 "Norm_Bind_Med_Expr_Positive": "Norm Bind Med (Expr+)",
-                                "Binding_Efficiency": "Binding Efficiency (DP/FITC+)",
+                                "Binding_Efficiency": "Binding Efficiency",
                                 "Norm_IWB_Index": "Norm Intensity-Weighted Binding Index"
                             }
                             raw_metric_col = metric_map.get(selected_metric, selected_metric)
