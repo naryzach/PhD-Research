@@ -6,5 +6,6 @@ streamlit
 pandas
 numpy
 matplotlib
+statsmodels
 s3fs
 boto3
