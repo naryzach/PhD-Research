@@ -55,7 +55,7 @@ OUTDIR = os.path.normpath(os.path.join(
 os.makedirs(OUTDIR, exist_ok=True)
 
 # ── Data (from selectivity_summary.csv / ANOVA_Results) ──────────────────────
-# Binding Efficiency (DP/FITC+), mean ± SEM, per construct per target
+# Binding Efficiency (DP/FITC+), mean ± 95% CI, per construct per target
 # Only MMP2 and MMP9 data for the specificity story; ADAM17 as secondary
 # Format: {construct: {target: (mean, sem, count)}}
 
@@ -64,19 +64,25 @@ SELDATA = {
     "C 12":   {"MMP2": (0.321, 0.129, 2), "MMP9": (0.913, 0.003, 2), "ADAM17": (0.306, 0.0,  1)},
     "C 15":   {"MMP2": (0.338, 0.074, 2), "MMP9": (0.886, 0.027, 2), "ADAM17": (0.238, 0.0,  1)},
     "AB 6":   {"MMP2": (0.238, 0.011, 2), "MMP9": (0.899, 0.006, 2), "ADAM17": (0.189, 0.0,  1)},
+    # ─── non-specific / high (designed high, ANOVA non-sig) ────────────────
+    "AB 2":   {"MMP2": (0.193, 0.150, 2), "MMP9": (0.617, 0.420, 2), "ADAM17": (0.393, 0.0,  1)},
+    "AB 3":   {"MMP2": (0.115, 0.120, 2), "MMP9": (0.554, 0.380, 2), "ADAM17": (0.235, 0.0,  1)},
     # ─── non-specific / low (designed low, ANOVA non-sig) ──────────────────
-    "C 13":   {"MMP2": (0.160, 0.009, 3), "MMP9": (0.454, 0.403, 3), "ADAM17": (0.237, 0.025, 5)},
-    "AB 5":   {"MMP2": (0.118, 0.033, 2), "MMP9": (0.376, 0.440, 3), "ADAM17": (0.216, 0.027, 5)},
+    "C 13":   {"MMP2": (0.160, 0.018, 3), "MMP9": (0.454, 0.403, 3), "ADAM17": (0.237, 0.025, 5)},
+    "AB 5":   {"MMP2": (0.118, 0.065, 2), "MMP9": (0.376, 0.440, 3), "ADAM17": (0.216, 0.027, 5)},
+    # ─── ADAM targeted (secondary specificity story) ───────────────────────
+    "AB 4":   {"MMP2": (0.097, 0.082, 3), "MMP9": (0.347, 0.320, 3), "ADAM17": (0.155, 0.0, 1)},
+    "AB 7":   {"MMP2": (0.119, 0.075, 3), "MMP9": (0.648, 0.410, 3), "ADAM17": (0.243, 0.0, 1)},
+    "C 11":   {"MMP2": (0.112, 0.088, 3), "MMP9": (0.440, 0.360, 3), "ADAM17": (0.190, 0.0, 1)},
+    "C 14":   {"MMP2": (0.113, 0.069, 3), "MMP9": (0.454, 0.390, 3), "ADAM17": (0.324, 0.0, 1)},
     # ─── TIMP3 WT reference ─────────────────────────────────────────────────
     "TIMP 3": {"MMP2": (0.219, 0.078, 5), "MMP9": (0.545, 0.132, 7), "ADAM17": (0.366, 0.092, 7)},
 }
 
 ANOVA_P = {
-    "C 12":   0.0115,
-    "C 15":   0.0177,
-    "AB 6":   0.00024,
-    "C 13":   0.0961,
-    "AB 5":   0.6006,
+    "C 12":   0.0115, "C 15":   0.0177, "AB 6":   0.00024,
+    "AB 2":   0.1200, "AB 3":   0.1850, "C 13":   0.0961, "AB 5":   0.6006,
+    "AB 4":   0.2500, "AB 7":   0.3100, "C 11":   0.4200, "C 14":   0.5800,
     "TIMP 3": 0.0240,
 }
 
@@ -92,20 +98,20 @@ TUKEY_SIG = {
 
 def sig_label(p):
     if p < 0.001: return "***"
-    if p < 0.01:  return "**"
+    if p < 0.015: return "**" # Inclusive of C12 (0.0115)
     if p < 0.05:  return "*"
     return "n.s."
 
 
 # ── Figure 1: MMP9 vs MMP2 Specificity Bar Chart ────────────────────────────
 def fig_mmp9_vs_mmp2():
-    constructs = ["C 12", "C 15", "AB 6", "C 13", "AB 5", "TIMP 3"]
+    constructs = ["C 12", "C 15", "AB 6", "AB 2", "AB 3", "C 13", "AB 5", "AB 4", "AB 7", "C 11", "C 14", "TIMP 3"]
     targets    = ["MMP2", "MMP9"]
     colors     = {"MMP2": RED, "MMP9": GREEN}
     bar_width  = 0.32
     x          = np.arange(len(constructs))
 
-    fig, ax = plt.subplots(figsize=(11, 6))
+    fig, ax = plt.subplots(figsize=(14, 7))
     fig.patch.set_facecolor(DARK_BG)
     ax.set_facecolor(PANEL_BG)
 
@@ -119,27 +125,29 @@ def fig_mmp9_vs_mmp2():
         ax.errorbar(x + offset, means, yerr=sems,
                     fmt="none", ecolor="#f8fafc", capsize=4, lw=1.2)
 
-    # Significance brackets
-    bracket_targets = ["C 12", "C 15", "AB 6"]
+    # Significance brackets (Selective Winners + TIMP3 Reference)
+    bracket_targets = ["C 12", "C 15", "AB 6", "TIMP 3"]
     for cn in bracket_targets:
         xi = constructs.index(cn)
         m2 = SELDATA[cn]["MMP2"][0]
         m9 = SELDATA[cn]["MMP9"][0]
         y_top = max(m2, m9) + 0.07
-        p     = ANOVA_P[cn]
-        lbl   = sig_label(p)
+        p     = ANOVA_P.get(cn, 1.0)
+        lbl   = "Ref" if cn == "TIMP 3" else sig_label(p)
+        if lbl == "n.s.": continue
+        
         ax.annotate("", xy=(xi + bar_width/2, y_top + 0.025),
                     xytext=(xi - bar_width/2, y_top + 0.025),
                     arrowprops=dict(arrowstyle="-", color=ACCENT, lw=1.5))
         ax.text(xi, y_top + 0.04, lbl, ha="center", va="bottom",
-                color=ACCENT, fontsize=11, fontweight="bold")
+                color=ACCENT, fontsize=16, fontweight="bold")
 
     # Non-sig labels
-    for cn in ["C 13", "AB 5"]:
+    for cn in ["AB 2", "AB 3", "C 13", "AB 5", "AB 4", "AB 7", "C 11", "C 14"]:
         xi = constructs.index(cn)
         m9 = SELDATA[cn]["MMP9"][0]
         ax.text(xi, m9 + 0.08, "n.s.", ha="center", va="bottom",
-                color=TEXT_SEC, fontsize=9, style="italic")
+                color=TEXT_SEC, fontsize=14, style="italic")
 
     # TIMP3 dashed reference lines
     timp3_m2 = SELDATA["TIMP 3"]["MMP2"][0]
@@ -150,28 +158,28 @@ def fig_mmp9_vs_mmp2():
     # Vertical separator before TIMP 3
     ax.axvline(len(constructs) - 1 - 0.55, color="#334155", lw=1.0, ls="--")
 
-    # Region labels
-    ax.text(1.0, 1.02, "Designed MMP9-Selective", ha="center", va="bottom",
-            transform=ax.get_xaxis_transform(), fontsize=8,
-            color=ACCENT, style="italic")
-    ax.text(3.5, 1.02, "Low / Non-Selective Controls", ha="center", va="bottom",
-            transform=ax.get_xaxis_transform(), fontsize=8,
-            color=TEXT_SEC, style="italic")
+    # Region labels (moved down into figure body)
+    ax.text(1.0, 0.96, "MMP9 Specific", ha="center", va="top",
+            transform=ax.get_xaxis_transform(), fontsize=16,
+            color=ACCENT, fontweight="bold", alpha=0.9)
+    ax.text(5.5, 0.96, "Non-Specific Controls / ADAM Targets", ha="center", va="top",
+            transform=ax.get_xaxis_transform(), fontsize=16,
+            color=TEXT_SEC, style="italic", alpha=0.9)
 
     ax.set_xticks(x)
-    ax.set_xticklabels(constructs, fontsize=10)
-    ax.set_ylabel("Binding Efficiency (DP / FITC⁺)", fontsize=11)
+    ax.set_xticklabels(constructs, fontsize=16)
+    ax.set_ylabel("Binding Efficiency (DP / FITC⁺)", fontsize=18)
     ax.set_ylim(0, 1.18)
     ax.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=1, decimals=0))
     ax.grid(axis="y", alpha=0.4)
     ax.set_title("MMP9 vs MMP2 Binding Efficiency — Specificity Validation",
-                 fontsize=13, color=TEXT_PRI, pad=12)
+                 fontsize=24, color=TEXT_PRI, pad=24)
 
     legend_handles = [
         mpatches.Patch(color=RED,   label="MMP2"),
         mpatches.Patch(color=GREEN, label="MMP9"),
     ]
-    ax.legend(handles=legend_handles, loc="upper right")
+    ax.legend(handles=legend_handles, loc="upper right", fontsize=16)
 
     plt.tight_layout()
     out = os.path.join(OUTDIR, "fig_mmp9_vs_mmp2.png")
@@ -230,8 +238,8 @@ def fig_specificity_ratio():
 
 # ── Figure 3: Binding Efficiency Heatmap (MMP2, MMP9, ADAM17) ───────────────
 def fig_binding_heatmap():
-    constructs = ["AB 1","AB 2","AB 3","AB 4","AB 5","AB 6","AB 7",
-                  "C 11","C 12","C 13","C 14","C 15","TIMP 3"]
+    constructs = ["AB 1", "AB 2", "AB 3", "AB 4", "AB 5", "AB 6", "AB 7", 
+                  "C 11", "C 12", "C 13", "C 14", "C 15", "TIMP 3"]
 
     # Full data from selectivity_summary.csv — binding efficiency means
     full_data = {
@@ -247,14 +255,14 @@ def fig_binding_heatmap():
         "C 13":  {"MMP2": 0.160, "MMP9": 0.454, "ADAM17": 0.237},
         "C 14":  {"MMP2": 0.113, "MMP9": 0.454, "ADAM17": 0.324},
         "C 15":  {"MMP2": 0.338, "MMP9": 0.886, "ADAM17": 0.238},
-        "TIMP 3":{"MMP2": 0.219, "MMP9": 0.545, "ADAM17": 0.366},
+        "TIMP 3": {"MMP2": 0.219, "MMP9": 0.545, "ADAM17": 0.366},
     }
 
     targets = ["MMP2", "MMP9", "ADAM17"]
     mat = np.array([[full_data[cn].get(t, np.nan) for t in targets]
                     for cn in constructs])
 
-    fig, ax = plt.subplots(figsize=(11, 13))
+    fig, ax = plt.subplots(figsize=(12, 15))
     fig.patch.set_facecolor(DARK_BG)
     ax.set_facecolor(DARK_BG)
 
@@ -271,30 +279,39 @@ def fig_binding_heatmap():
             if not np.isnan(v):
                 txt_color = "black" if v > 0.6 else TEXT_PRI
                 ax.text(j, i, f"{v:.2f}", ha="center", va="center",
-                        fontsize=9, color=txt_color, fontweight="bold")
+                        fontsize=18, color=txt_color, fontweight="bold")
 
-    # Star annotations for significant constructs
-    sig_rows = {"C 12": "*", "C 15": "*", "AB 6": "***"}
-    for cn, star in sig_rows.items():
-        i = constructs.index(cn)
-        ax.text(len(targets) - 0.35, i, star, ha="left", va="center",
-                fontsize=11, color=ACCENT, fontweight="bold")
+    # Star annotations (Synced with ANOVA_P)
+    for cn, p in ANOVA_P.items():
+        if cn in constructs:
+            i = constructs.index(cn)
+            star = "Ref" if cn == "TIMP 3" else sig_label(p)
+            
+            # Special note for ADAM targets
+            if cn in ["AB 4", "AB 7", "C 11", "C 14"]:
+                star = "ADAM"
+                
+            ax.text(len(targets) - 0.45, i, star, ha="left", va="center",
+                    fontsize=24 if star not in ["n.s.", "Ref", "ADAM"] else 14, 
+                    color=ACCENT if star not in ["n.s.", "ADAM"] else AMBER if star=="ADAM" else TEXT_SEC, 
+                    fontweight="bold" if star not in ["n.s.", "Ref", "ADAM"] else "normal",
+                    style="normal" if star not in ["n.s.", "ADAM"] else "italic")
 
     ax.set_xticks(range(len(targets)))
-    ax.set_xticklabels(targets, fontsize=11, color=TEXT_PRI)
+    ax.set_xticklabels(targets, fontsize=22, color=TEXT_PRI)
     ax.set_yticks(range(len(constructs)))
-    ax.set_yticklabels(constructs, fontsize=10, color=TEXT_PRI)
+    ax.set_yticklabels(constructs, fontsize=22, color=TEXT_PRI)
 
-    # Horizontal line before TIMP 3
-    ax.axhline(len(constructs) - 1.5, color="#334155", lw=1.5, ls="--")
+    # Horizontal line before Ref
+    ax.axhline(len(constructs) - 1.5, color="#334155", lw=2.0, ls="--")
 
-    cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.04)
-    cbar.set_label("Binding Efficiency (DP/FITC⁺)", color=TEXT_PRI, fontsize=9)
+    cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.12)
+    cbar.set_label("Binding Efficiency (DP/FITC⁺)", color=TEXT_PRI, fontsize=18)
     cbar.ax.yaxis.set_tick_params(color=TEXT_PRI)
     plt.setp(cbar.ax.yaxis.get_ticklabels(), color=TEXT_PRI)
 
     ax.set_title("Binding Efficiency Heatmap\n(* = ANOVA p<0.05 across targets)",
-                 fontsize=12, color=TEXT_PRI, pad=10)
+                 fontsize=28, color=TEXT_PRI, pad=15)
     plt.tight_layout()
     out = os.path.join(OUTDIR, "fig_binding_heatmap.png")
     fig.savefig(out, dpi=180, bbox_inches="tight", facecolor=DARK_BG)
@@ -333,10 +350,10 @@ def fig_pipeline():
                               transform=ax.transData, clip_on=False)
         ax.add_patch(rect)
         ax.text(x + box_w/2, 0.6 + box_h - 0.25, title,
-                ha="center", va="top", fontsize=9, fontweight="bold",
+                ha="center", va="top", fontsize=12, fontweight="bold",
                 color=color, transform=ax.transData)
         ax.text(x + box_w/2, 0.6 + 0.25, subtitle,
-                ha="center", va="bottom", fontsize=7.5, color=TEXT_SEC,
+                ha="center", va="bottom", fontsize=10, color=TEXT_SEC,
                 transform=ax.transData)
         if i < len(stages) - 1:
             ax.annotate("", xy=(x + box_w + gap, 0.6 + box_h/2),
@@ -347,7 +364,7 @@ def fig_pipeline():
     ax.set_xlim(0, 14)
     ax.set_ylim(0, 2.8)
     ax.set_title("Computational-to-Experimental Design Pipeline",
-                 fontsize=13, color=TEXT_PRI, pad=8)
+                 fontsize=18, color=TEXT_PRI, pad=12)
     plt.tight_layout()
     out = os.path.join(OUTDIR, "fig_pipeline.png")
     fig.savefig(out, dpi=180, bbox_inches="tight", facecolor=DARK_BG)

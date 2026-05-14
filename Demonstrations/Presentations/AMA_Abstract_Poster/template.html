@@ -51,12 +51,12 @@
                 <h1 class="poster-title">{{ data.title }}</h1>
                 <h2 class="poster-author">{{ data.author }}</h2>
             </div>
-            <div style="margin-left: 60px; flex-shrink: 0; display: flex; align-items: center; gap: 24px;">
+            <div style="margin-left: 80px; flex-shrink: 0; display: flex; align-items: center; gap: 32px;">
                 <img src="../../SharedAssets/figures/UNR Logo.png" alt="UNR Logo"
-                     style="height: 100px; filter: drop-shadow(0 8px 12px rgba(0,0,0,0.5));">
-                <div style="font-family: 'Inter', sans-serif; font-size: 32px; font-weight: 800;
+                     style="height: 140px; filter: drop-shadow(0 8px 12px rgba(0,0,0,0.5));">
+                <div style="font-family: 'Inter', sans-serif; font-size: 48px; font-weight: 400;
                             color: #f8fafc; line-height: 1.15; text-align: left;
-                            border-left: 5px solid #38bdf8; padding-left: 24px; white-space: nowrap;">
+                            white-space: nowrap;">
                     University of Nevada, Reno
                 </div>
             </div>
@@ -116,14 +116,13 @@
                                     <th>Design</th>
                                     <th>MMP2</th>
                                     <th>MMP9</th>
-                                    <th>Ratio</th>
                                     <th>ANOVA <i>p</i></th>
                                     <th>Verdict</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for row in data.specificity_table.rows %}
-                                <tr class="{% if loop.index <= 3 %}sig-row{% elif loop.index <= 5 %}ctrl-row{% else %}ref-row{% endif %}">
+                                <tr class="{% if loop.index <= 3 %}sig-row{% elif loop.index <= 7 %}ctrl-row{% elif loop.index <= 11 %}adam-row{% else %}ref-row{% endif %}">
                                     {% for cell in row %}
                                     <td>{{ cell }}</td>
                                     {% endfor %}
@@ -131,7 +130,7 @@
                                 {% endfor %}
                             </tbody>
                         </table>
-                        <div class="spec-table-note">Binding Efficiency = DP / FITC+ (double-positive / expression-positive). One-way ANOVA tests equality across all tested targets. n.s. ✓ = non-significant result expected by design for 'Low' constructs.</div>
+                        <div class="spec-table-note">Binding Efficiency = DP / FITC+ (double-positive / expression-positive). Error bars represent 95% Confidence Intervals (CI). One-way ANOVA tests equality across all tested targets. n.s. = non-significant result validating design intent.</div>
                     </div>
 
                     <!-- Result Figures -->
