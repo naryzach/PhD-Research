@@ -5,6 +5,8 @@
 > Primary selectivity target: **MMP9 vs MMP2** (structurally homologous, clinically distinct).  
 > ADAM17 is included in normalized binding comparisons to TIMP3 but not in selectivity analyses.  
 > MMP3 data was used for internal calibration trials only and is excluded from publications.
+> **Clinical Objective:** Selective MMP9 inhibition for oncology applications (tumor metastasis) without off-target musculoskeletal toxicity from MMP2 inhibition.
+> **Strategic Roadmap:** Includes "Reverse Selectivity" (MMP2 > MMP9) as a controllability proof of concept, ADAM10 presentation optimization, and absolute kinetic measurement (SPR).
 
 ---
 

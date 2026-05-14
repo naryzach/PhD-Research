@@ -7,44 +7,72 @@
   Width  : 48 inches  (landscape)
   Height : 36 inches
   Ratio  : 4:3 (≈ 19:6 approximate / 48:36)
-  CSS    : style.css → body { width: 48in; height: 36in; }
+  CSS    : style.css → body { width: 4608px; height: 3456px; }
   Build  : python build_poster.py → output.html + poster_output.pdf
   ============================================================
 -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ data.title }}</title>
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Outfit:wght@500;700&display=swap" rel="stylesheet">
+    <script>
+      /* ── Poster Viewport Scaler ────────────────────────────────────────────
+         Scales the 4608×3456 px poster canvas to fit any browser window.
+         This only affects screen preview — PDF export via build_poster.py
+         uses the physical 48" × 36" dimensions unaffected by this script.
+         ──────────────────────────────────────────────────────────────────── */
+      (function () {
+        var W = 4608, H = 3456; // 48" × 36" at 96 dpi
+        function fit() {
+          if (window.matchMedia('print').matches) return;
+          var scale = Math.min(
+            window.innerWidth  / W,
+            window.innerHeight / H
+          );
+          document.body.style.transform = 'scale(' + scale + ')';
+          var ml = Math.max(0, (window.innerWidth  - W * scale) / 2);
+          var mt = Math.max(0, (window.innerHeight - H * scale) / 2);
+          document.body.style.marginLeft = ml + 'px';
+          document.body.style.marginTop  = mt + 'px';
+        }
+        window.addEventListener('load',   fit);
+        window.addEventListener('resize', fit);
+      })();
+    </script>
 </head>
 <body>
     <div class="poster-container">
-        <!-- Header -->
-        <header class="poster-header glass-panel" style="display: flex; align-items: center; justify-content: space-between;">
+
+        <!-- ═══ HEADER ═══════════════════════════════════════════════════════ -->
+        <header class="poster-header glass-panel">
             <div style="flex: 1; text-align: left;">
                 <h1 class="poster-title">{{ data.title }}</h1>
                 <h2 class="poster-author">{{ data.author }}</h2>
             </div>
-            <div style="margin-left: 80px; flex-shrink: 0; display: flex; align-items: center; gap: 30px;">
-                <img src="../../SharedAssets/figures/UNR Logo.png" alt="UNR Logo" style="height: 120px; filter: drop-shadow(0 10px 15px rgba(0,0,0,0.5));">
-                <div style="font-family: 'Inter', sans-serif; font-size: 38px; font-weight: 800; color: #f8fafc; line-height: 1.15; text-align: left; border-left: 6px solid #38bdf8; padding-left: 30px; white-space: nowrap;">
+            <div style="margin-left: 60px; flex-shrink: 0; display: flex; align-items: center; gap: 24px;">
+                <img src="../../SharedAssets/figures/UNR Logo.png" alt="UNR Logo"
+                     style="height: 100px; filter: drop-shadow(0 8px 12px rgba(0,0,0,0.5));">
+                <div style="font-family: 'Inter', sans-serif; font-size: 32px; font-weight: 800;
+                            color: #f8fafc; line-height: 1.15; text-align: left;
+                            border-left: 5px solid #38bdf8; padding-left: 24px; white-space: nowrap;">
                     University of Nevada, Reno
                 </div>
             </div>
         </header>
 
-        <!-- Main Content Grid -->
+        <!-- ═══ MAIN 3-COLUMN GRID ═══════════════════════════════════════════ -->
         <main class="poster-grid">
-            
-            <!-- Left Column -->
+
+            <!-- ── LEFT COLUMN: Background + Methods ─────────────────────── -->
             <div class="column">
+
                 <section class="poster-section glass-panel">
                     <h3>{{ data.background.title }}</h3>
                     <p>{{ data.background.content }}</p>
                     <figure class="poster-figure">
-                        <img src="{{ data.background.figure }}" alt="Background Figure">
+                        <img src="{{ data.background.figure }}" alt="MMP2 active site structure">
                         <figcaption>{{ data.background.figure_caption }}</figcaption>
                     </figure>
                 </section>
@@ -52,66 +80,45 @@
                 <section class="poster-section glass-panel">
                     <h3>{{ data.methods.title }}</h3>
                     <p>{{ data.methods.content }}</p>
-
-                    <!-- 6-Stage Workflow Diagram -->
-                    <div class="workflow-diagram">
-                        <div class="workflow-stage" style="border-color: rgba(59,130,246,0.4);">
-                            <div class="stage-icon" style="color:#3b82f6; border-color:rgba(59,130,246,0.3); background:rgba(59,130,246,0.1);">GEN</div>
-                            <div class="stage-label">Backbone Generation</div>
-                            <div class="stage-tool">RFdiffusion · AB/C/EF loops · 6–24 aa</div>
-                        </div>
-                        <div class="workflow-arrow">⬇</div>
-                        <div class="workflow-stage" style="border-color: rgba(139,92,246,0.4);">
-                            <div class="stage-icon" style="color:#8b5cf6; border-color:rgba(139,92,246,0.3); background:rgba(139,92,246,0.1);">SEQ</div>
-                            <div class="stage-label">Sequence Design</div>
-                            <div class="stage-tool">ProteinMPNN · 1000 seqs/target · T=0.2</div>
-                        </div>
-                        <div class="workflow-arrow">⬇</div>
-                        <div class="workflow-stage" style="border-color: rgba(6,182,212,0.4);">
-                            <div class="stage-icon" style="color:#06b6d4; border-color:rgba(6,182,212,0.3); background:rgba(6,182,212,0.1);">VAL</div>
-                            <div class="stage-label">Structural Co-folding</div>
-                            <div class="stage-tool">AlphaFold3 Server · ipTM / PAE / pLDDT</div>
-                        </div>
-                        <div class="workflow-arrow">⬇</div>
-                        <div class="workflow-stage" style="border-color: rgba(16,185,129,0.4);">
-                            <div class="stage-icon" style="color:#10b981; border-color:rgba(16,185,129,0.3); background:rgba(16,185,129,0.1);">SEL</div>
-                            <div class="stage-label">Candidate Selection</div>
-                            <div class="stage-tool">T-score &gt; 2.0 · Multi-metric consensus</div>
-                        </div>
-                        <div class="workflow-arrow">⬇</div>
-                        <div class="workflow-stage" style="border-color: rgba(245,158,11,0.4);">
-                            <div class="stage-icon" style="color:#f59e0b; border-color:rgba(245,158,11,0.3); background:rgba(245,158,11,0.1);">SYN</div>
-                            <div class="stage-label">DNA Synthesis</div>
-                            <div class="stage-tool">Twist Bioscience · 13 constructs · Dec 2025</div>
-                        </div>
-                        <div class="workflow-arrow">⬇</div>
-                        <div class="workflow-stage" style="border-color: rgba(239,68,68,0.4);">
-                            <div class="stage-icon" style="color:#ef4444; border-color:rgba(239,68,68,0.3); background:rgba(239,68,68,0.1);">EXP</div>
-                            <div class="stage-label">Experimental Validation</div>
-                            <div class="stage-tool">Yeast Display · Flow Cytometry · ANOVA</div>
-                        </div>
-                    </div>
+                    <!-- Horizontal pipeline diagram replaces vertical workflow div -->
+                    <figure class="poster-figure" style="padding: 12px; margin-top: 18px;">
+                        <img src="{{ data.methods.pipeline_figure }}"
+                             alt="6-Stage Pipeline: Backbone Generation → Sequence Design → Structural Co-folding → Candidate Selection → DNA Synthesis → Yeast Display"
+                             style="width: 100%; max-height: 380px; object-fit: contain;">
+                        <figcaption>Figure: Six-stage generative-AI-to-experiment pipeline. Each stage narrows the candidate pool while preserving structural fidelity, reducing >1,000 generated sequences to 13 synthesis-ready constructs.</figcaption>
+                    </figure>
                 </section>
+
             </div>
 
-            <!-- Middle Column -->
+            <!-- ── MIDDLE COLUMN: Results ─────────────────────────────────── -->
             <div class="column">
                 <section class="poster-section glass-panel">
                     <h3>{{ data.results.title }}</h3>
-                    <p>{{ data.results.content }}</p>
+
+                    <div class="result-subsection">
+                        <div class="result-subsection-title">Computational Stage Outcomes</div>
+                        <p style="margin-bottom: 10px;">{{ data.results.pipeline_success }}</p>
+                    </div>
+
+                    <div class="result-subsection">
+                        <div class="result-subsection-title">Experimental Validation</div>
+                        <p>{{ data.results.content }}</p>
+                    </div>
 
                     <!-- Specificity Table -->
                     <div class="specificity-table-wrap">
-                        <div class="spec-table-title">Binding Efficiency Specificity Analysis (MMP9 vs MMP2)</div>
+                        <div class="spec-table-title">Binding Efficiency Specificity: MMP9 vs MMP2</div>
                         <table class="specificity-table">
                             <thead>
                                 <tr>
                                     <th>Construct</th>
-                                    <th>Expected</th>
-                                    <th>MMP2 Eff.</th>
-                                    <th>MMP9 Eff.</th>
+                                    <th>Design</th>
+                                    <th>MMP2</th>
+                                    <th>MMP9</th>
+                                    <th>Ratio</th>
                                     <th>ANOVA <i>p</i></th>
-                                    <th>Result</th>
+                                    <th>Verdict</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -124,34 +131,38 @@
                                 {% endfor %}
                             </tbody>
                         </table>
-                        <div class="spec-table-note">Binding Efficiency = DP/FITC+ fraction. ANOVA tests null hypothesis that efficiency is equal across all tested targets. n.s. ✓ = non-significant as expected for Low-designed constructs.</div>
+                        <div class="spec-table-note">Binding Efficiency = DP / FITC+ (double-positive / expression-positive). One-way ANOVA tests equality across all tested targets. n.s. ✓ = non-significant result expected by design for 'Low' constructs.</div>
                     </div>
 
-                    <!-- Figures -->
-                    <div style="display: flex; flex-direction: column; gap: 30px; margin-top: 20px;">
-                        {% for fig in data.results.figures %}
-                        <figure class="poster-figure">
-                            <img src="{{ fig.path }}" alt="Result Figure" style="max-height: 720px; width: 100%; object-fit: contain;">
-                            {% if fig.caption %}
-                            <figcaption>{{ fig.caption }}</figcaption>
-                            {% endif %}
-                        </figure>
-                        {% endfor %}
-                    </div>
+                    <!-- Result Figures -->
+                    {% for fig in data.results.figures %}
+                    <figure class="poster-figure" style="margin-top: 18px;">
+                        <img src="{{ fig.path }}" alt="Result figure"
+                             style="width: 100%; {% if loop.index == 2 %}max-height: 900px;{% else %}max-height: 680px;{% endif %} object-fit: contain;">
+                        {% if fig.caption %}
+                        <figcaption>{{ fig.caption }}</figcaption>
+                        {% endif %}
+                    </figure>
+                    {% endfor %}
                 </section>
             </div>
 
-            <!-- Right Column -->
+            <!-- ── RIGHT COLUMN: Conclusions + Future + Clinical + References ── -->
             <div class="column">
 
                 <section class="poster-section glass-panel">
                     <h3>{{ data.conclusions.title }}</h3>
-                    <p>{{ data.conclusions.content }}</p>
+                    <p class="multiline">{{ data.conclusions.content }}</p>
                 </section>
 
                 <section class="poster-section glass-panel">
                     <h3>{{ data.future.title }}</h3>
-                    <p>{{ data.future.content }}</p>
+                    <p class="multiline">{{ data.future.content }}</p>
+                </section>
+
+                <section class="poster-section glass-panel">
+                    <h3>{{ data.clinical.title }}</h3>
+                    <p class="multiline">{{ data.clinical.content }}</p>
                 </section>
 
                 <section class="poster-section glass-panel references">
@@ -162,6 +173,7 @@
                         {% endfor %}
                     </ul>
                 </section>
+
             </div>
 
         </main>

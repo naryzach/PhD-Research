@@ -46,7 +46,13 @@ plt.rcParams.update({
     "legend.edgecolor":  "#334155",
 })
 
-OUTDIR = os.path.dirname(__file__)
+# Output directory: SharedAssets is the canonical location for all referenced figures.
+# Original script location: Demonstrations/Presentations/AMA_Abstract_Poster/
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTDIR = os.path.normpath(os.path.join(
+    _SCRIPT_DIR, "..", "..", "SharedAssets", "figures", "De_Novo_Binder_Generation"
+))
+os.makedirs(OUTDIR, exist_ok=True)
 
 # ── Data (from selectivity_summary.csv / ANOVA_Results) ──────────────────────
 # Binding Efficiency (DP/FITC+), mean ± SEM, per construct per target
@@ -248,7 +254,7 @@ def fig_binding_heatmap():
     mat = np.array([[full_data[cn].get(t, np.nan) for t in targets]
                     for cn in constructs])
 
-    fig, ax = plt.subplots(figsize=(7, 8))
+    fig, ax = plt.subplots(figsize=(11, 13))
     fig.patch.set_facecolor(DARK_BG)
     ax.set_facecolor(DARK_BG)
 
