@@ -502,8 +502,8 @@ def get_folder_aggregate_stats(directory, _ctrls, fsc_col="FSC-A", ssc_col="SSC-
             p_bind_mean_ref = df_stats["Bind Mean (Expr+)"].max()
             p_expr_mean_ref = df_stats["Expr Mean (Bind+)"].max()
 
-        df_stats["Norm Pos Med Ratio"] = df_stats["Pos Med Ratio"] / max(p_med_rat_ref, 1e-9)
-        df_stats["Norm Pos Mean Ratio"] = df_stats["Pos Mean Ratio"] / max(p_mean_rat_ref, 1e-9)
+        df_stats["Norm Median Ratio"] = df_stats["Pos Med Ratio"] / max(p_med_rat_ref, 1e-9)
+        df_stats["Norm Mean Ratio"] = df_stats["Pos Mean Ratio"] / max(p_mean_rat_ref, 1e-9)
         df_stats["Norm Bind Med (Expr+)"] = df_stats["Bind Med (Expr+)"] / max(p_bind_med_ref, 1e-9)
         df_stats["Norm Expr Med (Bind+)"] = df_stats["Expr Med (Bind+)"] / max(p_expr_med_ref, 1e-9)
         df_stats["Norm Bind Mean (Expr+)"] = df_stats["Bind Mean (Expr+)"] / max(p_bind_mean_ref, 1e-9)
@@ -511,7 +511,10 @@ def get_folder_aggregate_stats(directory, _ctrls, fsc_col="FSC-A", ssc_col="SSC-
         
     elif not df_stats.empty:
         for m in ["Pos Med Ratio", "Pos Mean Ratio", "Bind Med (Expr+)", "Expr Med (Bind+)", "Bind Mean (Expr+)", "Expr Mean (Bind+)"]:
-            df_stats[f"Norm {m}"] = df_stats[m] / max(df_stats[m].max(), 1e-9)
+            col_name = f"Norm {m}"
+            if m == "Pos Med Ratio": col_name = "Norm Median Ratio"
+            if m == "Pos Mean Ratio": col_name = "Norm Mean Ratio"
+            df_stats[col_name] = df_stats[m] / max(df_stats[m].max(), 1e-9)
         
     return df_stats, df_ridge
 
@@ -1334,7 +1337,10 @@ if selected_file and df is not None:
                     
                     row1_c1, row1_c2 = st.columns(2)
                     
-                    fig_dp = px.bar(df_stats_sorted, x="Filename", y="Double+ %", color="Norm Pos Med Ratio", template="plotly_dark", title="Double Positive %")
+                    # Robust color column selection
+                    agg_color_col = "Norm Median Ratio" if "Norm Median Ratio" in df_stats_sorted.columns else ("Norm Pos Med Ratio" if "Norm Pos Med Ratio" in df_stats_sorted.columns else None)
+                    
+                    fig_dp = px.bar(df_stats_sorted, x="Filename", y="Double+ %", color=agg_color_col, template="plotly_dark", title="Double Positive %")
                     row1_c1.plotly_chart(fig_dp, width='stretch', key="agg_dp_bar")
                     
                     fig_mfi = px.scatter(df_stats, x="Bind MFI", y="Expr MFI", color="Filename", template="plotly_dark", title=f"MFI Scatter ({bind_ch_lbl} vs {expr_ch_lbl})")
@@ -1374,8 +1380,8 @@ if selected_file and df is not None:
                         pref = "Norm " if is_norm else ""
 
                         plots = [
-                            (f"{pref}Pos Med Ratio", "Pos Median Ratio (Bind/Expr)"),
-                            (f"{pref}Pos Mean Ratio", "Pos Mean Ratio (Bind/Expr)"),
+                            ("Norm Median Ratio" if is_norm else "Pos Med Ratio", "Pos Median Ratio (Bind/Expr)"),
+                            ("Norm Mean Ratio" if is_norm else "Pos Mean Ratio", "Pos Mean Ratio (Bind/Expr)"),
                             (f"{pref}Expr Med (Bind+)", f"Median {expr_ch_lbl} for Positive {bind_ch_lbl}"),
                             (f"{pref}Bind Med (Expr+)", f"Median {bind_ch_lbl} for Positive {expr_ch_lbl}"),
 
@@ -1424,6 +1430,14 @@ if selected_file and df is not None:
                 df_constructs = df_constructs.sort_values("Construct")
                 
                 # Update grouping to use selected metric
+                if sel_metric_col not in df_constructs.columns:
+                    st.error(f"❌ Metric **{sel_metric_col}** not found in current dataset.")
+                    if st.session_state.get("data_mode") == "Cloud (R2)":
+                        st.info("You are in **Cloud (R2)** mode. This metric might require uploading the latest `aggregate_summary.csv` to R2. Try switching to **Local** mode in the sidebar if you just ran a local analysis.")
+                    else:
+                        st.info("You are in **Local** mode. Please ensure you have run `aggregate_analysis.py` to regenerate the summary data with the required metrics.")
+                    st.stop()
+
                 df_grouped = df_constructs.groupby("Construct").agg({
                     sel_metric_col: ["mean", "std", "count"],
                     "Double+ %": "mean"
@@ -1551,7 +1565,7 @@ if selected_file and df is not None:
              st.rerun()
 
              
-        if fs and BUCKET:
+        if st.session_state.get("data_mode") == "Cloud (R2)" and fs and BUCKET:
             global_agg_dir = os.path.join(BUCKET, "Aggregate_FCS_Analysis")
         else:
             # Try multiple relative paths to be safe
@@ -1602,7 +1616,27 @@ if selected_file and df is not None:
                     metric_dirs = sorted([d for d in os.listdir(selectivity_dir) if os.path.isdir(os.path.join(selectivity_dir, d))])
             
             if metric_dirs:
-                selected_metric = st.selectbox("Select Metric to View", metric_dirs, key="selectivity_tab_metric_sel")
+                # Filter out legacy normalized folders from selectivity view
+                metric_dirs = [d for d in metric_dirs if not d.startswith("Norm_")]
+                
+                # Human readable mapping
+                display_map = {
+                    "Median_Ratio": "Median Binding Ratio (Raw)",
+                    "Bind_Med_Expr_Positive": "Median Binding MFI (Raw)",
+                    "Binding_Efficiency": "Binding Efficiency",
+                    "IWB_Index": "IWB Index (Raw)"
+                }
+                
+                selected_display = st.selectbox(
+                    "Select Metric to View", 
+                    [display_map.get(d, d) for d in metric_dirs], 
+                    key="selectivity_tab_metric_sel_display"
+                )
+                
+                # Reverse map to get the actual folder name
+                rev_map = {v: k for k, v in display_map.items()}
+                selected_metric = rev_map.get(selected_display, selected_display)
+                
                 metric_subdir = os.path.join(selectivity_dir, selected_metric)
                 
                 sum_csv = os.path.join(metric_subdir, "selectivity_summary.csv")
@@ -1723,16 +1757,20 @@ if selected_file and df is not None:
                         if df_global_filtered is not None:
                             # Use the metric mapping to get the correct column
                             metric_map = {
-                                "Norm_Median_Ratio": "Norm Pos Med Ratio",
-                                "Norm_Bind_Med_Expr_Positive": "Norm Bind Med (Expr+)",
+                                "Median_Ratio": "Pos Med Ratio",
+                                "Bind_Med_Expr_Positive": "Bind Med (Expr+)",
                                 "Binding_Efficiency": "Binding Efficiency",
-                                "Norm_IWB_Index": "Norm Intensity-Weighted Binding Index"
+                                "IWB_Index": "Intensity-Weighted Binding Index"
                             }
                             raw_metric_col = metric_map.get(selected_metric, selected_metric)
                             
-                            # USE FILTERED DATA (QC Applied)
-                            c_trials = df_global_filtered[df_global_filtered['Construct'] == selected_variant]
-                            p_val_sel = run_anova_p(c_trials, 'Target', raw_metric_col)
+                            if raw_metric_col not in df_global_filtered.columns:
+                                st.warning(f"Metric '{raw_metric_col}' not found in raw trials. ANOVA skipped.")
+                                p_val_sel = np.nan
+                            else:
+                                # USE FILTERED DATA (QC Applied)
+                                c_trials = df_global_filtered[df_global_filtered['Construct'] == selected_variant]
+                                p_val_sel = run_anova_p(c_trials, 'Target', raw_metric_col)
 
                             
                             if not np.isnan(p_val_sel):

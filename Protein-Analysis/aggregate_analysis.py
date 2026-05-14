@@ -195,7 +195,8 @@ def main():
     
     # 0. Define metrics and control patterns
     # Metrics list controls both aggregate plots and selectivity analysis
-    metrics = [
+    # Aggregate metrics (Normalized) - used for within-target/trial comparisons
+    aggregate_metrics = [
         {
             "y_col": "Norm Median Ratio",
             "y_label": "Normalized Median Binding Ratio (vs Pos Ctrl)",
@@ -219,6 +220,34 @@ def main():
             "y_label": "Normalized IWB Index (vs Pos Ctrl)",
             "title_prefix": "IWB Index",
             "folder": "Norm_IWB_Index"
+        }
+    ]
+
+    # Selectivity metrics (Raw/Non-normalized) - used for cross-target comparisons
+    selectivity_metrics = [
+        {
+            "y_col": "Pos Med Ratio",
+            "y_label": "Median Binding Ratio (Bind/Expr)",
+            "title_prefix": "Binding to Expression Ratio",
+            "folder": "Median_Ratio"
+        },
+        {
+            "y_col": "Bind Med (Expr+)",
+            "y_label": "Median APC for FITC+ Cells",
+            "title_prefix": "Binding of Expressed Cells",
+            "folder": "Bind_Med_Expr_Positive"
+        },
+        {
+            "y_col": "Binding Efficiency",
+            "y_label": "Binding Efficiency (Double Positive / Expr+)",
+            "title_prefix": "Binding Efficiency",
+            "folder": "Binding_Efficiency"
+        },
+        {
+            "y_col": "Intensity-Weighted Binding Index",
+            "y_label": "IWB Index",
+            "title_prefix": "IWB Index",
+            "folder": "IWB_Index"
         }
     ]
 
@@ -330,7 +359,9 @@ def main():
                             construct_num = num_match.group(1) if num_match else None
                             
                             # Extract required metrics
+                            pos_med_ratio = float(row.get('Pos Med Ratio', 0))
                             norm_med_ratio = float(row.get('Norm Pos Med Ratio', 0))
+                            pos_mean_ratio = float(row.get('Pos Mean Ratio', 0))
                             norm_mean_ratio = float(row.get('Norm Pos Mean Ratio', 0))
                             double_pos = float(row.get('Double+ %', 0))
                             expr_pos = float(row.get('Expr+ %', 0))
@@ -341,8 +372,11 @@ def main():
                             low_events = gated_events < 500
                             
                             # New Filtered Metrics
+                            bind_med_expr = float(row.get('Bind Med (Expr+)', 0))
                             norm_bind_med_expr = float(row.get('Norm Bind Med (Expr+)', 0))
+                            bind_mean_expr = float(row.get('Bind Mean (Expr+)', 0))
                             norm_bind_mean_expr = float(row.get('Norm Bind Mean (Expr+)', 0))
+                            expr_med_bind = float(row.get('Expr Med (Bind+)', 0))
                             norm_expr_med_bind = float(row.get('Norm Expr Med (Bind+)', 0))
                             
                             # New Refined Metrics
@@ -351,6 +385,7 @@ def main():
                                 if "Binding Efficiency (DP/" in col:
                                     bind_eff = float(row.get(col, 0))
                                     break
+                            iwb_index = float(row.get('Intensity-Weighted Binding Index', 0))
                             norm_iwb_index = float(row.get('Norm Intensity-Weighted Binding Index', 0))
 
                             
@@ -360,13 +395,19 @@ def main():
                                 'Construct': standard_name,
                                 'Construct Num': construct_num,
                                 'Raw Name': raw_name,
+                                'Pos Med Ratio': pos_med_ratio,
                                 'Norm Median Ratio': norm_med_ratio,
+                                'Pos Mean Ratio': pos_mean_ratio,
                                 'Norm Mean Ratio': norm_mean_ratio,
                                 'Double+ %': double_pos,
+                                'Bind Med (Expr+)': bind_med_expr,
                                 'Norm Bind Med (Expr+)': norm_bind_med_expr,
+                                'Bind Mean (Expr+)': bind_mean_expr,
                                 'Norm Bind Mean (Expr+)': norm_bind_mean_expr,
+                                'Expr Med (Bind+)': expr_med_bind,
                                 'Norm Expr Med (Bind+)': norm_expr_med_bind,
                                 'Binding Efficiency': bind_eff,
+                                'Intensity-Weighted Binding Index': iwb_index,
                                 'Norm Intensity-Weighted Binding Index': norm_iwb_index,
                                 'Expr+ %': expr_pos,
                                 'Gated Events': gated_events,
@@ -389,7 +430,7 @@ def main():
 
     # Save aggregate CSV
     output_csv = os.path.join(output_dir, "aggregate_summary.csv")
-    fieldnames = ['Target', 'Date', 'Construct', 'Raw Name', 'Norm Median Ratio', 'Norm Mean Ratio', 'Double+ %', 'Expr+ %', 'Gated Events', 'Norm Bind Med (Expr+)', 'Norm Bind Mean (Expr+)', 'Norm Expr Med (Bind+)', 'Binding Efficiency', 'Norm Intensity-Weighted Binding Index', 'Low Expression', 'Low Events', 'Trial Failed', 'Trial Failed Reason']
+    fieldnames = ['Target', 'Date', 'Construct', 'Raw Name', 'Pos Med Ratio', 'Norm Median Ratio', 'Pos Mean Ratio', 'Norm Mean Ratio', 'Double+ %', 'Expr+ %', 'Gated Events', 'Bind Med (Expr+)', 'Norm Bind Med (Expr+)', 'Bind Mean (Expr+)', 'Norm Bind Mean (Expr+)', 'Expr Med (Bind+)', 'Norm Expr Med (Bind+)', 'Binding Efficiency', 'Intensity-Weighted Binding Index', 'Norm Intensity-Weighted Binding Index', 'Low Expression', 'Low Events', 'Trial Failed', 'Trial Failed Reason']
     with open(output_csv, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -406,7 +447,7 @@ def main():
     # Initialize master log
     master_sig_log = []
 
-    for metric in metrics:
+    for metric in aggregate_metrics:
 
         metric_dir = os.path.join(output_dir, metric["folder"])
         if not os.path.exists(metric_dir):
@@ -532,8 +573,8 @@ def main():
     print(f"Saved cross-target summary to {output_cross_csv}", flush=True)
 
     # 3. Selectivity Analysis
-    # Pass the filtered global dataframe (valid trials only) and the metrics list
-    perform_selectivity_analysis(global_df_filtered, output_dir, metrics, master_sig_log)
+    # Pass the filtered global dataframe (valid trials only) and the selectivity metrics list (Raw)
+    perform_selectivity_analysis(global_df_filtered, output_dir, selectivity_metrics, master_sig_log)
 
 
 def perform_selectivity_analysis(df, output_dir, metrics, master_sig_log):
