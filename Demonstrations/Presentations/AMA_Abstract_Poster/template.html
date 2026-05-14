@@ -1,4 +1,16 @@
 <!DOCTYPE html>
+<!--
+  ============================================================
+  AMA ABSTRACT POSTER TEMPLATE
+  ⚠️  FIXED PHYSICAL DIMENSIONS — DO NOT CHANGE
+  ============================================================
+  Width  : 48 inches  (landscape)
+  Height : 36 inches
+  Ratio  : 4:3 (≈ 19:6 approximate / 48:36)
+  CSS    : style.css → body { width: 48in; height: 36in; }
+  Build  : python build_poster.py → output.html + poster_output.pdf
+  ============================================================
+-->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -41,30 +53,42 @@
                     <h3>{{ data.methods.title }}</h3>
                     <p>{{ data.methods.content }}</p>
 
-                    <!-- Static Workflow Diagram -->
+                    <!-- 6-Stage Workflow Diagram -->
                     <div class="workflow-diagram">
-                        <div class="workflow-stage">
-                            <div class="stage-icon">GEN</div>
+                        <div class="workflow-stage" style="border-color: rgba(59,130,246,0.4);">
+                            <div class="stage-icon" style="color:#3b82f6; border-color:rgba(59,130,246,0.3); background:rgba(59,130,246,0.1);">GEN</div>
                             <div class="stage-label">Backbone Generation</div>
-                            <div class="stage-tool">RFdiffusion</div>
+                            <div class="stage-tool">RFdiffusion · AB/C/EF loops · 6–24 aa</div>
                         </div>
                         <div class="workflow-arrow">⬇</div>
-                        <div class="workflow-stage">
-                            <div class="stage-icon">SEQ</div>
+                        <div class="workflow-stage" style="border-color: rgba(139,92,246,0.4);">
+                            <div class="stage-icon" style="color:#8b5cf6; border-color:rgba(139,92,246,0.3); background:rgba(139,92,246,0.1);">SEQ</div>
                             <div class="stage-label">Sequence Design</div>
-                            <div class="stage-tool">ProteinMPNN</div>
+                            <div class="stage-tool">ProteinMPNN · 1000 seqs/target · T=0.2</div>
                         </div>
                         <div class="workflow-arrow">⬇</div>
-                        <div class="workflow-stage">
-                            <div class="stage-icon">VAL</div>
-                            <div class="stage-label">Structure Verification</div>
-                            <div class="stage-tool">AlphaFold 3</div>
+                        <div class="workflow-stage" style="border-color: rgba(6,182,212,0.4);">
+                            <div class="stage-icon" style="color:#06b6d4; border-color:rgba(6,182,212,0.3); background:rgba(6,182,212,0.1);">VAL</div>
+                            <div class="stage-label">Structural Co-folding</div>
+                            <div class="stage-tool">AlphaFold3 Server · ipTM / PAE / pLDDT</div>
                         </div>
                         <div class="workflow-arrow">⬇</div>
-                        <div class="workflow-stage">
-                            <div class="stage-icon">EXP</div>
+                        <div class="workflow-stage" style="border-color: rgba(16,185,129,0.4);">
+                            <div class="stage-icon" style="color:#10b981; border-color:rgba(16,185,129,0.3); background:rgba(16,185,129,0.1);">SEL</div>
+                            <div class="stage-label">Candidate Selection</div>
+                            <div class="stage-tool">T-score &gt; 2.0 · Multi-metric consensus</div>
+                        </div>
+                        <div class="workflow-arrow">⬇</div>
+                        <div class="workflow-stage" style="border-color: rgba(245,158,11,0.4);">
+                            <div class="stage-icon" style="color:#f59e0b; border-color:rgba(245,158,11,0.3); background:rgba(245,158,11,0.1);">SYN</div>
+                            <div class="stage-label">DNA Synthesis</div>
+                            <div class="stage-tool">Twist Bioscience · 13 constructs · Dec 2025</div>
+                        </div>
+                        <div class="workflow-arrow">⬇</div>
+                        <div class="workflow-stage" style="border-color: rgba(239,68,68,0.4);">
+                            <div class="stage-icon" style="color:#ef4444; border-color:rgba(239,68,68,0.3); background:rgba(239,68,68,0.1);">EXP</div>
                             <div class="stage-label">Experimental Validation</div>
-                            <div class="stage-tool">Flow Cytometry</div>
+                            <div class="stage-tool">Yeast Display · Flow Cytometry · ANOVA</div>
                         </div>
                     </div>
                 </section>
@@ -75,10 +99,42 @@
                 <section class="poster-section glass-panel">
                     <h3>{{ data.results.title }}</h3>
                     <p>{{ data.results.content }}</p>
-                    <div style="display: flex; flex-direction: column; gap: 40px; margin-top: auto;">
+
+                    <!-- Specificity Table -->
+                    <div class="specificity-table-wrap">
+                        <div class="spec-table-title">Binding Efficiency Specificity Analysis (MMP9 vs MMP2)</div>
+                        <table class="specificity-table">
+                            <thead>
+                                <tr>
+                                    <th>Construct</th>
+                                    <th>Expected</th>
+                                    <th>MMP2 Eff.</th>
+                                    <th>MMP9 Eff.</th>
+                                    <th>ANOVA <i>p</i></th>
+                                    <th>Result</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in data.specificity_table.rows %}
+                                <tr class="{% if loop.index <= 3 %}sig-row{% elif loop.index <= 5 %}ctrl-row{% else %}ref-row{% endif %}">
+                                    {% for cell in row %}
+                                    <td>{{ cell }}</td>
+                                    {% endfor %}
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        <div class="spec-table-note">Binding Efficiency = DP/FITC+ fraction. ANOVA tests null hypothesis that efficiency is equal across all tested targets. n.s. ✓ = non-significant as expected for Low-designed constructs.</div>
+                    </div>
+
+                    <!-- Figures -->
+                    <div style="display: flex; flex-direction: column; gap: 30px; margin-top: 20px;">
                         {% for fig in data.results.figures %}
                         <figure class="poster-figure">
-                            <img src="{{ fig.path }}" alt="Result Figure" style="max-height: 800px; width: 100%; object-fit: contain;">
+                            <img src="{{ fig.path }}" alt="Result Figure" style="max-height: 720px; width: 100%; object-fit: contain;">
+                            {% if fig.caption %}
+                            <figcaption>{{ fig.caption }}</figcaption>
+                            {% endif %}
                         </figure>
                         {% endfor %}
                     </div>

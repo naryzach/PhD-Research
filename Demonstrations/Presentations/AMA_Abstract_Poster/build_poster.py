@@ -1,3 +1,10 @@
+# =============================================================
+# AMA ABSTRACT POSTER BUILD SCRIPT
+# ⚠️  FIXED DIMENSIONS: 48" W × 36" H (landscape, 4:3 ratio)
+#     Do NOT change width/height in this file or in style.css
+#     without AMA submission approval.
+#     At 96 DPI: 4608 × 3456 px
+# =============================================================
 import yaml
 from jinja2 import Environment, FileSystemLoader
 from playwright.sync_api import sync_playwright
@@ -28,10 +35,12 @@ def generate_pdf_png(html_file):
         absolute_path = 'file://' + os.path.abspath(html_file)
         page.goto(absolute_path, wait_until='networkidle')
         
-        # Set viewport to 4608x3456 (48x36 inches at 96DPI)
+        # Set viewport to 4608x3456 (48" x 36" at 96 DPI)
+        # ⚠️  AMA POSTER FIXED DIMENSIONS — DO NOT CHANGE
         page.set_viewport_size({"width": 4608, "height": 3456})
         
-        # Export PDF
+        # Export PDF — 48in × 36in landscape
+        # ⚠️  AMA POSTER FIXED DIMENSIONS — DO NOT CHANGE
         page.pdf(path='poster_output.pdf', width='48in', height='36in', print_background=True)
         
         # Export PNG

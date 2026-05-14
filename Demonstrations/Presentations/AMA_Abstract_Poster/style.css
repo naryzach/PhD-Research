@@ -1,3 +1,18 @@
+/*
+ * ============================================================
+ *  AMA ABSTRACT POSTER — FIXED PHYSICAL DIMENSIONS
+ *  ⚠️  DO NOT CHANGE WITHOUT AMA SUBMISSION APPROVAL
+ * ============================================================
+ *  Width  : 48 inches  (landscape)
+ *  Height : 36 inches
+ *  Ratio  : 4:3 (≈ 19:6 approximate / 48:36)
+ *  DPI    : 96 (browser default) — at 96 DPI:
+ *             48in × 96 = 4608 px wide
+ *             36in × 96 = 3456 px tall
+ *  Build  : build_poster.py → Playwright PDF → 48in × 36in
+ * ============================================================
+ */
+
 :root {
     --primary-bg: #0f172a;
     --panel-bg: rgba(30, 41, 59, 0.7);
@@ -15,14 +30,37 @@
     padding: 0;
 }
 
+/* ── Body: canonical poster canvas (48” × 36” @ 96dpi = 4608 × 3456 px) ── */
 body {
     font-family: 'Inter', sans-serif;
     background: linear-gradient(135deg, var(--gradient-start) 0%, var(--gradient-end) 100%);
     color: var(--text-primary);
-    width: 48in;
-    height: 36in;
+    /* AMA POSTER FIXED DIMENSIONS - DO NOT CHANGE
+       48" W x 36" H at 96 dpi = 4608 x 3456 px
+       PDF export via build_poster.py uses width='48in' height='36in' */
+    width: 4608px;
+    height: 3456px;
     overflow: hidden;
     padding: 40px;
+    transform-origin: 0 0;
+}
+
+/* Screen: scale to fit viewport (does not affect PDF output) */
+@media screen {
+    html {
+        overflow: hidden;
+        background: #080c1a;
+    }
+}
+
+/* Print / PDF (Playwright): restore physical inch dimensions */
+@media print {
+    html { overflow: visible; background: transparent; }
+    body {
+        width: 48in !important;
+        height: 36in !important;
+        transform: none !important;
+    }
 }
 
 .poster-container {
@@ -211,3 +249,94 @@ body {
     font-weight: 500;
     color: #818cf8;
 }
+
+/* ── Specificity Table ───────────────────────────────────────────── */
+.specificity-table-wrap {
+    margin-top: 25px;
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 20px;
+    padding: 30px 35px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.spec-table-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 26px;
+    font-weight: 700;
+    color: #38bdf8;
+    margin-bottom: 20px;
+    letter-spacing: 0.02em;
+}
+
+.specificity-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'Inter', monospace;
+    font-size: 22px;
+}
+
+.specificity-table th {
+    text-align: left;
+    color: #94a3b8;
+    font-size: 18px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-bottom: 2px solid rgba(56, 189, 248, 0.3);
+    padding: 10px 14px;
+}
+
+.specificity-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    color: #e2e8f0;
+    white-space: nowrap;
+}
+
+.specificity-table .sig-row td:first-child {
+    font-weight: 800;
+    color: #34d399;
+}
+
+.specificity-table .sig-row td:nth-child(4) {
+    font-weight: 800;
+    color: #34d399;
+}
+
+.specificity-table .sig-row td:nth-child(5) {
+    color: #34d399;
+    font-weight: 700;
+}
+
+.specificity-table .sig-row td:nth-child(6) {
+    color: #34d399;
+    font-weight: 700;
+}
+
+.specificity-table .ctrl-row {
+    opacity: 0.55;
+}
+
+.specificity-table .ctrl-row td:nth-child(5) {
+    color: #94a3b8;
+}
+
+.specificity-table .ref-row td:first-child {
+    color: #38bdf8;
+    font-weight: 700;
+}
+
+.specificity-table .ref-row td:nth-child(5) {
+    color: #38bdf8;
+}
+
+.spec-table-note {
+    font-size: 17px;
+    color: #64748b;
+    font-style: italic;
+    margin-top: 14px;
+    line-height: 1.4;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    padding-top: 12px;
+}
+
