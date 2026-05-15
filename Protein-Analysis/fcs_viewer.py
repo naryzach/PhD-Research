@@ -1696,9 +1696,19 @@ if selected_file and df is not None:
                         c_target_counts = df_global_filtered.groupby('Construct')['Target'].nunique()
                         multi_target_vars = sorted(c_target_counts[c_target_counts > 1].index.tolist())
                         
+                        # Define the raw metrics for selectivity summary
+                        sel_summary_metrics = {
+                            "Median Binding Ratio (Raw)": "Pos Med Ratio",
+                            "Median Binding MFI (Raw)": "Bind Med (Expr+)",
+                            "Binding Efficiency": "Binding Efficiency",
+                            "IWB Index (Raw)": "Intensity-Weighted Binding Index"
+                        }
+                        
                         for construct in multi_target_vars:
                             c_trials = df_global_filtered[df_global_filtered['Construct'] == construct]
-                            for m_label, m_col in metric_options.items():
+                            for m_label, m_col in sel_summary_metrics.items():
+                                if m_col not in c_trials.columns: continue
+                                
                                 p_val = run_anova_p(c_trials, 'Target', m_col)
                                 if not np.isnan(p_val) and p_val < 0.05:
                                     sig_targets = run_tukey_summary(c_trials, 'Target', m_col)
