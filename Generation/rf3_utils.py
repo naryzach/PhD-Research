@@ -7,20 +7,28 @@ from rf3.inference_engines.rf3 import RF3InferenceEngine
 from rf3.utils.inference import InferenceInput
 
 class RF3Runner:
-    def __init__(self, ckpt_path='rf3'):
-        self.engine = RF3InferenceEngine(ckpt_path=ckpt_path, verbose=False)
+    def __init__(self, ckpt_path='rf3_foundry_01_24_latest_remapped.ckpt', n_recycles=10, diffusion_batch_size=1):
+        # Set checkpoint directory
+        checkpoint_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Tools", "foundry_checkpoints"))
+        if not os.path.exists(checkpoint_dir):
+            # Fallback to current dir or home if Tools is missing (unlikely here)
+            checkpoint_dir = os.path.expanduser("~/.foundry/checkpoints")
+            
+        os.environ["FOUNDRY_CHECKPOINT_DIRS"] = checkpoint_dir
+        os.environ["DGLBACKEND"] = "pytorch"
+        
+        full_ckpt_path = os.path.join(checkpoint_dir, ckpt_path)
+        self.engine = RF3InferenceEngine(
+            ckpt_path=full_ckpt_path, 
+            n_recycles=n_recycles, 
+            diffusion_batch_size=diffusion_batch_size,
+            verbose=False
+        )
 
-    def run_from_sequences(self, job_name, sequences, out_dir, num_cycles=10):
+    def run_from_sequences(self, job_name, sequences, out_dir):
         """
         sequences: list of dicts, e.g. [{"type": "protein", "sequence": "ACDEF..."}]
         """
-        # Construct the JSON dict for from_json_dict
-        # The exact format for 'components' depends on the RF3 implementation.
-        # Based on AlphaFold 3 server / RF All-Atom, it's often a list of entities.
-        
-        # For now, let's assume a simple protein-only format if that's what's most common.
-        # If the user wants multiple chains, we add them to the components.
-        
         components = []
         for i, seq_info in enumerate(sequences):
             # If id is not provided, use A, B, C...
@@ -50,7 +58,10 @@ class RF3Runner:
         inference_input = InferenceInput.from_json_dict(data)
         
         # Run inference
-        outputs = self.engine.run(inputs=inference_input, num_cycles=num_cycles)
+        outputs = self.engine.run(
+            inputs=inference_input, 
+            annotate_b_factor_with_plddt=True
+        )
         
         # Save outputs
         os.makedirs(out_dir, exist_ok=True)
@@ -59,8 +70,6 @@ class RF3Runner:
         for key, output_list in outputs.items():
             for i, output in enumerate(output_list):
                 out_path = os.path.join(out_dir, f"{job_name}_{i}.cif")
-                # We need to save the atom array to CIF
-                # atomworks.io utility is usually used here
                 from atomworks.io.utils.io_utils import to_cif_file
                 to_cif_file(output.atom_array, out_path, file_type="cif")
                 
@@ -70,15 +79,17 @@ class RF3Runner:
                 with open(metrics_path, 'w') as f:
                     json.dump(metrics, f, indent=4)
                 
-                # Save PAE if available
-                if hasattr(output, 'pae'):
+                # Save PAE if available in confidences
+                pae_path = None
+                if output.confidences and 'pae' in output.confidences:
                     pae_path = os.path.join(out_dir, f"{job_name}_{i}_pae.npy")
-                    np.save(pae_path, output.pae)
+                    pae_data = np.array(output.confidences['pae'])
+                    np.save(pae_path, pae_data)
                 
                 results.append({
                     "cif": out_path,
                     "metrics": metrics,
-                    "pae": pae_path if hasattr(output, 'pae') else None
+                    "pae": pae_path
                 })
                 
         return results
