@@ -1622,7 +1622,7 @@ if selected_file and df is not None:
                 # Human readable mapping
                 display_map = {
                     "Median_Ratio": "Median Binding Ratio (Raw)",
-                    "Bind_Med_Expr_Positive": "Median Binding MFI (Raw)",
+                    "Bind_Med_Expr_Positive": "Median of Expr+ (Raw)",
                     "Binding_Efficiency": "Binding Efficiency",
                     "IWB_Index": "IWB Index (Raw)"
                 }
@@ -1699,7 +1699,7 @@ if selected_file and df is not None:
                         # Define the raw metrics for selectivity summary
                         sel_summary_metrics = {
                             "Median Binding Ratio (Raw)": "Pos Med Ratio",
-                            "Median Binding MFI (Raw)": "Bind Med (Expr+)",
+                            "Median of Expr+ (Raw)": "Bind Med (Expr+)",
                             "Binding Efficiency": "Binding Efficiency",
                             "IWB Index (Raw)": "Intensity-Weighted Binding Index"
                         }
