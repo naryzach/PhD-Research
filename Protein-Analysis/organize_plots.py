@@ -112,17 +112,130 @@ def organize_plots(dry_run=True):
                 os.makedirs(dest_path, exist_ok=True)
 
             # Subdirectories to copy from
-            subdirs = ["Publication_Ready", "Aggregate_Plots"]
-            for sub in subdirs:
+            subdirs = {
+                "Publication_Ready": "*.png",
+                "Aggregate_Plots": "*.png",
+                "Positive_Distributions": "*_PosDist.png",
+                "Filtered_Histograms": "*_Bind_Filtered.png",
+                "Filtered_Histograms/Binding": "*_Bind_Filtered.png",
+                "Positive_Ratios": "*.png"
+            }
+            
+            copied_files = set() # Use set to avoid duplicates if found in multiple places
+            
+            # 1. Root files (like Gating_Strategy)
+            root_patterns = ["Gating_Strategy_*.png"]
+            for pat in root_patterns:
+                files = glob.glob(os.path.join(entry['path'], pat))
+                for f in files:
+                    fname = os.path.basename(f)
+                    if not dry_run:
+                        shutil.copy2(f, os.path.join(dest_path, fname))
+                    copied_files.add(fname)
+
+            # 2. Subdirectories
+            for sub, pattern in subdirs.items():
                 src_sub = os.path.join(entry['path'], sub)
                 if os.path.exists(src_sub):
-                    files = glob.glob(os.path.join(src_sub, "*.png"))
+                    files = glob.glob(os.path.join(src_sub, pattern))
                     for f in files:
                         fname = os.path.basename(f)
-                        if dry_run:
-                            pass # Too much output
-                        else:
+                        if not dry_run:
                             shutil.copy2(f, os.path.join(dest_path, fname))
+                        copied_files.add(fname)
+
+            if not dry_run:
+                generate_tex_template(dest_path, entry['date_raw'], target, extra, list(copied_files))
+
+def generate_tex_template(dest_path, date_raw, target, extra, files):
+    """Generates a .tex file with figure blocks for easy notebook inclusion."""
+    tex_path = os.path.join(dest_path, "figures.tex")
+    
+    # Target abbreviation for filename consistency
+    target_abbr_map = {'MMP2': 'MMP2', 'MMP3': 'MMP3', 'MMP9': 'MMP9', 'ADAM10': 'ADAM10', 'ADAM17': 'ADAM17'}
+    target_name = target_abbr_map.get(target, target)
+    target_full = f"{target_name}({extra})" if extra else target_name
+    
+    # Format date as YYYY-MM-DD
+    try:
+        caption_date = f"{date_raw[0:4]}-{date_raw[4:6]}-{date_raw[6:8]}"
+    except:
+        caption_date = date_raw
+
+    # Define categories and their specific files/rules
+    # Using an OrderedDict to maintain sequence from user example
+    from collections import OrderedDict
+    categories = OrderedDict([
+        ("Controls", []),
+        ("ABs", []),
+        ("Cs", []),
+        ("ABCs", []),
+        ("Aggregate Expression and Binding", []),
+        ("Negative Control Comparison Metrics", []),
+        ("Positive Control Comparison Metrics", []),
+        ("Positive Distributions", []),
+        ("Filtered APC Plots", []),
+        ("Gating Strategy", [])
+    ])
+    
+    # Sort files to ensure deterministic order
+    for f in sorted(files):
+        # 1. Gating
+        if "Gating_Strategy" in f:
+            categories["Gating Strategy"].append(f)
+        # 2. Aggregates
+        elif "Aggregate_Ridgeline" in f:
+            # Only include _All ridgelines as per user request
+            if "_All.png" in f:
+                categories["Aggregate Expression and Binding"].append(f)
+        elif "Aggregate_FoldChange" in f:
+            categories["Negative Control Comparison Metrics"].append(f)
+        elif "Aggregate_Norm" in f:
+            categories["Positive Control Comparison Metrics"].append(f)
+        # 3. Distributions and Filtered
+        elif "_PosDist" in f:
+            # Only include PosDist for positive controls (TIMP or Positive Control)
+            if "TIMP" in f.upper() or "POSITIVE CONTROL" in f.upper():
+                categories["Positive Distributions"].append(f)
+        elif "_Bind_Filtered" in f:
+            categories["Filtered APC Plots"].append(f)
+        # 4. Individuals (Controls, ABs, Cs, ABCs)
+        elif "_iso.png" in f:
+            if "Negative Control" in f or "TIMP" in f:
+                categories["Controls"].append(f)
+            elif f.startswith("AB "):
+                categories["ABs"].append(f)
+            elif f.startswith("C "):
+                categories["Cs"].append(f)
+            elif f.startswith("ABC "):
+                categories["ABCs"].append(f)
+
+    with open(tex_path, 'w') as t:
+        t.write(f"\\subsection*{{Data \\& Results ({target_full})}}\n")
+        
+        rel_folder = os.path.join("Resources", os.path.basename(dest_path))
+        
+        for cat, cat_files in categories.items():
+            if not cat_files:
+                continue
+            
+            t.write(f"\t\\begin{{figure}}[H]\n")
+            t.write(f"\t\t\\centering\n")
+            
+            # Determine width based on user example
+            width = "0.45"
+            if "Aggregate Expression and Binding" in cat:
+                width = "0.7"
+            elif "Comparison Metrics" in cat:
+                width = "0.6"
+            elif "Gating Strategy" in cat:
+                width = "0.6"
+            
+            for f in cat_files:
+                t.write(f"\t\t\\includegraphics[width={width}\\textwidth]{{{rel_folder}/{f}}}\n")
+            
+            t.write(f"\t\t\\caption{{TwistBio expression flow {caption_date} ({target_full}) -- {cat}}}\n")
+            t.write(f"\t\\end{{figure}}\n\n")
 
 if __name__ == "__main__":
     import argparse
