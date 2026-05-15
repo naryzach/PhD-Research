@@ -272,7 +272,7 @@ else:
                 fig = px.imshow(pae_data, color_continuous_scale="Viridis_r", 
                                labels={'color': 'Error (Å)'},
                                title="Predicted Aligned Error")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
             else:
                 st.warning("PAE data not available for this model.")
     else:
