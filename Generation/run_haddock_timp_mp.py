@@ -5,13 +5,13 @@ from datetime import date
 
 # Run from the PhD-Research root directory; all paths are relative to it.
 BASE_DIR = os.getcwd()
-DATA_DIR = os.path.join(BASE_DIR, "Data/Target_Crystal_Structures")
+DATA_DIR = os.path.join(BASE_DIR, "../Data/Target_Crystal_Structures")
 
 RUN_DATE = date.today().strftime("%Y-%m-%d")
-LOCAL_DIR = os.path.join(BASE_DIR, "Local/haddock_timp_mp", RUN_DATE)
+LOCAL_DIR = os.path.join(BASE_DIR, "../Local/haddock_timp_mp", RUN_DATE)
 INPUT_DIR = os.path.join(LOCAL_DIR, "inputs")
 RUN_DIR = os.path.join(LOCAL_DIR, "runs")
-OUTPUT_DIR = os.path.join(BASE_DIR, "Local/haddock_outputs", RUN_DATE)
+OUTPUT_DIR = os.path.join(BASE_DIR, "../Local/haddock_outputs", RUN_DATE)
 
 # Ensure directories exist
 for d in [INPUT_DIR, RUN_DIR, OUTPUT_DIR]:
