@@ -203,13 +203,9 @@ top_models = 5
             print(f"capri_ss.tsv has no model entries for {mp_name}")
             return
 
-        # capri_ss.tsv column 0 is the model path relative to the run_dir
+        # capri_ss.tsv column 0 is the model path relative to the caprieval folder
         best_model_rel = lines[1].split('\t')[0].strip()
-        # Path in the file is relative to the run directory parent (work_dir)
-        best_model_path = os.path.join(work_dir, best_model_rel)
-        if not os.path.exists(best_model_path):
-            # Try resolving relative to work_dir's parent
-            best_model_path = os.path.join(os.path.dirname(work_dir), best_model_rel)
+        best_model_path = os.path.normpath(os.path.join(last_capri, best_model_rel))
 
         if not os.path.exists(best_model_path):
             print(f"Best model file not found: {best_model_path}")
