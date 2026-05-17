@@ -8,7 +8,7 @@ DATA_DIR = os.path.join(BASE_DIR, "Data/Target_Crystal_Structures")
 LOCAL_DIR = os.path.join(BASE_DIR, "Local/haddock_timp_mp")
 INPUT_DIR = os.path.join(LOCAL_DIR, "inputs")
 RUN_DIR = os.path.join(LOCAL_DIR, "runs")
-OUTPUT_DIR = os.path.join(BASE_DIR, "Data/HADDOCK_Outputs")
+OUTPUT_DIR = os.path.join(BASE_DIR, "Local/haddock_outputs")
 
 # Ensure directories exist
 for d in [INPUT_DIR, RUN_DIR, OUTPUT_DIR]:
@@ -26,7 +26,10 @@ mps = {
 
 NCORES = 14
 
-TIMP3_MOTIF = (1, 5)  # CTCSP loop
+# TIMP3 active residues: CTCSP loop (1-5) — coordinates directly with catalytic zinc
+# TIMP3 passive residues: extended N-terminal loop (6-10) — nearby but not directly in active site
+TIMP3_ACTIVE = (1, 5)
+TIMP3_PASSIVE = (6, 10)
 TIMP3_PDB = os.path.join(DATA_DIR, "TIMP3_Xray.pdb")
 
 def prepare_structures():
@@ -71,25 +74,45 @@ def prepare_structures():
             print(f"Error processing {name}: {e}")
 
 def generate_tbl(mp_name, mp_range):
-    """Generate HADDOCK TBL file for AIRs."""
+    """Generate HADDOCK TBL file for AIRs.
+
+    Uses the standard HADDOCK ambiguous interaction restraint (AIR) format:
+    each active residue of molecule 1 must be within 2+2=4 Å of any atom of
+    (active + passive) residues of molecule 2, and vice versa.
+    Passive residues provide one-sided restraints only (they are targets, not sources).
+    """
     tbl_path = os.path.join(INPUT_DIR, f"{mp_name}_restraints.tbl")
+
+    # The full set of MP motif residues spans the HExxHxxGxxH zinc-binding loop.
+    # All are treated as active since the loop is the direct interface site.
+    mp_active_str = " or ".join([f"resid {i}" for i in range(mp_range[0], mp_range[1] + 1)])
+
+    # Combined TIMP3 target (active + passive) for MP active restraints
+    timp_all_str = " or ".join(
+        [f"resid {i}" for i in range(TIMP3_ACTIVE[0], TIMP3_PASSIVE[1] + 1)]
+    )
+
     with open(tbl_path, 'w') as f:
-        # Define AIRs: MP motif residues are active, TIMP3 motif residues are active.
-        # Format: assign (selection1) (selection2) distance upper lower
-        
-        # Selection 1: MP Motif (Chain A)
-        mp_resid_str = " or ".join([f"resid {i}" for i in range(mp_range[0], mp_range[1] + 1)])
-        # Selection 2: TIMP3 Motif (Chain B)
-        timp_resid_str = " or ".join([f"resid {i}" for i in range(TIMP3_MOTIF[0], TIMP3_MOTIF[1] + 1)])
-        
-        # In HADDOCK, "active" residues on protein 1 should be restrained to "all residues (active+passive) on protein 2".
-        # For simplicity and strong bias, we restrain the two motifs together.
+        f.write("! AIR restraints: MP catalytic zinc loop (A) <-> TIMP3 N-terminal loop (B)\n")
+        f.write("!\n")
+
+        # Each active MP residue restrained to any atom of TIMP3 active+passive
+        f.write("! MP active -> TIMP3 (active + passive)\n")
         for i in range(mp_range[0], mp_range[1] + 1):
-            f.write(f"assign (resid {i} and segid A) (({timp_resid_str}) and segid B) 2.0 2.0 0.0\n")
-        
-        for i in range(TIMP3_MOTIF[0], TIMP3_MOTIF[1] + 1):
-            f.write(f"assign (resid {i} and segid B) (({mp_resid_str}) and segid A) 2.0 2.0 0.0\n")
-            
+            f.write(
+                f"assign (resid {i} and segid A) "
+                f"(({timp_all_str}) and segid B) 2.0 2.0 0.0\n"
+            )
+
+        f.write("!\n")
+        # Each TIMP3 active residue restrained to any atom of MP active loop
+        f.write("! TIMP3 active -> MP active\n")
+        for i in range(TIMP3_ACTIVE[0], TIMP3_ACTIVE[1] + 1):
+            f.write(
+                f"assign (resid {i} and segid B) "
+                f"(({mp_active_str}) and segid A) 2.0 2.0 0.0\n"
+            )
+
     return tbl_path
 
 def run_haddock(mp_name):
@@ -127,20 +150,23 @@ sampling = 500
 ambig_fname = "{tbl_path}"
 
 [seletop]
-select = 100
+select = 200
 
 [flexref]
+# Restraints must carry through flexible refinement so the loop interface is preserved
+ambig_fname = "{tbl_path}"
 
 [emref]
+# Restraints must carry through EM refinement so the loop interface is preserved
+ambig_fname = "{tbl_path}"
 
 [clustfcc]
 
 [seletopclusts]
-top_clusters = 1
+top_clusters = 4
 top_models = 5
 
 [caprieval]
-reference_fname = "{mp_pdb}"
 """
     cfg_path = os.path.join(INPUT_DIR, f"{mp_name}_haddock3.cfg")
     with open(cfg_path, 'w') as f:
@@ -152,36 +178,44 @@ reference_fname = "{mp_pdb}"
         subprocess.run(f"conda run -n haddock haddock3 {cfg_path}", shell=True, stdout=log_file, stderr=subprocess.STDOUT)
     print(f"Finished {mp_name}. Log: {log_path}")
     
-    # Post-processing: Extract best model and convert to CIF
+    # Post-processing: Extract best model from the final caprieval ranking
     try:
-        # HADDOCK3 output structure: work_dir/07_caprieval/capri_ss.tsv (or similar)
-        # However, it's easier to find the best model in the last caprieval folder.
+        import shutil
+
         capri_folders = sorted(glob.glob(os.path.join(work_dir, "*_caprieval")))
-        if capri_folders:
-            last_capri = capri_folders[-1]
-            # The top models are copied to the cluster/model folders or kept in the previous step's output.
-            # HADDOCK3 usually has a 'best_models' or similar in the run folder if seletop was used.
-            # Let's look for the ranking.
-            ranking_file = os.path.join(last_capri, "capri_ss.tsv")
-            if os.path.exists(ranking_file):
-                with open(ranking_file, 'r') as f:
-                    lines = f.readlines()
-                    if len(lines) > 1:
-                        # First line is header, second line is best model
-                        best_model_rel = lines[1].split('\t')[0]
-                        best_model_path = os.path.join(work_dir, best_model_rel)
-                        
-                        target_pdb = os.path.join(OUTPUT_DIR, f"{mp_name}_TIMP3_complex.pdb")
-                        target_cif = os.path.join(OUTPUT_DIR, f"{mp_name}_TIMP3_complex.cif")
-                        
-                        import shutil
-                        shutil.copy(best_model_path, target_pdb)
-                        print(f"Best model for {mp_name} saved to {target_pdb}")
-                        
-                        # Convert to CIF
-                        cmd = f"conda run -n haddock python -c \"from Bio.PDB import PDBParser, MMCIFIO; parser = PDBParser(); structure = parser.get_structure('{mp_name}', '{target_pdb}'); io = MMCIFIO(); io.set_structure(structure); io.save('{target_cif}')\""
-                        subprocess.run(cmd, shell=True, check=True)
-                        print(f"Converted {mp_name} to CIF: {target_cif}")
+        if not capri_folders:
+            print(f"No caprieval folder found for {mp_name}, skipping post-processing.")
+            return
+
+        last_capri = capri_folders[-1]
+        ranking_file = os.path.join(last_capri, "capri_ss.tsv")
+        if not os.path.exists(ranking_file):
+            print(f"capri_ss.tsv not found in {last_capri}")
+            return
+
+        with open(ranking_file) as f:
+            lines = f.readlines()
+
+        if len(lines) < 2:
+            print(f"capri_ss.tsv has no model entries for {mp_name}")
+            return
+
+        # capri_ss.tsv column 0 is the model path relative to the run_dir
+        best_model_rel = lines[1].split('\t')[0].strip()
+        # Path in the file is relative to the run directory parent (work_dir)
+        best_model_path = os.path.join(work_dir, best_model_rel)
+        if not os.path.exists(best_model_path):
+            # Try resolving relative to work_dir's parent
+            best_model_path = os.path.join(os.path.dirname(work_dir), best_model_rel)
+
+        if not os.path.exists(best_model_path):
+            print(f"Best model file not found: {best_model_path}")
+            return
+
+        target_pdb = os.path.join(OUTPUT_DIR, f"{mp_name}_TIMP3_HADDOCK.pdb")
+        shutil.copy(best_model_path, target_pdb)
+        print(f"Best model for {mp_name} saved to {target_pdb}")
+
     except Exception as e:
         print(f"Post-processing failed for {mp_name}: {e}")
 
