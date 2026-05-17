@@ -1,14 +1,17 @@
 import os
 import subprocess
 import glob
+from datetime import date
 
-# Configuration
-BASE_DIR = "/home/ryangustafson/Documents/GitHubProj/PhD-Research"
+# Run from the PhD-Research root directory; all paths are relative to it.
+BASE_DIR = os.getcwd()
 DATA_DIR = os.path.join(BASE_DIR, "Data/Target_Crystal_Structures")
-LOCAL_DIR = os.path.join(BASE_DIR, "Local/haddock_timp_mp")
+
+RUN_DATE = date.today().strftime("%Y-%m-%d")
+LOCAL_DIR = os.path.join(BASE_DIR, "Local/haddock_timp_mp", RUN_DATE)
 INPUT_DIR = os.path.join(LOCAL_DIR, "inputs")
 RUN_DIR = os.path.join(LOCAL_DIR, "runs")
-OUTPUT_DIR = os.path.join(BASE_DIR, "Local/haddock_outputs")
+OUTPUT_DIR = os.path.join(BASE_DIR, "Local/haddock_outputs", RUN_DATE)
 
 # Ensure directories exist
 for d in [INPUT_DIR, RUN_DIR, OUTPUT_DIR]:
