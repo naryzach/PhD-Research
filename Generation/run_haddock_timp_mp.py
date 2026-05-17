@@ -226,14 +226,19 @@ def _ca_coords(pdb_path, chain, res_start, res_end):
     return atoms
 
 
-def _parse_remark(pdb_path, keyword):
-    """Return the float value from a HADDOCK REMARK line matching keyword."""
+def _parse_remark(pdb_path, keyword, field=0):
+    """Return a float from a HADDOCK REMARK line matching keyword.
+
+    field selects which comma-separated value to return (default 0 = first).
+    Used for violations lines like '0, 0, 0, 0, 0, 0, 0'.
+    """
     with open(pdb_path) as f:
         for line in f:
             if line.startswith("REMARK") and keyword in line:
                 try:
-                    return float(line.split(":")[-1].strip())
-                except ValueError:
+                    raw = line.split(":")[-1].strip()
+                    return float(raw.split(",")[field].strip())
+                except (ValueError, IndexError):
                     pass
     return None
 
