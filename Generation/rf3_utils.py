@@ -1,4 +1,17 @@
 import os
+import subprocess
+
+# --- PORTABILITY: GPU-Aware Environment Setup ---
+# We must detect the GPU and set DISABLE_CUEQUIVARIANCE before importing heavy ML libraries.
+# cuEquivariance checks this at import time, so inside main() is too late.
+try:
+    smi_out = subprocess.check_output(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"]).decode()
+    if "V100" in smi_out:
+        os.environ["DISABLE_CUEQUIVARIANCE"] = "1"
+        print(f"Detected V100 GPU. Automatically setting DISABLE_CUEQUIVARIANCE=1 for compatibility.")
+except Exception:
+    pass
+
 import json
 import torch
 import dataclasses
@@ -18,11 +31,19 @@ class RF3Runner:
         os.environ["DGLBACKEND"] = "pytorch"
         
         full_ckpt_path = os.path.join(checkpoint_dir, ckpt_path)
+        # Determine dynamic precision for V100 GPU compatibility
+        precision = "bf16-mixed"
+        if torch.cuda.is_available():
+            device_name = torch.cuda.get_device_name(0)
+            if "V100" in device_name:
+                precision = "16-mixed"
+
         self.engine = RF3InferenceEngine(
             ckpt_path=full_ckpt_path, 
             n_recycles=n_recycles, 
             diffusion_batch_size=diffusion_batch_size,
-            verbose=False
+            verbose=False,
+            trainer_overrides={"precision": precision}
         )
 
     def run_from_sequences(self, job_name, sequences, out_dir):

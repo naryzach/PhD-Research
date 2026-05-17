@@ -27,6 +27,19 @@ Output layout:
 """
 
 import os
+import subprocess
+
+# --- PORTABILITY: GPU-Aware Environment Setup ---
+# We must detect the GPU and set DISABLE_CUEQUIVARIANCE before importing heavy ML libraries.
+# cuEquivariance checks this at import time, so inside main() is too late.
+try:
+    smi_out = subprocess.check_output(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"]).decode()
+    if "V100" in smi_out:
+        os.environ["DISABLE_CUEQUIVARIANCE"] = "1"
+        print(f"Detected V100 GPU. Automatically setting DISABLE_CUEQUIVARIANCE=1 for compatibility.")
+except Exception:
+    pass
+
 import re
 import sys
 import time
@@ -536,7 +549,12 @@ class IterativeRefiner:
             logger.warning(f"No target sequence for {target_name}; RF3 complex skipped.")
             return []
 
-        engine  = RF3InferenceEngine(ckpt_path="rf3", verbose=False)
+        precision = "bf16-mixed"
+        if torch.cuda.is_available():
+            device_name = torch.cuda.get_device_name(0)
+            if "V100" in device_name:
+                precision = "16-mixed"
+        engine  = RF3InferenceEngine(ckpt_path="rf3", verbose=False, trainer_overrides={"precision": precision})
         scored  = []
         t0      = time.time()
 
