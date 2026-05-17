@@ -42,6 +42,8 @@ TIMP3_PDB = os.path.join(DATA_DIR, "TIMP3_Xray.pdb")
 SCORE_GOOD = -80.0   # HADDOCK score (more negative = better)
 BSA_GOOD   = 1200.0  # buried surface area (Å²)
 DIST_GOOD  = 9.0     # min CA-CA distance between motifs (Å); lower = closer
+VIOL_MAX   = 3       # max acceptable AIR violations (>0.3 Å); a few are normal
+                     # with ambiguous restraints over an 11-residue zinc loop
 
 # ---------------------------------------------------------------------------
 # Structure preparation
@@ -271,10 +273,10 @@ def evaluate_complex(mp_name, pdb_path):
     else:
         min_dist = None
 
-    score_ok = score    is not None and score    < SCORE_GOOD
-    bsa_ok   = bsa      is not None and bsa      > BSA_GOOD
-    dist_ok  = min_dist is not None and min_dist < DIST_GOOD
-    viol_ok  = violations == 0.0
+    score_ok = score      is not None and score      < SCORE_GOOD
+    bsa_ok   = bsa        is not None and bsa        > BSA_GOOD
+    dist_ok  = min_dist   is not None and min_dist   < DIST_GOOD
+    viol_ok  = violations is not None and violations <= VIOL_MAX
 
     def fmt(val, fmt_str, ok):
         tag = "OK" if ok else "!!"
@@ -286,7 +288,7 @@ def evaluate_complex(mp_name, pdb_path):
     print(f"  HADDOCK score    : {fmt(score,    '8.2f', score_ok)}  (threshold < {SCORE_GOOD})")
     print(f"  Buried SA (A^2)  : {fmt(bsa,      '8.1f', bsa_ok  )}  (threshold > {BSA_GOOD})")
     print(f"  Min CA-CA (A)    : {fmt(min_dist, '8.1f', dist_ok )}  (threshold < {DIST_GOOD})")
-    print(f"  AIR violations   : {fmt(violations,'8.0f', viol_ok )}")
+    print(f"  AIR violations   : {fmt(violations,'8.0f', viol_ok )}  (threshold <= {VIOL_MAX})")
 
     passed = sum([score_ok, bsa_ok, dist_ok, viol_ok])
     print(f"  Overall          : {passed}/4 checks passed")
