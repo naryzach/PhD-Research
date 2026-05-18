@@ -33,15 +33,15 @@ const currentData = computed(() => {
 })
 
 const maxVal = computed(() => {
-  let max = 1.5
+  let max = 0
   currentData.value.forEach(c => {
     c.bars.forEach(b => {
-      const val = Number(b['Norm Median Ratio'] || 0)
+      const val = Number(b['Pos Med Ratio'] || 0)
       const ci = Number(b['Ratio CI'] || 0)
       if (val + ci > max) max = val + ci
     })
   })
-  return max * 1.2
+  return (max || 0.4) * 1.25
 })
 
 const chartHeight = 210
@@ -74,7 +74,7 @@ function getBarColor(target: string) {
     <div class="relative h-[320px] w-full flex items-end">
       <svg viewBox="0 -20 1000 320" class="w-full h-full overflow-visible">
         <!-- Axis Titles -->
-        <text x="-105" y="30" class="axis-title" text-anchor="middle" transform="rotate(-90)">NORM. MEDIAN RATIO (X WT)</text>
+        <text x="-105" y="30" class="axis-title" text-anchor="middle" transform="rotate(-90)">APC/FITC MEDIAN RATIO (EXPR+)</text>
         <text :x="100 + chartWidth/2" y="280" class="axis-title" text-anchor="middle">TIMP3 DESIGN VARIANTS</text>
 
         <!-- Legend - Repositioned and resized -->
@@ -110,9 +110,9 @@ function getBarColor(target: string) {
           <g v-for="(b, barIdx) in group.bars" :key="b.Construct + b._target">
             <rect 
               :x="barIdx * Math.min(25, (chartWidth / currentData.length / group.bars.length) - 1)" 
-              :y="chartHeight - (Number(b['Norm Median Ratio'] || 0) / maxVal * chartHeight)"
+              :y="chartHeight - (Number(b['Pos Med Ratio'] || 0) / maxVal * chartHeight)"
               :width="Math.min(25, (chartWidth / currentData.length / group.bars.length) - 1)" 
-              :height="Math.max(2, (Number(b['Norm Median Ratio'] || 0) / maxVal) * chartHeight)"
+              :height="Math.max(2, (Number(b['Pos Med Ratio'] || 0) / maxVal) * chartHeight)"
               :fill="getBarColor(b._target)"
               stroke="#ffffff"
               :stroke-width="hoveredId === group.name + b._target ? 1.5 : 0.3"
@@ -126,9 +126,9 @@ function getBarColor(target: string) {
             <g v-if="Number(b['Ratio CI'] || 0) > 0" class="error-bar" :style="{ opacity: (!hoveredId || hoveredId === group.name + b._target) ? 1 : 0.3 }">
               <line 
                 :x1="barIdx * Math.min(25, (chartWidth / currentData.length / group.bars.length) - 1) + Math.min(25, (chartWidth / currentData.length / group.bars.length) - 1)/2" 
-                :y1="chartHeight - ((Number(b['Norm Median Ratio']) - Number(b['Ratio CI'])) / maxVal * chartHeight)"
+                :y1="chartHeight - ((Number(b['Pos Med Ratio']) - Number(b['Ratio CI'])) / maxVal * chartHeight)"
                 :x2="barIdx * Math.min(25, (chartWidth / currentData.length / group.bars.length) - 1) + Math.min(25, (chartWidth / currentData.length / group.bars.length) - 1)/2" 
-                :y2="chartHeight - ((Number(b['Norm Median Ratio']) + Number(b['Ratio CI'])) / maxVal * chartHeight)"
+                :y2="chartHeight - ((Number(b['Pos Med Ratio']) + Number(b['Ratio CI'])) / maxVal * chartHeight)"
                 stroke="white" stroke-width="1" 
               />
             </g>
@@ -145,7 +145,7 @@ function getBarColor(target: string) {
           <span class="opacity-50">Target:</span>
           <span class="font-bold text-blue-200 uppercase">{{ currentData.flatMap(g => g.bars).find(b => (b.Construct + b._target) === hoveredId)?._target }}</span>
         </div>
-        <div class="text-[10px] text-white font-bold">Ratio: {{ Number(currentData.flatMap(g => g.bars).find(b => (b.Construct + b._target) === hoveredId)?.['Norm Median Ratio'] || 0).toFixed(2) }}x</div>
+        <div class="text-[10px] text-white font-bold">APC/FITC: {{ Number(currentData.flatMap(g => g.bars).find(b => (b.Construct + b._target) === hoveredId)?.['Pos Med Ratio'] || 0).toFixed(3) }}</div>
         <div class="text-[8px] text-white/50">95% CI: ±{{ Number(currentData.flatMap(g => g.bars).find(b => (b.Construct + b._target) === hoveredId)?.['Ratio CI'] || 0).toFixed(2) }} (n={{ currentData.flatMap(g => g.bars).find(b => (b.Construct + b._target) === hoveredId)?.N }})</div>
       </div>
     </div>

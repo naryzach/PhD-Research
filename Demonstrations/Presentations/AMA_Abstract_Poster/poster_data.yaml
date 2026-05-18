@@ -1,47 +1,46 @@
 title: "Generative Deep Learning Pipeline for the Rapid Design of Patient-Specific Therapeutic Binders Against Customized Cancer Markers"
-author: "Ryan Gustafson | University of Nevada, Reno"
+author: "Ryan Gustafson"
 
 background:
   title: "Background: The MMP Selectivity Problem"
   content: "Matrix Metalloproteinases (MMPs) are zinc-dependent endopeptidases essential to extracellular matrix remodeling [1]. In cancer, MMP9 is the primary driver of basement membrane degradation, enabling tumor cell intravasation and metastatic spread; it additionally promotes angiogenesis by cleaving and releasing VEGF sequestered in the ECM [3]. The clinically relevant distinction: MMP2 maintains basal connective tissue homeostasis, while MMP9 is the pathogenic species in >90% of invasive breast, colorectal, and lung cancers. Despite this, MMP2 and MMP9 share near-identical active site architecture (~65% identity in the catalytic domain), making selective inhibition extraordinarily difficult. Previous broad-spectrum MMP inhibitors (marimastat, batimastat) failed Phase III oncology trials due to musculoskeletal toxicity caused by off-target inhibition of MMP1/2/3 [3]. TIMP3 is a natural, endogenous inhibitor that engages metalloproteinase active sites through its N-terminal reactive site loops—offering a structurally validated scaffold for engineering selectivity by loop redesign [2]."
-  figure: "../../SharedAssets/figures/De_Novo_Binder_Generation/mmp2_active_site.png"
-  figure_caption: "Figure 1: MMP-2 catalytic domain (AlphaFold3 structure). Yellow sticks indicate the conserved zinc-binding HExxHxxGxxH motif shared between MMP2 and MMP9. Despite near-identical active site geometry, small loop architecture differences make selective binding achievable by short engineered peptide insertions."
+  figure: "../../SharedAssets/figures/De_Novo_Binder_Generation/mmp9_timp3_complex.png"
+  figure_caption: "Figure 1: MMP9–TIMP3 complex (HADDOCK docking structure). Steel blue: MMP9 catalytic domain. Lavender: TIMP3 scaffold. Gold: zinc-binding HExxHxxGxxH motif (HIS120–HIS130) — conserved active site targeted by inhibitor loops. Cyan: TIMP3 AB loop (residues 31–36). Orange: TIMP3 C loop (residues 63–68). These two reactive-site loops insert into the MMP9 active site and serve as the scaffold for loop-expansion selectivity engineering."
 
 methods:
   title: "Methods: AI-Driven 6-Stage Design Pipeline"
-  content: "The workflow moves from generative structural AI through experimental validation in six tightly coupled stages. (1) A diffusion model generates novel 3D loop backbone geometries on the TIMP3 scaffold across the AB, C, and EF binding loops (6–24 aa expansions) [5], run on an A30 GPU (~20 hr/run). (2) A graph neural network sequences each backbone—sampling 1,000 diverse amino acid sequences per loop/target combination at low temperature (T=0.2) to preserve backbone compatibility while maximizing sequence diversity [6]. The scaffold residues are held fixed; only loop positions are designed. (3) The top 10 sequences per loop are co-folded with each metalloproteinase target using the AlphaFold3 Server; interface confidence metrics (ipTM, pLDDT, Interface PAE) are extracted per complex [4]. (4) A self-normalized T-score filter identifies variants that outperform their own cross-target mean—explicitly selecting for target-preferential binders rather than globally high-confidence structures. Candidates require T>2.0 on ≥2 independent metrics and ipTM ≥ 0.82. (5) All 13 final construct DNA sequences are screened for restriction enzyme recognition sites (BsrGI, BamHI, BsaI) that would interfere with Golden Gate cloning; all 13 passed. (6) Constructs are cloned into a yeast surface display vector, transformed into EBY100 yeast, and screened by flow cytometry. Binding Efficiency (DP/FITC+ fraction) is used as the primary cross-target-comparable metric."
+  content: "The workflow moves from generative structural AI through experimental validation in six tightly coupled stages. (1) A diffusion model generates novel 3D loop backbone geometries on the TIMP3 scaffold across the AB, C, and EF binding loops (6–24 aa expansions) [5], run on an A30 GPU (~20 hr/run). (2) A graph neural network sequences each backbone—sampling 1,000 diverse amino acid sequences per loop/target combination at low temperature (T=0.2) to preserve backbone compatibility while maximizing sequence diversity [6]. The scaffold residues are held fixed; only loop positions are designed. (3) The top 10 sequences per loop are co-folded with each metalloproteinase target using the AlphaFold3 Server; interface confidence metrics (ipTM, pLDDT, Interface PAE) are extracted per complex [4]. (4) A self-normalized T-score filter identifies variants that outperform their own cross-target mean—explicitly selecting for target-preferential binders rather than globally high-confidence structures. Candidates require T>2.0 on ≥2 independent metrics and ipTM ≥ 0.82. (5) All 13 final construct DNA sequences are screened for restriction enzyme recognition sites (BsrGI, BamHI, BsaI) that would interfere with Golden Gate cloning; all 13 passed. (6) Constructs are cloned into a yeast surface display vector, transformed into EBY100 yeast, and screened by flow cytometry. The primary readout is the Positive Median Ratio: the ratio of the APC-A (binding) median to the FITC-A (expression) median within the FITC-positive gate. Dividing by FITC normalizes for surface-display level variation between individual yeast cells while keeping MMP9 and MMP2 values on a shared scale—a higher ratio for MMP9 than MMP2 directly indicates target preference. TIMP3-WT reference lines are drawn at the actual TIMP3-WT Pos Med Ratio per target. Error bars represent 95% confidence intervals (t-distribution). Failed trials (positive control binding efficiency below threshold) are excluded before statistical analysis."
   pipeline_figure: "../../SharedAssets/figures/De_Novo_Binder_Generation/fig_pipeline.png"
 
 results:
   title: "Results"
   pipeline_success: "Computational Stage Outcomes: The diffusion backbone generator produced structurally diverse loop geometries in the 6–15 residue range not achievable by conventional mutagenesis, including extended beta-hairpin and helix-turn motifs [5]. Following sequence design and structural co-folding, the self-normalized T-score filter reduced the candidate pool from >1,000 generated sequences to 13 final constructs—a >98% reduction—while enriching for the experimentally confirmed MMP9 binders. Top-ranked MMP9 candidates (C-loop and AB-loop variants) achieved interface confidence scores placing them in the top decile of all evaluated structures, consistent with their subsequent experimental validation."
-  content: "Experimental Validation (MMP9 vs MMP2): One-way ANOVA on Binding Efficiency (DP/FITC+) with Tukey-HSD post-hoc testing confirmed statistically significant MMP9 preference over MMP2 for all three MMP9-targeted constructs. C 12 (loop: ASGPITVNGETIW, C-loop) achieved 91.3% MMP9 vs 32.1% MMP2 binding efficiency (ANOVA p=0.012, Tukey MMP9-vs-MMP2 p=0.015). C 15 (C-loop) achieved 88.6% MMP9 vs 33.8% MMP2 (ANOVA p=0.018, Tukey p=0.043). AB 6 (loop: TDTFPTANWTGEV, AB-loop) showed the strongest statistical signal: 89.9% MMP9 vs 23.8% MMP2 (ANOVA p=0.0002, Tukey p=0.0004). Variants computationally predicted as 'High' (AB 2, AB 3) or 'Low' (C 13, AB 5) binders showed non-significant ANOVA (p>0.05), confirming that significant results in the selective constructs reflect genuine target discrimination rather than assay noise."
+  content: "Experimental Validation (MMP9 vs MMP2): Two-group Tukey HSD on the Median Binding Ratio (APC/FITC, FITC+ gate) confirmed statistically significant MMP9 preference over MMP2 for three of four MMP9-targeted constructs (75% PPV). C 12 (loop: ASGPITVNGETIW, C-loop) achieved the highest MMP9 ratio (0.289 vs 0.087 for MMP2), a 3.3× preference (p=0.009). C 15 (2.5× preference; p=0.004) and AB 6 (loop: TDTFPTANWTGEV, 2.7× preference; p=0.001) showed similarly amplified selectivity. AB 1 showed directionally correct binding (0.180 vs 0.080) but did not reach significance (p=0.277). Variants predicted as Low binders (C 13, AB 5) showed non-significant results (p>0.05), confirming that significant results reflect genuine target discrimination."
   figures:
-    - path: "../../SharedAssets/figures/De_Novo_Binder_Generation/fig_mmp9_vs_mmp2.png"
-      caption: "Figure 3: MMP9 vs MMP2 Binding Efficiency (mean ± 95% CI). Brackets indicate significant Tukey-HSD pairs (*p<0.05, **p<0.01, ***p<0.001). n.s. constructs were non-significant — validating design intent."
-    - path: "../../SharedAssets/figures/De_Novo_Binder_Generation/fig_binding_heatmap.png"
-      caption: "Figure 4: Binding Efficiency Heatmap across all 13 constructs × targets. * = ANOVA p<0.05. ADAM17 data included for within-target comparison only (no cross-target ADAM selectivity without ADAM10 control)."
+    - path: "../../SharedAssets/figures/De_Novo_Binder_Generation/fig_bind_med_expr_pos.png"
+      caption: "Figure 3: MMP9 vs MMP2 — Median Binding Ratio (APC-A / FITC-A, expression-positive gate). For each trial, the ratio of the APC-A (binding) median to the FITC-A (expression) median is computed within the FITC+ gate, normalizing for surface-display level variation between cells. Mean ratio ± 95% CI shown. Brackets: Tukey-HSD significant pairs (***p<0.001, *p<0.05). Dashed lines = TIMP3-WT ratio per target. Construct labels colored by design group (green = ANOVA-confirmed MMP9-selective, amber = ADAM17-targeted, blue = WT reference)."
 
 specificity_table:
-  headers: ["Construct", "Design", "MMP2", "MMP9", "ANOVA p", "Verdict"]
+  headers: ["Construct", "Design", "MMP2 Ratio", "MMP9 Ratio", "Tukey HSD p", "Verdict"]
   rows:
-    - ["C 12",   "MMP9 Selective", "32.1%", "91.3%", "0.012",  "✓ MMP9-Selective"]
-    - ["C 15",   "MMP9 Selective", "33.8%", "88.6%", "0.018",  "✓ MMP9-Selective"]
-    - ["AB 6",   "MMP9 Selective", "23.8%", "89.9%", "0.0002", "✓ MMP9-Selective"]
-    - ["AB 2",   "High Affin M9",  "19.3%", "61.7%", "0.120",  "n.s. (high affin)"]
-    - ["AB 3",   "High Affinity",  "11.5%", "55.4%", "0.185",  "n.s. (high affin)"]
-    - ["C 13",   "Low Control",    "16.0%", "45.4%", "0.096",  "n.s. (expected)"]
-    - ["AB 5",   "Low Control",    "11.8%", "37.6%", "0.601",  "n.s. (expected)"]
-    - ["AB 4",   "ADAM17 Spec",    "9.7%",  "34.7%", "0.250",  "ADAM-targeted"]
-    - ["AB 7",   "ADAM17 Spec",    "11.9%", "64.8%", "0.310",  "ADAM-targeted"]
-    - ["C 11",   "High Affin A17", "11.2%", "44.0%", "0.420",  "ADAM-targeted"]
-    - ["C 14",   "ADAM17 Spec",    "11.3%", "45.4%", "0.580",  "ADAM-targeted"]
-    - ["TIMP 3", "WT Reference",   "21.9%", "54.5%", "0.024",  "Reference"]
+    - ["C 12",   "MMP9 Selective", "0.087", "0.289", "0.009",  "✓ MMP9-Selective",  "sig-row"]
+    - ["C 15",   "MMP9 Selective", "0.094", "0.232", "0.004",  "✓ MMP9-Selective",  "sig-row"]
+    - ["AB 6",   "MMP9 Selective", "0.078", "0.209", "0.001",  "✓ MMP9-Selective",  "sig-row"]
+    - ["AB 1",   "MMP9 Predicted", "0.080", "0.180", "0.277",  "n.s.",              ""]
+    - ["AB 2",   "High Affin M9",  "—",     "—",     "0.300",  "n.s.",              ""]
+    - ["AB 3",   "High Affinity",  "—",     "—",     "0.341",  "n.s.",              ""]
+    - ["C 13",   "Low Control",    "—",     "—",     "0.288",  "n.s.",              "ctrl-row"]
+    - ["AB 5",   "Low Control",    "—",     "—",     "0.529",  "n.s.",              "ctrl-row"]
+    - ["AB 4",   "ADAM17 Spec",    "—",     "—",     "0.521",  "n.s.",              "adam-row"]
+    - ["AB 7",   "ADAM17 Spec",    "—",     "—",     "0.176",  "n.s.",              "adam-row"]
+    - ["C 11",   "High Affin A17", "—",     "—",     "0.304",  "n.s.",              "adam-row"]
+    - ["C 14",   "ADAM17 Spec",    "—",     "—",     "0.323",  "n.s.",              "adam-row"]
+    - ["TIMP 3", "WT Reference",   "0.107", "0.211", "0.150",  "n.s.",              "ref-row"]
 
 conclusions:
   title: "Conclusions"
   content: |
-    Pipeline Validation — 3 for 3: Every computationally predicted MMP9-selective construct was experimentally confirmed, a 100% positive predictive value. Every 'Low' control showed non-significant ANOVA—0% false positives. This bidirectional concordance validates the T-score multi-metric filter as a reliable predictor of experimental selectivity, not just overall binding strength.
+    Pipeline Validation — 3 of 4: Three of four computationally predicted MMP9-selective constructs were experimentally confirmed (75% PPV). AB 1 showed directionally correct binding (MMP9 > MMP2) but high trial-to-trial variability (σ = 43%) prevented statistical confirmation. Every 'Low' control showed non-significant ANOVA—0% false positives. This bidirectional concordance validates the T-score multi-metric filter as a reliable predictor of experimental selectivity, not just overall binding strength. A 75% success rate among specific predictions is strong given the vast landscape of possible protein sequences.
 
     Scaffold Plasticity: Loop insertions of 6–15 residues into the TIMP3 AB and C loops were structurally tolerated (high interface confidence in co-folding) and biologically functional on the yeast surface. Wild-type TIMP3 itself showed significant MMP9 preference (p=0.024), and all three engineered MMP9-selective variants substantially amplified this preference.
 

@@ -49,7 +49,14 @@
         <header class="poster-header glass-panel">
             <div style="flex: 1; text-align: left;">
                 <h1 class="poster-title">{{ data.title }}</h1>
-                <h2 class="poster-author">{{ data.author }}</h2>
+                <h2 class="poster-author">
+                    Ryan Gustafson<sup style="font-size:0.55em; vertical-align:super; font-weight:600;">1</sup>,
+                    Gavin Gallagher<sup style="font-size:0.55em; vertical-align:super; font-weight:600;">1</sup>,
+                    Maryam Raeeszadeh-Sarmazdeh<sup style="font-size:0.55em; vertical-align:super; font-weight:600;">1</sup>
+                </h2>
+                <div style="font-family:'Inter',sans-serif; font-size:26px; color:#94a3b8; margin-top:6px;">
+                    <sup style="font-size:0.75em; vertical-align:super;">1</sup>University of Nevada, Reno
+                </div>
             </div>
             <div style="margin-left: 80px; flex-shrink: 0; display: flex; align-items: center; gap: 32px;">
                 <img src="../../SharedAssets/figures/UNR Logo.png" alt="UNR Logo"
@@ -68,31 +75,38 @@
             <!-- ── LEFT COLUMN: Background + Methods ─────────────────────── -->
             <div class="column">
 
-                <section class="poster-section glass-panel">
+                <section class="poster-section glass-panel" style="flex: 1.5;">
                     <h3>{{ data.background.title }}</h3>
                     <p>{{ data.background.content }}</p>
                     <figure class="poster-figure">
-                        <img src="{{ data.background.figure }}" alt="MMP2 active site structure">
+                        <img src="{{ data.background.figure }}" alt="MMP9-TIMP3 complex"
+                             style="max-height: 540px; width: auto; max-width: 100%;">
                         <figcaption>{{ data.background.figure_caption }}</figcaption>
                     </figure>
                 </section>
 
-                <section class="poster-section glass-panel">
+                <section class="poster-section glass-panel" style="flex: 1.3;">
                     <h3>{{ data.methods.title }}</h3>
                     <p>{{ data.methods.content }}</p>
-                    <!-- Horizontal pipeline diagram replaces vertical workflow div -->
-                    <figure class="poster-figure" style="padding: 12px; margin-top: 18px;">
-                        <img src="{{ data.methods.pipeline_figure }}"
-                             alt="6-Stage Pipeline: Backbone Generation → Sequence Design → Structural Co-folding → Candidate Selection → DNA Synthesis → Yeast Display"
-                             style="width: 100%; max-height: 380px; object-fit: contain;">
-                        <figcaption>Figure 2: Six-stage generative-AI-to-experiment pipeline. Each stage narrows the candidate pool while preserving structural fidelity, reducing >1,000 generated sequences to 13 synthesis-ready constructs.</figcaption>
-                    </figure>
+                    <p style="margin-top: 10px; font-size: 22px; color: rgba(56,189,248,0.8); font-style: italic;">Six-stage workflow illustrated in Figure 2 (center column).</p>
                 </section>
 
             </div>
 
-            <!-- ── MIDDLE COLUMN: Results ─────────────────────────────────── -->
+            <!-- ── MIDDLE COLUMN: Pipeline + Results ────────────────────────── -->
             <div class="column">
+
+                <!-- Pipeline figure — full-width in center column -->
+                <section class="poster-section glass-panel" style="flex: 0 0 auto; padding: 22px 28px;">
+                    <h3>Computational Pipeline</h3>
+                    <figure class="poster-figure" style="padding: 8px; margin-top: 12px;">
+                        <img src="{{ data.methods.pipeline_figure }}"
+                             alt="6-Stage Pipeline"
+                             style="width: 100%; object-fit: contain;">
+                        <figcaption>Figure 2: Six-stage generative-AI-to-experiment pipeline. Backbone generation (RFdiffusion) → sequence design (ProteinMPNN) → structural co-folding (AlphaFold3) → T-score candidate selection → DNA synthesis → yeast surface display &amp; flow cytometry. Reduces &gt;1,000 generated sequences to 13 synthesis-ready constructs.</figcaption>
+                    </figure>
+                </section>
+
                 <section class="poster-section glass-panel">
                     <h3>{{ data.results.title }}</h3>
 
@@ -108,7 +122,7 @@
 
                     <!-- Specificity Table -->
                     <div class="specificity-table-wrap">
-                        <div class="spec-table-title">Binding Efficiency Specificity: MMP9 vs MMP2</div>
+                        <div class="spec-table-title">Median Binding Ratio Specificity: MMP9 vs MMP2</div>
                         <table class="specificity-table">
                             <thead>
                                 <tr>
@@ -116,28 +130,28 @@
                                     <th>Design</th>
                                     <th>MMP2</th>
                                     <th>MMP9</th>
-                                    <th>ANOVA <i>p</i></th>
+                                    <th>Tukey HSD <i>p</i></th>
                                     <th>Verdict</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {% for row in data.specificity_table.rows %}
-                                <tr class="{% if loop.index <= 3 %}sig-row{% elif loop.index <= 7 %}ctrl-row{% elif loop.index <= 11 %}adam-row{% else %}ref-row{% endif %}">
-                                    {% for cell in row %}
+                                <tr class="{{ row[-1] }}">
+                                    {% for cell in row[:-1] %}
                                     <td>{{ cell }}</td>
                                     {% endfor %}
                                 </tr>
                                 {% endfor %}
                             </tbody>
                         </table>
-                        <div class="spec-table-note">Binding Efficiency = DP / FITC+ (double-positive / expression-positive). Error bars represent 95% Confidence Intervals (CI). One-way ANOVA tests equality across all tested targets. n.s. = non-significant result validating design intent.</div>
+                        <div class="spec-table-note">Median Binding Ratio = APC-A median / FITC-A median (expression-positive gate). Two-group Tukey HSD per construct (MMP9 vs MMP2 only). n.s. = non-significant. Construct names colored by design group.</div>
                     </div>
 
                     <!-- Result Figures -->
                     {% for fig in data.results.figures %}
                     <figure class="poster-figure" style="margin-top: 18px;">
                         <img src="{{ fig.path }}" alt="Result figure"
-                             style="width: 100%; {% if loop.index == 2 %}max-height: 900px;{% else %}max-height: 680px;{% endif %} object-fit: contain;">
+                             style="width: 100%; max-height: 780px; object-fit: contain;">
                         {% if fig.caption %}
                         <figcaption>{{ fig.caption }}</figcaption>
                         {% endif %}
