@@ -77,7 +77,7 @@ import tscoreDataRaw from '../../../SharedAssets/data/De_Novo_Binder_Generation/
 
 const tscoreData = tscoreDataRaw.default || tscoreDataRaw
 const activeLoop = ref('ALL')
-const showMore = ref(false)
+const showMore = ref(true)
 
 const uniqueLoops = computed(() => {
   const loops = ['ALL', ...new Set(tscoreData.map(d => d.loop))]
