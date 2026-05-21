@@ -160,22 +160,27 @@
                 </section>
             </div>
 
-            <!-- ── RIGHT COLUMN: Conclusions + Future + Clinical + References ── -->
+            <!-- ── RIGHT COLUMN: Conclusions + Future + Clinical + Acknowledgements + References ── -->
             <div class="column">
 
-                <section class="poster-section glass-panel">
+                <section class="poster-section glass-panel" style="flex: 0.80;">
                     <h3>{{ data.conclusions.title }}</h3>
                     <p class="multiline">{{ data.conclusions.content }}</p>
                 </section>
 
-                <section class="poster-section glass-panel">
+                <section class="poster-section glass-panel" style="flex: 1.05;">
                     <h3>{{ data.future.title }}</h3>
                     <p class="multiline">{{ data.future.content }}</p>
                 </section>
 
-                <section class="poster-section glass-panel">
+                <section class="poster-section glass-panel" style="flex: 0.80;">
                     <h3>{{ data.clinical.title }}</h3>
                     <p class="multiline">{{ data.clinical.content }}</p>
+                </section>
+
+                <section class="poster-section glass-panel acknowledgements">
+                    <h3>{{ data.acknowledgements.title }}</h3>
+                    <p class="multiline">{{ data.acknowledgements.content }}</p>
                 </section>
 
                 <section class="poster-section glass-panel references">

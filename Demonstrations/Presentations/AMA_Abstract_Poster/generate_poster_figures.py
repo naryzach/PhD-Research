@@ -130,6 +130,15 @@ _ANOVA_P_BIND_EFF = {
     "TIMP 3": 0.0240,
 }
 
+# Two-group Tukey HSD p-values: MMP9 vs MMP2 only (Pos Med Ratio — poster primary metric)
+# Used for significance brackets on the primary poster figure (fig_bind_med_expr_pos).
+_TUKEY_MMP9_VS_MMP2 = {
+    "C 12":  0.009,   # ** (p<0.01)
+    "C 15":  0.004,   # ** (p<0.01)
+    "AB 6":  0.0001,  # *** (p<0.001; actual Tukey p-adj ≈ 0.0000)
+    "AB 1":  0.277,   # n.s.
+}
+
 
 def sig_label(p):
     if p < 0.001: return "***"
@@ -334,8 +343,9 @@ def fig_bind_med_expr_pos(sel_data=None, anova_p=None):
     bracket_gap = y_max_data * 0.04
 
     # Significance brackets above bars (skip TIMP references)
+    # Use two-group Tukey HSD p-values (MMP9 vs MMP2) for the poster metric.
     for xi, cn in enumerate(constructs):
-        p   = anova_p.get(cn, 1.0)
+        p   = _TUKEY_MMP9_VS_MMP2.get(cn, 1.0)
         lbl = sig_label(p)
         if lbl == "n.s." or cn.startswith("TIMP"):
             continue
