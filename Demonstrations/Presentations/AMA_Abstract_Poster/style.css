@@ -104,10 +104,7 @@ body {
     font-weight: 700;
     line-height: 1.1;
     margin-bottom: 12px;
-    background: linear-gradient(to right, #38bdf8, #818cf8);
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: #f8fafc;
 }
 
 .poster-author {
@@ -119,7 +116,7 @@ body {
 /* ── Main 3-column grid ──────────────────────────────────────────────────── */
 .poster-grid {
     display: grid;
-    grid-template-columns: 0.80fr 1.5fr 1.2fr;
+    grid-template-columns: 0.70fr 1.5fr 1.35fr;
     gap: 28px;
     flex-grow: 1;
     min-height: 0;
@@ -204,6 +201,23 @@ body {
     color: var(--text-secondary);
     font-style: italic;
     line-height: 1.4;
+}
+
+/* ── Acknowledgements (compact) ─────────────────────────────────────────── */
+.acknowledgements {
+    flex: 0 0 auto !important;
+}
+
+.acknowledgements h3 {
+    font-size: 40px !important;
+    margin-bottom: 8px !important;
+    padding-bottom: 6px !important;
+}
+
+.acknowledgements p {
+    font-size: 20px !important;
+    line-height: 1.4 !important;
+    opacity: 0.85;
 }
 
 /* ── References (compact) ────────────────────────────────────────────────── */

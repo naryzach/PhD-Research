@@ -15,17 +15,17 @@ methods:
 results:
   title: "Results"
   pipeline_success: "Computational Stage Outcomes: The diffusion backbone generator produced structurally diverse loop geometries in the 6–15 residue range not achievable by conventional mutagenesis, including extended beta-hairpin and helix-turn motifs [5]. Following sequence design and structural co-folding, the self-normalized T-score filter reduced the candidate pool from >1,000 generated sequences to 13 final constructs—a >98% reduction—while enriching for the experimentally confirmed MMP9 binders. Top-ranked MMP9 candidates (C-loop and AB-loop variants) achieved interface confidence scores placing them in the top decile of all evaluated structures, consistent with their subsequent experimental validation."
-  content: "Experimental Validation (MMP9 vs MMP2): Two-group Tukey HSD on the Median Binding Ratio (APC/FITC, FITC+ gate) confirmed statistically significant MMP9 preference over MMP2 for three of four MMP9-targeted constructs (75% PPV). C 12 (loop: ASGPITVNGETIW, C-loop) achieved the highest MMP9 ratio (0.289 vs 0.087 for MMP2), a 3.3× preference (p=0.009). C 15 (2.5× preference; p=0.004) and AB 6 (loop: TDTFPTANWTGEV, 2.7× preference; p=0.001) showed similarly amplified selectivity. AB 1 showed directionally correct binding (0.180 vs 0.080) but did not reach significance (p=0.277). Variants predicted as Low binders (C 13, AB 5) showed non-significant results (p>0.05), confirming that significant results reflect genuine target discrimination."
+  content: "Experimental Validation (MMP9 vs MMP2): Two-group Tukey HSD on the Median Binding Ratio (APC/FITC, FITC+ gate) confirmed statistically significant MMP9 preference over MMP2 for three of four MMP9-targeted constructs (75% PPV). C 12 (loop: ASGPITVNGETIW, C-loop) achieved the highest MMP9 ratio (0.289 vs 0.087 for MMP2), a 3.3× preference (p=0.009). C 15 (2.5× preference; p=0.004) and AB 6 (loop: TDTFPTANWTGEV, 2.7× preference; p<0.001) showed similarly amplified selectivity. AB 1 showed directionally correct binding (0.180 vs 0.080) but did not reach significance (p=0.277). Variants predicted as Low binders (C 13, AB 5) showed non-significant results (p>0.05), confirming that significant results reflect genuine target discrimination."
   figures:
     - path: "../../SharedAssets/figures/De_Novo_Binder_Generation/fig_bind_med_expr_pos.png"
-      caption: "Figure 3: MMP9 vs MMP2 — Median Binding Ratio (APC-A / FITC-A, expression-positive gate). For each trial, the ratio of the APC-A (binding) median to the FITC-A (expression) median is computed within the FITC+ gate, normalizing for surface-display level variation between cells. Mean ratio ± 95% CI shown. Brackets: Tukey-HSD significant pairs (***p<0.001, *p<0.05). Dashed lines = TIMP3-WT ratio per target. Construct labels colored by design group (green = ANOVA-confirmed MMP9-selective, amber = ADAM17-targeted, blue = WT reference)."
+      caption: "Figure 3: MMP9 vs MMP2 — Median Binding Ratio (APC-A / FITC-A, expression-positive gate). For each trial, the ratio of the APC-A (binding) median to the FITC-A (expression) median is computed within the FITC+ gate, normalizing for surface-display level variation between cells. Mean ratio ± 95% CI shown. Brackets: Tukey-HSD significant pairs (***p<0.001, **p<0.01, *p<0.05). Dashed lines = TIMP3-WT ratio per target. Construct labels colored by design group (green = ANOVA-confirmed MMP9-selective, amber = ADAM17-targeted, blue = WT reference)."
 
 specificity_table:
   headers: ["Construct", "Design", "MMP2 Ratio", "MMP9 Ratio", "Tukey HSD p", "Verdict"]
   rows:
     - ["C 12",   "MMP9 Selective", "0.087", "0.289", "0.009",  "✓ MMP9-Selective",  "sig-row"]
     - ["C 15",   "MMP9 Selective", "0.094", "0.232", "0.004",  "✓ MMP9-Selective",  "sig-row"]
-    - ["AB 6",   "MMP9 Selective", "0.078", "0.209", "0.001",  "✓ MMP9-Selective",  "sig-row"]
+    - ["AB 6",   "MMP9 Selective", "0.078", "0.209", "<0.001", "✓ MMP9-Selective",  "sig-row"]
     - ["AB 1",   "MMP9 Predicted", "0.080", "0.180", "0.277",  "n.s.",              ""]
     - ["AB 2",   "High Affin M9",  "—",     "—",     "0.300",  "n.s.",              ""]
     - ["AB 3",   "High Affinity",  "—",     "—",     "0.341",  "n.s.",              ""]
@@ -42,7 +42,7 @@ conclusions:
   content: |
     Pipeline Validation — 3 of 4: Three of four computationally predicted MMP9-selective constructs were experimentally confirmed (75% PPV). AB 1 showed directionally correct binding (MMP9 > MMP2) but high trial-to-trial variability (σ = 43%) prevented statistical confirmation. Every 'Low' control showed non-significant ANOVA—0% false positives. This bidirectional concordance validates the T-score multi-metric filter as a reliable predictor of experimental selectivity, not just overall binding strength. A 75% success rate among specific predictions is strong given the vast landscape of possible protein sequences.
 
-    Scaffold Plasticity: Loop insertions of 6–15 residues into the TIMP3 AB and C loops were structurally tolerated (high interface confidence in co-folding) and biologically functional on the yeast surface. Wild-type TIMP3 itself showed significant MMP9 preference (p=0.024), and all three engineered MMP9-selective variants substantially amplified this preference.
+    Scaffold Plasticity: Loop insertions of 6–15 residues into the TIMP3 AB and C loops were structurally tolerated (high interface confidence in co-folding) and biologically functional on the yeast surface. Wild-type TIMP3 showed directional MMP9 preference (0.211 vs 0.107; n.s.), and all three engineered MMP9-selective variants substantially amplified this trend to statistical significance.
 
     T-Score vs Z-Score: By normalizing each variant against its own cross-target performance distribution rather than the population, the T-score framework explicitly isolates target-preferential binders. This is the critical distinction: a globally excellent binder (high Z-score) is not necessarily a selective one. The T-score filter directly optimizes for the clinically relevant property.
 
@@ -67,6 +67,11 @@ clinical:
     A Generalizable AI Protein Engineering Platform: This pipeline's significance extends beyond TIMP3 and MMPs. Any therapeutic context requiring fine specificity between structurally similar targets—kinase isoforms, cytokine receptors, viral surface proteins—is addressable by an identical computational-experimental workflow. The de novo loop engineering approach can generate binding domains for any protein interaction where conventional antibody or small-molecule approaches lack resolution.
 
     Personalized Medicine & CAR-T Cell Analogy: Chimeric Antigen Receptor T-cell (CAR-T) therapies engineer a patient's own immune cells to recognize and destroy tumor cells bearing a specific surface antigen. The fundamental limitation of current CAR-T designs is that shared antigens between tumor and healthy cells cause on-target/off-tumor toxicity—the same selectivity problem faced by MMP inhibitors. A patient's tumor genome can be sequenced to identify neoantigens unique to their cancer. The de novo binder pipeline could then computationally generate binding domains specific to those patient-specific neoantigens and incorporate them into a CAR construct. Combined with AI-driven specificity engineering, this creates a path toward hyperspecific, genome-informed CAR-T therapies with minimal off-tumor toxicity—a convergence of precision genomics and computational protein design.
+
+acknowledgements:
+  title: "Acknowledgements"
+  content: |
+    This work was supported by startup funds from the University of Nevada, Reno College of Engineering and the Raeeszadeh-Sarmazdeh Laboratory. The authors thank members of the Raeeszadeh-Sarmazdeh Laboratory for technical support.
 
 references:
   - "1. Bonnans et al. (2014). Remodelling the extracellular matrix in development and disease. Nat Rev Mol Cell Biol 15, 786–801."
