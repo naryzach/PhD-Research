@@ -1,4 +1,4 @@
-title: "Generative Deep Learning Pipeline for the Rapid Design of Patient-Specific Therapeutic Binders Against Customized Cancer Markers"
+title: "Generative Deep Learning Pipeline for the Rapid Design of Therapeutic Binders Against Customized Protein Targets"
 author: "Ryan Gustafson"
 
 background:
@@ -51,7 +51,7 @@ conclusions:
 future:
   title: "Future Directions"
   content: |
-    Kinetic Characterization (Near-term): Flow cytometry measures relative binding in a cell-surface display context. Surface Plasmon Resonance (SPR) will provide absolute dissociation constants (KD), on-rates (kon) and off-rates (koff) for C 12, C 15, and AB 6, enabling direct comparison to wild-type TIMP3 affinity and benchmarking against clinical inhibitor standards.
+    Selectivity Characterization (Near-term): Flow cytometry-based cell-surface display assays will be expanded across a broader panel of metalloproteinase targets to evaluate the relative binding and selectivity profiles of C12, C15, and AB6. Comparative analysis across target homologs will help identify specificity trends and inform the next generation of TIMP3 construct designs.
 
     Reverse Selectivity — MMP2 > MMP9 as Proof of Concept: To rigorously demonstrate that the pipeline can be steered in either direction, we will redesign AB-loop variants specifically targeting MMP2 over MMP9. Since MMP2 plays a homeostatic role and MMP9 drives metastasis, a selective MMP2 binder has less therapeutic utility—but its design and experimental confirmation would constitute the strongest possible proof that the pipeline achieves genuine, controllable specificity rather than an MMP9-intrinsic affinity artifact of the TIMP3 scaffold.
 
