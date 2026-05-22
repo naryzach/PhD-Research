@@ -6,7 +6,7 @@
   ============================================================
   Width  : 48 inches  (landscape)
   Height : 36 inches
-  Ratio  : 4:3 (≈ 19:6 approximate / 48:36)
+  Ratio  : 4:3
   CSS    : style.css → body { width: 4608px; height: 3456px; }
   Build  : python build_poster.py → output.html + poster_output.pdf
   ============================================================
@@ -24,7 +24,7 @@
          uses the physical 48" × 36" dimensions unaffected by this script.
          ──────────────────────────────────────────────────────────────────── */
       (function () {
-        var W = 4608, H = 3456; // 48" × 36" at 96 dpi
+        var W = 4608, H = 3456; // 48" × 36" at 96 dpi (4:3)
         function fit() {
           if (window.matchMedia('print').matches) return;
           var scale = Math.min(
@@ -50,17 +50,19 @@
             <div style="flex: 1; text-align: left;">
                 <h1 class="poster-title">{{ data.title }}</h1>
                 <h2 class="poster-author">
-                    Ryan Gustafson<sup style="font-size:0.55em; vertical-align:super; font-weight:600;">1</sup>,
+                    Ryan Gustafson<sup style="font-size:0.55em; vertical-align:super; font-weight:600;">1,2</sup>,
                     Gavin Gallagher<sup style="font-size:0.55em; vertical-align:super; font-weight:600;">1</sup>,
                     Maryam Raeeszadeh-Sarmazdeh<sup style="font-size:0.55em; vertical-align:super; font-weight:600;">1</sup>
                 </h2>
-                <div style="font-family:'Inter',sans-serif; font-size:26px; color:#64748b; margin-top:6px;">
+                <div style="font-family:'Inter',sans-serif; font-size:26px; color:#64748b; margin-top:6px; line-height:1.5;">
                     <sup style="font-size:0.75em; vertical-align:super;">1</sup>Chemical and Materials Engineering, University of Nevada, Reno
+                    &nbsp;&nbsp;
+                    <sup style="font-size:0.75em; vertical-align:super;">2</sup>Integrated Neuroscience Program, University of Nevada, Reno
                 </div>
             </div>
             <div style="margin-left: 80px; flex-shrink: 0; display: flex; align-items: center; gap: 32px;">
-                <img src="../../SharedAssets/figures/UNR Logo.png" alt="UNR Logo"
-                     style="height: 140px; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.2));">
+                <img src="../../SharedAssets/figures/UNR_Logo.png" alt="UNR Logo"
+                     style="height: 180px; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.2));">
                 <div style="font-family: 'Inter', sans-serif; font-size: 48px; font-weight: 400;
                             color: #0f172a; line-height: 1.15; text-align: left;
                             white-space: nowrap;">
@@ -158,37 +160,34 @@
                     </figure>
                     {% endfor %}
                 </section>
-            </div>
 
-            <!-- ── RIGHT COLUMN: Conclusions + Future + Clinical + Acknowledgements + References ── -->
-            <div class="column">
-
-                <section class="poster-section glass-panel" style="flex: 0.80;">
+                <!-- Conclusions — moved to middle column -->
+                <section class="poster-section glass-panel" style="flex: 0 0 auto;">
                     <h3>{{ data.conclusions.title }}</h3>
                     <p class="multiline">{{ data.conclusions.content }}</p>
                 </section>
+            </div>
 
-                <section class="poster-section glass-panel" style="flex: 1.05;">
+            <!-- ── RIGHT COLUMN: Future + Clinical + Acknowledgements + References ── -->
+            <div class="column">
+
+                <section class="poster-section glass-panel" style="flex: 1.1;">
                     <h3>{{ data.future.title }}</h3>
                     <p class="multiline">{{ data.future.content }}</p>
                 </section>
 
-                <section class="poster-section glass-panel" style="flex: 0.80;">
+                <section class="poster-section glass-panel" style="flex: 0.90;">
                     <h3>{{ data.clinical.title }}</h3>
                     <p class="multiline">{{ data.clinical.content }}</p>
                 </section>
 
-                <section class="poster-section glass-panel acknowledgements">
+                <section class="poster-section glass-panel acknowledgements" style="flex: 1.2;">
                     <h3>{{ data.acknowledgements.title }}</h3>
-                    <div style="display: flex; gap: 20px; align-items: flex-start; margin-top: 6px;">
-                        <div style="flex: 0 0 auto; width: 260px; height: 195px;
-                                    background: rgba(0,0,0,0.06); border-radius: 12px;
-                                    border: 2px dashed rgba(0,0,0,0.18);
-                                    display: flex; align-items: center; justify-content: center;
-                                    text-align: center; color: #94a3b8; font-size: 20px; font-style: italic;">
-                            Lab Group Photo
-                        </div>
-                        <p class="multiline" style="flex: 1;">{{ data.acknowledgements.content }}</p>
+                    <p class="multiline">{{ data.acknowledgements.content }}</p>
+                    <div style="margin-top: 14px; flex: 1; min-height: 0; overflow: hidden; border-radius: 14px;">
+                        <img src="../../SharedAssets/figures/Lab_Group_Photo.jpeg"
+                             alt="Raeeszadeh-Sarmazdeh Lab Group"
+                             style="width: 100%; height: 100%; object-fit: cover; object-position: top; border-radius: 14px;">
                     </div>
                 </section>
 

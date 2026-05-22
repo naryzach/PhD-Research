@@ -36,7 +36,7 @@ body {
     background: linear-gradient(135deg, var(--gradient-start) 0%, var(--gradient-end) 100%);
     color: var(--text-primary);
     /* AMA POSTER FIXED DIMENSIONS - DO NOT CHANGE
-       48" W x 36" H at 96 dpi = 4608 x 3456 px
+       48" W x 36" H at 96 dpi = 4608 x 3456 px  (4:3 ratio, landscape)
        PDF export via build_poster.py uses width='48in' height='36in' */
     width: 4608px;
     /* ⚠️ DO NOT CHANGE — 48" wide */
@@ -205,7 +205,7 @@ body {
 
 /* ── Acknowledgements ────────────────────────────────────────────────────── */
 .acknowledgements {
-    flex: 0 0 auto !important;
+    /* flex controlled per-instance in template */
 }
 
 .acknowledgements h3 {

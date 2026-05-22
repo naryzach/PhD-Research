@@ -6,7 +6,7 @@
   ============================================================
   Width  : 48 inches  (landscape)
   Height : 36 inches
-  Ratio  : 4:3 (≈ 19:6 approximate / 48:36)
+  Ratio  : 4:3
   CSS    : style.css → body { width: 4608px; height: 3456px; }
   Build  : python build_poster.py → output.html + poster_output.pdf
   ============================================================
@@ -24,7 +24,7 @@
          uses the physical 48" × 36" dimensions unaffected by this script.
          ──────────────────────────────────────────────────────────────────── */
       (function () {
-        var W = 4608, H = 3456; // 48" × 36" at 96 dpi
+        var W = 4608, H = 3456; // 48" × 36" at 96 dpi (4:3)
         function fit() {
           if (window.matchMedia('print').matches) return;
           var scale = Math.min(
@@ -50,17 +50,19 @@
             <div style="flex: 1; text-align: left;">
                 <h1 class="poster-title">Generative Deep Learning Pipeline for the Rapid Design of Specificity-Enhanced Binders Against Directed Protein Targets</h1>
                 <h2 class="poster-author">
-                    Ryan Gustafson<sup style="font-size:0.55em; vertical-align:super; font-weight:600;">1</sup>,
+                    Ryan Gustafson<sup style="font-size:0.55em; vertical-align:super; font-weight:600;">1,2</sup>,
                     Gavin Gallagher<sup style="font-size:0.55em; vertical-align:super; font-weight:600;">1</sup>,
                     Maryam Raeeszadeh-Sarmazdeh<sup style="font-size:0.55em; vertical-align:super; font-weight:600;">1</sup>
                 </h2>
-                <div style="font-family:'Inter',sans-serif; font-size:26px; color:#64748b; margin-top:6px;">
+                <div style="font-family:'Inter',sans-serif; font-size:26px; color:#64748b; margin-top:6px; line-height:1.5;">
                     <sup style="font-size:0.75em; vertical-align:super;">1</sup>Chemical and Materials Engineering, University of Nevada, Reno
+                    &nbsp;&nbsp;
+                    <sup style="font-size:0.75em; vertical-align:super;">2</sup>Integrated Neuroscience Program, University of Nevada, Reno
                 </div>
             </div>
             <div style="margin-left: 80px; flex-shrink: 0; display: flex; align-items: center; gap: 32px;">
-                <img src="../../SharedAssets/figures/UNR Logo.png" alt="UNR Logo"
-                     style="height: 140px; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.2));">
+                <img src="../../SharedAssets/figures/UNR_Logo.png" alt="UNR Logo"
+                     style="height: 180px; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.2));">
                 <div style="font-family: 'Inter', sans-serif; font-size: 48px; font-weight: 400;
                             color: #0f172a; line-height: 1.15; text-align: left;
                             white-space: nowrap;">
@@ -77,17 +79,17 @@
 
                 <section class="poster-section glass-panel" style="flex: 1.5;">
                     <h3>Background: The MMP Selectivity Problem</h3>
-                    <p>Matrix Metalloproteinases (MMPs) are zinc-dependent endopeptidases essential to extracellular matrix remodeling [1]. In cancer, MMP9 is the primary driver of basement membrane degradation, enabling tumor cell intravasation and metastatic spread; it additionally promotes angiogenesis by cleaving and releasing VEGF sequestered in the ECM [3]. The clinically relevant distinction: MMP2 maintains basal connective tissue homeostasis, while MMP9 is the pathogenic species in >90% of invasive breast, colorectal, and lung cancers. Despite this, MMP2 and MMP9 share near-identical active site architecture (~65% identity in the catalytic domain), making selective inhibition extraordinarily difficult. Previous broad-spectrum MMP inhibitors (marimastat, batimastat) failed Phase III oncology trials due to musculoskeletal toxicity caused by off-target inhibition of MMP1/2/3 [3]. TIMP3 is a natural, endogenous inhibitor that engages metalloproteinase active sites through its N-terminal reactive site loops—offering a structurally validated scaffold for engineering selectivity by loop redesign [2].</p>
+                    <p>Matrix Metalloproteinases (MMPs) are zinc-dependent endopeptidases essential to extracellular matrix remodeling [1]. In cancer, MMP9 is the primary driver of basement membrane degradation, enabling tumor cell intravasation and metastatic spread; it additionally promotes angiogenesis by cleaving and releasing VEGF sequestered in the ECM [3]. The clinically relevant distinction: MMP2 maintains basal connective tissue homeostasis, while MMP9 is the pathogenic species in >90% of invasive breast, colorectal, and lung cancers. Despite this, MMP2 and MMP9 share near-identical active site architecture (~65% identity in the catalytic domain), making selective inhibition extraordinarily difficult. Previous broad-spectrum MMP inhibitors (marimastat, batimastat) failed Phase III oncology trials due to musculoskeletal toxicity caused by off-target inhibition of MMP1/2/3 [3]. TIMP3 is a natural, endogenous inhibitor that engages metalloproteinase active sites through its N-terminal reactive site loops, offering a structurally validated scaffold for engineering selectivity by loop redesign [2].</p>
                     <figure class="poster-figure">
                         <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/mmp9_timp3_complex.png" alt="MMP9-TIMP3 complex"
                              style="max-height: 540px; width: auto; max-width: 100%;">
-                        <figcaption>Figure 1: MMP9–TIMP3 complex (HADDOCK docking structure). Blue: MMP9 catalytic domain. Violet: TIMP3 scaffold. Amber: zinc-binding active site motif (HExxHxxGxxH) — conserved residues targeted by TIMP3 inhibitory loops. Teal: TIMP3 AB loop (residues 31–36) — primary mutagenesis site. Orange: TIMP3 C loop (residues 63–68) — primary mutagenesis site. The AB and C loops insert into the MMP9 active site cleft and serve as the primary scaffold for selectivity engineering.</figcaption>
+                        <figcaption>Figure 1: MMP9–TIMP3 complex (HADDOCK docking structure). Blue: MMP9 catalytic domain. Violet: TIMP3 scaffold. Amber: zinc-binding active site motif (HExxHxxGxxH): conserved residues targeted by TIMP3 inhibitory loops. Teal: TIMP3 AB loop (residues 31–36), primary mutagenesis site. Orange: TIMP3 C loop (residues 63–68), primary mutagenesis site. The AB and C loops insert into the MMP9 active site cleft and serve as the primary scaffold for selectivity engineering.</figcaption>
                     </figure>
                 </section>
 
                 <section class="poster-section glass-panel" style="flex: 1.3;">
                     <h3>Methods: AI-Driven 6-Stage Design Pipeline</h3>
-                    <p>The workflow moves from generative structural AI through experimental validation in six tightly coupled stages. (1) A diffusion model generates novel 3D loop backbone geometries on the TIMP3 scaffold across the AB, C, and EF binding loops (6–24 aa expansions) [5], run on an A30 GPU (~20 hr/run). (2) A graph neural network sequences each backbone—sampling 1,000 diverse amino acid sequences per loop/target combination at low temperature (T=0.2) to preserve backbone compatibility while maximizing sequence diversity [6]. The scaffold residues are held fixed; only loop positions are designed. (3) The top 10 sequences per loop are co-folded with each metalloproteinase target using the AlphaFold3 Server; interface confidence metrics (ipTM, pLDDT, Interface PAE) are extracted per complex [4]. (4) A self-normalized T-score filter identifies variants that outperform their own cross-target mean—explicitly selecting for target-preferential binders rather than globally high-confidence structures. Candidates require T>2.0 on ≥2 independent metrics and ipTM ≥ 0.82. (5) All 13 final construct DNA sequences are screened for restriction enzyme recognition sites (BsrGI, BamHI, BsaI) that would interfere with Golden Gate cloning; all 13 passed. (6) Constructs are cloned into a yeast surface display vector, transformed into EBY100 yeast, and screened by flow cytometry. The primary readout is the Positive Median Ratio: the ratio of the APC-A (binding) median to the FITC-A (expression) median within the FITC-positive gate. Dividing by FITC normalizes for surface-display level variation between individual yeast cells while keeping MMP9 and MMP2 values on a shared scale—a higher ratio for MMP9 than MMP2 directly indicates target preference. TIMP3-WT reference lines are drawn at the actual TIMP3-WT Pos Med Ratio per target. Error bars represent 95% confidence intervals (t-distribution). Failed trials (positive control binding efficiency below threshold) are excluded before statistical analysis.</p>
+                    <p>The workflow moves from generative structural AI through experimental validation in six tightly coupled stages. (1) A diffusion model generates novel 3D loop backbone geometries on the TIMP3 scaffold across the AB, C, and EF binding loops (6–24 aa expansions) [5], run on an A30 GPU (~20 hr/run). (2) A graph neural network sequences each backbone, sampling 1,000 diverse amino acid sequences per loop/target combination at low temperature (T=0.2) to preserve backbone compatibility while maximizing sequence diversity [6]. The scaffold residues are held fixed; only loop positions are designed. (3) The top 10 sequences per loop are co-folded with each metalloproteinase target using the AlphaFold3 Server; interface confidence metrics (ipTM, pLDDT, Interface PAE) are extracted per complex [4]. (4) A self-normalized T-score filter identifies variants that outperform their own cross-target mean, explicitly selecting for target-preferential binders rather than globally high-confidence structures. Candidates require T>2.0 on ≥2 independent metrics and ipTM ≥ 0.82. (5) All 13 final construct DNA sequences are screened for restriction enzyme recognition sites (BsrGI, BamHI, BsaI) that would interfere with Golden Gate cloning; all 13 passed. (6) Constructs are cloned into a yeast surface display vector, transformed into EBY100 yeast, and screened by flow cytometry. The primary readout is the Positive Median Ratio: the ratio of the APC-A (binding) median to the FITC-A (expression) median within the FITC-positive gate. Dividing by FITC normalizes for surface-display level variation between individual yeast cells while keeping MMP9 and MMP2 values on a shared scale; a higher ratio for MMP9 than MMP2 directly indicates target preference. TIMP3-WT reference lines are drawn at the actual TIMP3-WT Pos Med Ratio per target. Error bars represent 95% confidence intervals (t-distribution). Failed trials (positive control binding efficiency below threshold) are excluded before statistical analysis.</p>
                     <p style="margin-top: 10px; font-size: 22px; color: rgba(2,132,199,0.85); font-style: italic;">Six-stage workflow illustrated in Figure 2 (center column).</p>
                 </section>
 
@@ -112,7 +114,7 @@
 
                     <div class="result-subsection">
                         <div class="result-subsection-title">Computational Stage Outcomes</div>
-                        <p style="margin-bottom: 10px;">Computational Stage Outcomes: The diffusion backbone generator produced structurally diverse loop geometries in the 6–15 residue range not achievable by conventional mutagenesis, including extended beta-hairpin and helix-turn motifs [5]. Following sequence design and structural co-folding, the self-normalized T-score filter reduced the candidate pool from >1,000 generated sequences to 13 final constructs—a >98% reduction—while enriching for constructs with MMP9-preferential binding signals. Top-ranked MMP9 candidates (C-loop and AB-loop variants) achieved interface confidence scores placing them in the top decile of all evaluated structures.</p>
+                        <p style="margin-bottom: 10px;">Computational Stage Outcomes: The diffusion backbone generator produced structurally diverse loop geometries in the 6–15 residue range not achievable by conventional mutagenesis, including extended beta-hairpin and helix-turn motifs [5]. Following sequence design and structural co-folding, the self-normalized T-score filter reduced the candidate pool from >1,000 generated sequences to 13 final constructs (a >98% reduction) while enriching for constructs with MMP9-preferential binding signals. Top-ranked MMP9 candidates (C-loop and AB-loop variants) achieved interface confidence scores placing them in the top decile of all evaluated structures.</p>
                     </div>
 
                     <div class="result-subsection">
@@ -352,57 +354,54 @@
                     <!-- Result Figures -->
                     
                 </section>
-            </div>
 
-            <!-- ── RIGHT COLUMN: Conclusions + Future + Clinical + Acknowledgements + References ── -->
-            <div class="column">
-
-                <section class="poster-section glass-panel" style="flex: 0.80;">
+                <!-- Conclusions — moved to middle column -->
+                <section class="poster-section glass-panel" style="flex: 0 0 auto;">
                     <h3>Conclusions</h3>
-                    <p class="multiline">Preliminary Validation — 3 of 4: Three of four computationally predicted MMP9-selective constructs showed statistically significant MMP9 preference over MMP2 in preliminary flow cytometry data (75% hit rate). AB 1 showed directionally correct binding (MMP9 > MMP2) but high trial-to-trial variability (σ = 43%) prevented statistical confirmation. Every 'Low' control showed non-significant results—0% false positives. These results suggest the T-score multi-metric filter may serve as a useful predictor of experimental target preference, not just overall binding strength. A 75% hit rate in these preliminary results is encouraging given the vast landscape of possible protein sequences.
+                    <p class="multiline">Preliminary Validation (3 of 4): Three of four computationally predicted MMP9-selective constructs showed statistically significant MMP9 preference over MMP2 in preliminary flow cytometry data (75% hit rate). AB 1 showed directionally correct binding (MMP9 > MMP2) but high trial-to-trial variability (σ = 43%) prevented statistical confirmation. Every 'Low' control showed non-significant results; 0% false positives. These results suggest the T-score multi-metric filter may serve as a useful predictor of experimental target preference, not just overall binding strength. A 75% hit rate in these preliminary results is encouraging given the vast landscape of possible protein sequences.
 
 Scaffold Plasticity: Loop insertions of 6–15 residues into the TIMP3 AB and C loops were structurally tolerated (high interface confidence in co-folding) and biologically functional on the yeast surface. Wild-type TIMP3 showed directional MMP9 preference (0.211 vs 0.107; n.s.), and all three engineered MMP9-selective variants amplified this trend to statistical significance in preliminary data.
 
-T-Score vs Z-Score: By normalizing each variant against its own cross-target performance distribution rather than the population, the T-score framework explicitly selects for target-preferential binders. This is the critical distinction: a globally excellent binder (high Z-score) is not necessarily a selective one. The T-score filter directly targets the clinically relevant property of selectivity.
+T-Score Selection Framework: With only four metalloproteinase targets evaluated per construct (MMP2, MMP9, ADAM10, ADAM17), the T-score was computed as a self-normalized metric: how many standard deviations above its own cross-target mean did a given interface metric fall for the target of interest. Two complementary T-score analyses were applied — one to identify candidates with strong overall binding potential, and a second to identify constructs that preferentially outperform their own cross-target mean, rewarding selectivity rather than global affinity. A variant can achieve high absolute interface confidence on every target without ever ranking as selective; the self-normalized T-score captures this distinction by comparing each variant to its own performance distribution across targets.
 
 Pipeline Generalizability: The workflow is target-agnostic by design. Any protein-protein interaction with available structural data may be addressable using an identical computational pipeline. MMP9 vs MMP2 selectivity serves as the validation case for a generalizable AI-driven precision protein engineering approach, pending further experimental confirmation.
 </p>
                 </section>
+            </div>
 
-                <section class="poster-section glass-panel" style="flex: 1.05;">
+            <!-- ── RIGHT COLUMN: Future + Clinical + Acknowledgements + References ── -->
+            <div class="column">
+
+                <section class="poster-section glass-panel" style="flex: 1.1;">
                     <h3>Future Directions</h3>
-                    <p class="multiline">Selectivity Characterization (Near-term): Flow cytometry-based cell-surface display assays will be expanded across a broader panel of metalloproteinase targets to evaluate the relative binding and selectivity profiles of C12, C15, and AB6. Comparative analysis across target homologs will help identify specificity trends and inform the next generation of TIMP3 construct designs.
+                    <p class="multiline">Selectivity Characterization (Near-term): Flow cytometry-based cell-surface display assays will be expanded across a broader panel of metalloproteinase targets to evaluate the relative binding and selectivity profiles of C12, C15, and AB6.
 
-Reverse Selectivity — MMP2 > MMP9 as Proof of Concept: To rigorously demonstrate that the pipeline can be steered in either direction, we will redesign AB-loop variants specifically targeting MMP2 over MMP9. Since MMP2 plays a homeostatic role and MMP9 drives metastasis, a selective MMP2 binder has less therapeutic utility—but its design and experimental confirmation would constitute the strongest possible proof that the pipeline achieves genuine, controllable specificity rather than an MMP9-intrinsic affinity artifact of the TIMP3 scaffold.
+Reverse Selectivity: MMP2 > MMP9 as Proof of Concept: To rigorously demonstrate that the pipeline can be steered in either direction, we will redesign AB-loop variants specifically targeting MMP2 over MMP9. Since MMP2 plays a homeostatic role and MMP9 drives metastasis, a selective MMP2 binder has less therapeutic utility, but its design and experimental confirmation would constitute the strongest possible proof that the pipeline achieves genuine, controllable specificity rather than an MMP9-intrinsic affinity artifact of the TIMP3 scaffold.
 
-ADAM10/ADAM17 Selectivity (Pending Optimization): ADAM17 data was collected across multiple trial dates and is included in normalized within-target comparisons. ADAM10 trials were excluded due to insufficient positive control signal in all runs. Optimizing the ADAM10 surface protein presentation protocol (titrated antibody concentration, induction time) will enable ADAM17 vs ADAM10 selectivity analysis using the identical ANOVA/T-score framework—extending the specificity pipeline to a clinically relevant Alzheimer's disease (ADAM10) vs inflammatory signaling (ADAM17) distinction.
+ADAM10/ADAM17 Selectivity (Pending Optimization): ADAM17 data was collected across multiple trial dates and is included in normalized within-target comparisons. ADAM10 trials were excluded due to insufficient positive control signal in all runs. Optimizing the ADAM10 surface protein presentation protocol (titrated antibody concentration, induction time) will enable ADAM17 vs ADAM10 selectivity analysis using the identical ANOVA/T-score framework, extending the specificity pipeline to a clinically relevant Alzheimer's disease (ADAM10) vs inflammatory signaling (ADAM17) distinction.
 
-In Silico Saturation Mutagenesis: A protein language model (trained on evolutionary sequence data from hundreds of millions of natural proteins) will predict the fitness effect of every single-residue substitution in the top MMP9-selective loops. This will identify which positions are critical for selectivity, which tolerate modification, and which substitutions may further improve affinity—dramatically accelerating the next design cycle without additional synthesis.
+In Silico Saturation Mutagenesis: A protein language model (trained on evolutionary sequence data from hundreds of millions of natural proteins) will predict the fitness effect of every single-residue substitution in the top MMP9-selective loops. This will identify which positions are critical for selectivity, which tolerate modification, and which substitutions may further improve affinity, dramatically accelerating the next design cycle without additional synthesis. The resulting per-residue substitution landscape will directly inform the next generative design iteration: high-tolerance positions will expand the sequence space sampled by ProteinMPNN, while selectivity-critical residues will be fixed as scaffold constraints in subsequent RFdiffusion runs, focusing backbone exploration on regions most likely to maintain or amplify the MMP9-over-MMP2 preference observed in C12, C15, and AB6.
 </p>
                 </section>
 
-                <section class="poster-section glass-panel" style="flex: 0.80;">
+                <section class="poster-section glass-panel" style="flex: 0.90;">
                     <h3>Clinical & Translational Outlook</h3>
-                    <p class="multiline">MMP9 as an Oncology Target: MMP9 overexpression correlates with tumor invasiveness, lymph node metastasis, and poor prognosis across >15 solid tumor types [3]. The previous failure of pan-MMP inhibitors in clinical trials was not a failure of the therapeutic hypothesis—it was a failure of selectivity. An MMP9-specific TIMP3 variant could inhibit the invasive phenotype while sparing MMP2-dependent basement membrane maintenance in normal tissue, addressing the toxicity problem that terminated earlier drug programs.
+                    <p class="multiline">MMP9 as an Oncology Target: MMP9 overexpression correlates with tumor invasiveness, lymph node metastasis, and poor prognosis across >15 solid tumor types [3]. The previous failure of pan-MMP inhibitors in clinical trials was not a failure of the therapeutic hypothesis; it was a failure of selectivity. An MMP9-specific TIMP3 variant could inhibit the invasive phenotype while sparing MMP2-dependent basement membrane maintenance in normal tissue, addressing the toxicity problem that terminated earlier drug programs.
 
-A Generalizable AI Protein Engineering Platform: This pipeline's significance extends beyond TIMP3 and MMPs. Any therapeutic context requiring fine specificity between structurally similar targets—kinase isoforms, cytokine receptors, viral surface proteins—is addressable by an identical computational-experimental workflow. The de novo loop engineering approach can generate binding domains for any protein interaction where conventional antibody or small-molecule approaches lack resolution.
+A Generalizable AI Protein Engineering Platform: This pipeline's significance extends beyond TIMP3 and MMPs. Any therapeutic context requiring fine specificity between structurally similar targets (kinase isoforms, cytokine receptors, viral surface proteins) is addressable by an identical computational-experimental workflow. The de novo loop engineering approach can generate binding domains for any protein interaction where conventional antibody or small-molecule approaches lack resolution.
 
-Personalized Medicine & CAR-T Cell Analogy: Chimeric Antigen Receptor T-cell (CAR-T) therapies engineer a patient's own immune cells to recognize and destroy tumor cells bearing a specific surface antigen. The fundamental limitation of current CAR-T designs is that shared antigens between tumor and healthy cells cause on-target/off-tumor toxicity—the same selectivity problem faced by MMP inhibitors. A patient's tumor genome can be sequenced to identify neoantigens unique to their cancer. The de novo binder pipeline could then computationally generate binding domains specific to those patient-specific neoantigens and incorporate them into a CAR construct. Combined with AI-driven specificity engineering, this creates a path toward hyperspecific, genome-informed CAR-T therapies with minimal off-tumor toxicity—a convergence of precision genomics and computational protein design.
+Personalized Medicine & CAR-T Cell Analogy: Chimeric Antigen Receptor T-cell (CAR-T) therapies engineer a patient's own immune cells to recognize and destroy tumor cells bearing a specific surface antigen. The fundamental limitation of current CAR-T designs is that shared antigens between tumor and healthy cells cause on-target/off-tumor toxicity, the same selectivity problem faced by MMP inhibitors. A patient's tumor genome can be sequenced to identify neoantigens unique to their cancer. The de novo binder pipeline could then computationally generate binding domains specific to those patient-specific neoantigens and incorporate them into a CAR construct. Combined with AI-driven specificity engineering, this creates a path toward hyperspecific, genome-informed CAR-T therapies with minimal off-tumor toxicity, a convergence of precision genomics and computational protein design.
 </p>
                 </section>
 
-                <section class="poster-section glass-panel acknowledgements">
+                <section class="poster-section glass-panel acknowledgements" style="flex: 1.2;">
                     <h3>Acknowledgements</h3>
-                    <div style="display: flex; gap: 20px; align-items: flex-start; margin-top: 6px;">
-                        <div style="flex: 0 0 auto; width: 260px; height: 195px;
-                                    background: rgba(0,0,0,0.06); border-radius: 12px;
-                                    border: 2px dashed rgba(0,0,0,0.18);
-                                    display: flex; align-items: center; justify-content: center;
-                                    text-align: center; color: #94a3b8; font-size: 20px; font-style: italic;">
-                            Lab Group Photo
-                        </div>
-                        <p class="multiline" style="flex: 1;">This work was supported by the NSF CAREER Award and NIH R35 MIRA Award to Dr. Maryam Raeeszadeh-Sarmazdeh (PI). R.G. was supported by the Berner Scholarship/Fellowship and the UNR Graduate Student Association Travel Award. The authors thank all members of the Raeeszadeh-Sarmazdeh Laboratory for their technical support and collaboration.
+                    <p class="multiline">This work was supported by the National Science Foundation (NSF) Faculty Early Career Development Program (CAREER) Award to Dr. Maryam Raeeszadeh-Sarmazdeh. This work was also supported by the National Institutes of Health (NIH) R35 Maximizing Investigators' Research Award (MIRA) to Dr. Maryam Raeeszadeh-Sarmazdeh. Ryan Gustafson was supported by the Raymond H. Berner Endowed Scholarship. Travel support was provided by the University of Nevada, Reno Graduate Student Association (GSA) Travel Award. The authors thank all members of the Raeeszadeh-Sarmazdeh Laboratory for their technical support and collaboration.
 </p>
+                    <div style="margin-top: 14px; flex: 1; min-height: 0; overflow: hidden; border-radius: 14px;">
+                        <img src="../../SharedAssets/figures/Lab_Group_Photo.jpeg"
+                             alt="Raeeszadeh-Sarmazdeh Lab Group"
+                             style="width: 100%; height: 100%; object-fit: cover; object-position: top; border-radius: 14px;">
                     </div>
                 </section>
 

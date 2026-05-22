@@ -8,7 +8,9 @@
 # Outputs:
 #   poster_output.pdf      — vector PDF, best for printing (48" × 36")
 #   poster_output.png      — 96 DPI preview (4608 × 3456 px)
-#   poster_hires.png       — 288 DPI print-ready (13824 × 10368 px)  [--hires]
+#   poster_hires.png       — 192 DPI print-ready (9216 × 6912 px)   [--hires]
+#   poster_digital.pdf     — 16:9 PDF (64" × 36") for digital dir.  [--digital]
+#   poster_digital.png     — 16:9 preview                           [--digital]
 # =============================================================
 import argparse
 import yaml
@@ -57,18 +59,82 @@ def generate_pdf_png(html_file, hires=False):
             browser.close()
             print("  ✓  poster_hires.png  (192 DPI, 9216 × 6912 px)")
 
+def generate_digital_pdf(html_file):
+    """
+    Generates poster_digital.pdf: 16:9 canvas (64" × 36" = 6144 × 3456 px).
+    The 48"×36" poster is centered with 8" side margins on the same gradient
+    background. CSS overrides are injected at runtime — no separate template needed.
+    """
+    DIGITAL_W_PX = 6144     # 64" × 96 dpi
+    POSTER_W_PX  = 4608     # 48" × 96 dpi
+    MARGIN_PX    = (DIGITAL_W_PX - POSTER_W_PX) // 2   # 768 px each side
+
+    absolute_path = 'file://' + os.path.abspath(html_file)
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.goto(absolute_path, wait_until='networkidle')
+        page.set_viewport_size({"width": DIGITAL_W_PX, "height": 3456})
+
+        # Inject print-mode overrides appended last so these !important rules win cascade.
+        # html becomes the 64"-wide canvas; body is the 48" poster centered within it.
+        page.evaluate(f"""
+            const s = document.createElement('style');
+            s.textContent = `
+                @media print {{
+                    html {{
+                        width: {DIGITAL_W_PX}px !important;
+                        overflow: visible !important;
+                        background: linear-gradient(135deg, #f0f9ff 0%, #dbeafe 100%) !important;
+                    }}
+                    body {{
+                        width: {POSTER_W_PX}px !important;
+                        height: 3456px !important;
+                        margin-left: {MARGIN_PX}px !important;
+                        margin-top: 0px !important;
+                        transform: none !important;
+                    }}
+                }}
+            `;
+            document.head.appendChild(s);
+        """)
+
+        page.pdf(
+            path='poster_digital.pdf',
+            width='64in',
+            height='36in',
+            print_background=True,
+        )
+        page.screenshot(path='poster_digital.png', full_page=True)
+        browser.close()
+
+    print("  ✓  poster_digital.pdf  (16:9, 64\" × 36\", 8\" side margins)")
+    print("  ✓  poster_digital.png  (16:9 preview)")
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--hires', action='store_true',
-        help='Also export poster_hires.png at 288 DPI (13824×10368 px). Takes ~60 s extra.'
+        help='Also export poster_hires.png at 192 DPI (9216×6912 px). Takes ~60 s extra.'
+    )
+    parser.add_argument(
+        '--digital', action='store_true',
+        help='Also export poster_digital.pdf/.png at 16:9 (64"×36") for digital directory submission.'
     )
     args = parser.parse_args()
 
     html_file = render_html()
     generate_pdf_png(html_file, hires=args.hires)
 
+    if args.digital:
+        print("\nGenerating 16:9 digital version …")
+        generate_digital_pdf(html_file)
+
     outputs = "output.html, poster_output.pdf, and poster_output.png"
     if args.hires:
-        outputs += ", and poster_hires.png"
-    print(f"Successfully generated {outputs}")
+        outputs += ", poster_hires.png"
+    if args.digital:
+        outputs += ", poster_digital.pdf, and poster_digital.png"
+    print(f"\nSuccessfully generated {outputs}")
