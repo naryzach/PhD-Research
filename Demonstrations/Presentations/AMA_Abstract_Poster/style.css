@@ -14,14 +14,14 @@
  */
 
 :root {
-    --primary-bg: #0f172a;
-    --panel-bg: rgba(30, 41, 59, 0.7);
-    --panel-border: rgba(255, 255, 255, 0.1);
-    --text-primary: #f8fafc;
-    --text-secondary: #cbd5e1;
-    --accent: #38bdf8;
-    --gradient-start: #0f172a;
-    --gradient-end: #1e1b4b;
+    --primary-bg: #f8fafc;
+    --panel-bg: rgba(255, 255, 255, 0.88);
+    --panel-border: rgba(0, 0, 0, 0.09);
+    --text-primary: #1e293b;
+    --text-secondary: #475569;
+    --accent: #0284c7;
+    --gradient-start: #f0f9ff;
+    --gradient-end: #dbeafe;
 }
 
 * {
@@ -51,7 +51,7 @@ body {
 @media screen {
     html {
         overflow: hidden;
-        background: #080c1a;
+        background: #bfdbfe;
     }
 }
 
@@ -77,7 +77,7 @@ body {
     gap: 24px;
 }
 
-/* ── Glassmorphism Panel Utility ──────────────────────────────────────────── */
+/* ── Light panel ──────────────────────────────────────────────────────────── */
 .glass-panel {
     background: var(--panel-bg);
     backdrop-filter: blur(16px);
@@ -85,7 +85,7 @@ body {
     border: 2px solid var(--panel-border);
     border-radius: 24px;
     padding: 28px;
-    box-shadow: 0 30px 60px -15px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.12);
 }
 
 /* ── Header ──────────────────────────────────────────────────────────────── */
@@ -104,7 +104,7 @@ body {
     font-weight: 700;
     line-height: 1.1;
     margin-bottom: 12px;
-    color: #f8fafc;
+    color: #0f172a;
 }
 
 .poster-author {
@@ -146,7 +146,7 @@ body {
     color: var(--accent);
     margin-bottom: 12px;
     padding-bottom: 8px;
-    border-bottom: 3px solid rgba(56, 189, 248, 0.3);
+    border-bottom: 3px solid rgba(2, 132, 199, 0.3);
     flex-shrink: 0;
 }
 
@@ -175,14 +175,14 @@ body {
     font-family: 'Outfit', sans-serif;
     font-size: 28px;
     font-weight: 700;
-    color: #818cf8;
+    color: #4f46e5;
     margin-bottom: 6px;
     letter-spacing: 0.02em;
 }
 
 /* ── Figures ─────────────────────────────────────────────────────────────── */
 .poster-figure {
-    background: rgba(0, 0, 0, 0.2);
+    background: rgba(0, 0, 0, 0.04);
     border-radius: 14px;
     padding: 14px;
     text-align: center;
@@ -203,7 +203,7 @@ body {
     line-height: 1.4;
 }
 
-/* ── Acknowledgements (compact) ─────────────────────────────────────────── */
+/* ── Acknowledgements ────────────────────────────────────────────────────── */
 .acknowledgements {
     flex: 0 0 auto !important;
 }
@@ -217,13 +217,12 @@ body {
 .acknowledgements p {
     font-size: 20px !important;
     line-height: 1.4 !important;
-    opacity: 0.85;
+    color: var(--text-secondary);
 }
 
 /* ── References (compact) ────────────────────────────────────────────────── */
 .references {
     flex: 0 0 auto !important;
-    /* don't grow — keep it compact */
 }
 
 .poster-grid>.column:last-child .poster-section:not(.references) {
@@ -249,24 +248,22 @@ body {
     opacity: 0.9;
 }
 
-/* bullets removed */
-
 /* ── Specificity Table ───────────────────────────────────────────────────── */
 .specificity-table-wrap {
     margin-top: 16px;
     margin-bottom: 0;
-    background: rgba(0, 0, 0, 0.25);
+    background: rgba(0, 0, 0, 0.04);
     border-radius: 16px;
     padding: 20px 24px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(0, 0, 0, 0.08);
     flex-shrink: 0;
 }
 
 .spec-table-title {
     font-family: 'Outfit', sans-serif;
-    font-size: 22px;
+    font-size: 26px;
     font-weight: 700;
-    color: #38bdf8;
+    color: #0284c7;
     margin-bottom: 12px;
     letter-spacing: 0.02em;
 }
@@ -276,64 +273,54 @@ body {
     margin: 0 auto;
     border-collapse: collapse;
     font-family: 'Inter', monospace;
-    font-size: 19px;
+    font-size: 21px;
     text-align: center;
 }
 
 .specificity-table th {
     text-align: center;
-    color: #94a3b8;
-    font-size: 15px;
+    color: #64748b;
+    font-size: 17px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    border-bottom: 2px solid rgba(56, 189, 248, 0.3);
+    border-bottom: 2px solid rgba(2, 132, 199, 0.35);
     padding: 7px 10px;
 }
 
 .specificity-table td {
     padding: 9px 10px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    color: #e2e8f0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+    color: #1e293b;
     white-space: nowrap;
 }
 
 .specificity-table .sig-row td:first-child {
     font-weight: 800;
-    color: #34d399;
-}
-
-.specificity-table .sig-row td:nth-child(5) {
-    color: #34d399;
-    font-weight: 700;
-}
-
-.specificity-table .sig-row td:nth-child(6) {
-    color: #34d399;
-    font-weight: 700;
+    color: #059669;
 }
 
 .specificity-table .sig-row td:nth-child(4) {
     font-weight: 800;
-    color: #34d399;
+    color: #059669;
 }
 
 .specificity-table .sig-row td:nth-child(5) {
-    color: #34d399;
+    color: #059669;
     font-weight: 700;
 }
 
 .specificity-table .sig-row td:nth-child(6) {
-    color: #34d399;
+    color: #059669;
     font-weight: 700;
 }
 
 .specificity-table .ctrl-row {
-    opacity: 0.6;
+    opacity: 0.55;
 }
 
 .specificity-table .adam-row td:first-child {
-    color: #fbbf24;
+    color: #d97706;
 }
 
 .specificity-table .adam-row {
@@ -341,20 +328,20 @@ body {
 }
 
 .specificity-table .ref-row td:first-child {
-    color: #38bdf8;
+    color: #0284c7;
     font-weight: 700;
 }
 
 .specificity-table .ref-row td:nth-child(5) {
-    color: #38bdf8;
+    color: #0284c7;
 }
 
 .spec-table-note {
-    font-size: 14px;
+    font-size: 16px;
     color: #64748b;
     font-style: italic;
     margin-top: 10px;
     line-height: 1.35;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
     padding-top: 8px;
 }

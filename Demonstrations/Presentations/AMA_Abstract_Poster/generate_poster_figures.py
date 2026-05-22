@@ -703,6 +703,11 @@ def fig_bind_med_heatmap(csv_data=None):
 # ── Figure 6: 6-stage pipeline diagram ───────────────────────────────────────
 
 def fig_pipeline():
+    _LIGHT_BG   = "#f8fafc"
+    _DARK_TEXT  = "#0f172a"
+    _DARK_SEC   = "#475569"
+    _ARROW_CLR  = "#64748b"
+
     stages = [
         ("RFdiffusion\n(Backbone Gen.)", "AB / C / EF loops\n6–24 aa expansion", "#3b82f6"),
         ("ProteinMPNN\n(Sequence Design)", "1000 seqs / target\nT=0.2, fixed scaffold", "#8b5cf6"),
@@ -713,8 +718,8 @@ def fig_pipeline():
     ]
 
     fig, ax = plt.subplots(figsize=(14, 3.5))
-    fig.patch.set_facecolor(DARK_BG)
-    ax.set_facecolor(DARK_BG)
+    fig.patch.set_facecolor(_LIGHT_BG)
+    ax.set_facecolor(_LIGHT_BG)
     ax.axis("off")
 
     box_w, box_h = 1.9, 1.6
@@ -735,21 +740,21 @@ def fig_pipeline():
                 ha="center", va="top", fontsize=12, fontweight="bold",
                 color=color, transform=ax.transData)
         ax.text(x + box_w / 2, 0.6 + 0.25, subtitle,
-                ha="center", va="bottom", fontsize=10, color=TEXT_SEC,
+                ha="center", va="bottom", fontsize=10, color=_DARK_SEC,
                 transform=ax.transData)
         if i < len(stages) - 1:
             ax.annotate("", xy=(x + box_w + gap, 0.6 + box_h / 2),
                         xytext=(x + box_w, 0.6 + box_h / 2),
-                        arrowprops=dict(arrowstyle="->", color=TEXT_SEC,
+                        arrowprops=dict(arrowstyle="->", color=_ARROW_CLR,
                                         lw=1.5, mutation_scale=14))
 
     ax.set_xlim(0, 14)
     ax.set_ylim(0, 2.8)
     ax.set_title("Computational-to-Experimental Design Pipeline",
-                 fontsize=18, color=TEXT_PRI, pad=12)
+                 fontsize=18, color=_DARK_TEXT, pad=12)
     plt.tight_layout()
     out = os.path.join(OUTDIR, "fig_pipeline.png")
-    fig.savefig(out, dpi=180, bbox_inches="tight", facecolor=DARK_BG)
+    fig.savefig(out, dpi=180, bbox_inches="tight", facecolor=_LIGHT_BG)
     plt.close(fig)
     print(f"  ✓  Saved: {out}")
 

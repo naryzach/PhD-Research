@@ -20,9 +20,9 @@ from playwright.sync_api import sync_playwright
 
 _SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
 PDB_PATH     = os.path.normpath(os.path.join(
-    _SCRIPT_DIR, "../../../Data/HADDOCK_Outputs/MMP9_TIMP3_HADDOCK.pdb"
+    _SCRIPT_DIR, "../../../Data/TIMP_Complexes/HADDOCK_Outputs/MMP9_TIMP3_HADDOCK.pdb"
 ))
-PDB_PATH_WSL = "/home/ryangustafson/Documents/GitHubProj/PhD-Research/.claude/worktrees/laughing-mclaren-c03fcc/Data/HADDOCK_Outputs/MMP9_TIMP3_HADDOCK.pdb"
+PDB_PATH_WSL = "/home/ryangustafson/Documents/GitHubProj/PhD-Research/Data/TIMP_Complexes/HADDOCK_Outputs/MMP9_TIMP3_HADDOCK.pdb"
 
 OUTPUT_PATH  = os.path.normpath(os.path.join(
     _SCRIPT_DIR, "..", "..", "SharedAssets", "figures",
@@ -99,44 +99,44 @@ html_content = f"""<!DOCTYPE html>
 <body>
 <div id="viewer"></div>
 <script>
-let viewer = $3Dmol.createViewer("viewer", {{ backgroundColor: "transparent" }});
-viewer.setBackgroundColor(0x000000, 0.0);
+let viewer = $3Dmol.createViewer("viewer", {{ backgroundColor: "white" }});
+viewer.setBackgroundColor(0xffffff, 1.0);
 
 let pdbData = {pdb_js};
 viewer.addModel(pdbData, "pdb");
 
-// ── MMP9 body (chain A) ─────────────────────────────────────────────────────
+// ── MMP9 body (chain A) — deep blue ──────────────────────────────────────────
 viewer.setStyle({{chain:'A'}}, {{
-    cartoon: {{color:'#3b6fa0', thickness:0.4, opacity:0.90}}
+    cartoon: {{color:'#1e40af', thickness:0.4, opacity:0.90}}
 }});
 
-// ── TIMP3 body (chain B) ───────────────────────────────────────────────────
+// ── TIMP3 body (chain B) — violet ─────────────────────────────────────────
 viewer.setStyle({{chain:'B'}}, {{
-    cartoon: {{color:'#8470c4', thickness:0.4, opacity:0.90}}
+    cartoon: {{color:'#7c3aed', thickness:0.4, opacity:0.90}}
 }});
 
-// ── Zinc-binding motif HExxHxxGxxH (chain A, res 120–130) — gold ──────────
+// ── Zinc-binding motif HExxHxxGxxH (chain A, res 120–130) — amber ─────────
 viewer.setStyle({{chain:'A', resi:'120-130'}}, {{
-    cartoon: {{color:'#fbbf24', thickness:0.55, opacity:1.0}}
+    cartoon: {{color:'#b45309', thickness:0.55, opacity:1.0}}
 }});
 viewer.addStyle({{chain:'A', resi:[120,121,124,130]}}, {{
-    stick: {{color:'#fbbf24', radius:0.22, opacity:1.0}}
+    stick: {{color:'#b45309', radius:0.22, opacity:1.0}}
 }});
 
-// ── TIMP3 AB loop (chain B, res 31–36) — cyan ─────────────────────────────
+// ── TIMP3 AB loop (chain B, res 31–36) — teal ────────────────────────────
 viewer.setStyle({{chain:'B', resi:'28-39'}}, {{
-    cartoon: {{color:'#38bdf8', thickness:0.60, opacity:1.0}}
+    cartoon: {{color:'#0e7490', thickness:0.60, opacity:1.0}}
 }});
 viewer.addStyle({{chain:'B', resi:'31-36'}}, {{
-    stick: {{color:'#38bdf8', radius:0.18, opacity:1.0}}
+    stick: {{color:'#0e7490', radius:0.18, opacity:1.0}}
 }});
 
 // ── TIMP3 C loop (chain B, res 63–68) — orange ────────────────────────────
 viewer.setStyle({{chain:'B', resi:'60-71'}}, {{
-    cartoon: {{color:'#f97316', thickness:0.60, opacity:1.0}}
+    cartoon: {{color:'#c2410c', thickness:0.60, opacity:1.0}}
 }});
 viewer.addStyle({{chain:'B', resi:'63-68'}}, {{
-    stick: {{color:'#f97316', radius:0.18, opacity:1.0}}
+    stick: {{color:'#c2410c', radius:0.18, opacity:1.0}}
 }});
 
 // ── Camera: center on full complex, rotate to expose binding pocket ────────
@@ -151,39 +151,39 @@ viewer.zoom(0.90);
 // Zinc-binding motif
 viewer.addArrow({{
     start:{_js(zinc_s)}, end:{_js(zinc_cen)},
-    color:'#fbbf24', radius:0.55, radiusRatio:2.2, mid:0.82
+    color:'#b45309', radius:0.55, radiusRatio:2.2, mid:0.82
 }});
 viewer.addLabel('Zn-binding motif', {{
     position:{_js(zinc_s)},
-    backgroundColor:'rgba(0,0,0,0.78)',
-    fontColor:'#fbbf24',
-    borderThickness:1.8, borderColor:'#fbbf24',
+    backgroundColor:'rgba(255,255,255,0.90)',
+    fontColor:'#b45309',
+    borderThickness:1.8, borderColor:'#b45309',
     fontSize:15, padding:6
 }});
 
 // TIMP3 AB loop
 viewer.addArrow({{
     start:{_js(ab_s)}, end:{_js(ab_cen)},
-    color:'#38bdf8', radius:0.55, radiusRatio:2.2, mid:0.82
+    color:'#0e7490', radius:0.55, radiusRatio:2.2, mid:0.82
 }});
 viewer.addLabel('AB loop', {{
     position:{_js(ab_s)},
-    backgroundColor:'rgba(0,0,0,0.78)',
-    fontColor:'#38bdf8',
-    borderThickness:1.8, borderColor:'#38bdf8',
+    backgroundColor:'rgba(255,255,255,0.90)',
+    fontColor:'#0e7490',
+    borderThickness:1.8, borderColor:'#0e7490',
     fontSize:15, padding:6
 }});
 
 // TIMP3 C loop
 viewer.addArrow({{
     start:{_js(c_s)}, end:{_js(c_cen)},
-    color:'#f97316', radius:0.55, radiusRatio:2.2, mid:0.82
+    color:'#c2410c', radius:0.55, radiusRatio:2.2, mid:0.82
 }});
 viewer.addLabel('C loop', {{
     position:{_js(c_s)},
-    backgroundColor:'rgba(0,0,0,0.78)',
-    fontColor:'#f97316',
-    borderThickness:1.8, borderColor:'#f97316',
+    backgroundColor:'rgba(255,255,255,0.90)',
+    fontColor:'#c2410c',
+    borderThickness:1.8, borderColor:'#c2410c',
     fontSize:15, padding:6
 }});
 

@@ -54,15 +54,15 @@
                     Gavin Gallagher<sup style="font-size:0.55em; vertical-align:super; font-weight:600;">1</sup>,
                     Maryam Raeeszadeh-Sarmazdeh<sup style="font-size:0.55em; vertical-align:super; font-weight:600;">1</sup>
                 </h2>
-                <div style="font-family:'Inter',sans-serif; font-size:26px; color:#94a3b8; margin-top:6px;">
-                    <sup style="font-size:0.75em; vertical-align:super;">1</sup>University of Nevada, Reno
+                <div style="font-family:'Inter',sans-serif; font-size:26px; color:#64748b; margin-top:6px;">
+                    <sup style="font-size:0.75em; vertical-align:super;">1</sup>Chemical and Materials Engineering, University of Nevada, Reno
                 </div>
             </div>
             <div style="margin-left: 80px; flex-shrink: 0; display: flex; align-items: center; gap: 32px;">
                 <img src="../../SharedAssets/figures/UNR Logo.png" alt="UNR Logo"
-                     style="height: 140px; filter: drop-shadow(0 8px 12px rgba(0,0,0,0.5));">
+                     style="height: 140px; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.2));">
                 <div style="font-family: 'Inter', sans-serif; font-size: 48px; font-weight: 400;
-                            color: #f8fafc; line-height: 1.15; text-align: left;
+                            color: #0f172a; line-height: 1.15; text-align: left;
                             white-space: nowrap;">
                     University of Nevada, Reno
                 </div>
@@ -81,14 +81,14 @@
                     <figure class="poster-figure">
                         <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/mmp9_timp3_complex.png" alt="MMP9-TIMP3 complex"
                              style="max-height: 540px; width: auto; max-width: 100%;">
-                        <figcaption>Figure 1: MMP9–TIMP3 complex (HADDOCK docking structure). Steel blue: MMP9 catalytic domain. Lavender: TIMP3 scaffold. Gold: zinc-binding HExxHxxGxxH motif (HIS120–HIS130) — conserved active site targeted by inhibitor loops. Cyan: TIMP3 AB loop (residues 31–36). Orange: TIMP3 C loop (residues 63–68). These two reactive-site loops insert into the MMP9 active site and serve as the scaffold for loop-expansion selectivity engineering.</figcaption>
+                        <figcaption>Figure 1: MMP9–TIMP3 complex (HADDOCK docking structure). Blue: MMP9 catalytic domain. Violet: TIMP3 scaffold. Amber: zinc-binding active site motif (HExxHxxGxxH) — conserved residues targeted by TIMP3 inhibitory loops. Teal: TIMP3 AB loop (residues 31–36) — primary mutagenesis site. Orange: TIMP3 C loop (residues 63–68) — primary mutagenesis site. The AB and C loops insert into the MMP9 active site cleft and serve as the primary scaffold for selectivity engineering.</figcaption>
                     </figure>
                 </section>
 
                 <section class="poster-section glass-panel" style="flex: 1.3;">
                     <h3>Methods: AI-Driven 6-Stage Design Pipeline</h3>
                     <p>The workflow moves from generative structural AI through experimental validation in six tightly coupled stages. (1) A diffusion model generates novel 3D loop backbone geometries on the TIMP3 scaffold across the AB, C, and EF binding loops (6–24 aa expansions) [5], run on an A30 GPU (~20 hr/run). (2) A graph neural network sequences each backbone—sampling 1,000 diverse amino acid sequences per loop/target combination at low temperature (T=0.2) to preserve backbone compatibility while maximizing sequence diversity [6]. The scaffold residues are held fixed; only loop positions are designed. (3) The top 10 sequences per loop are co-folded with each metalloproteinase target using the AlphaFold3 Server; interface confidence metrics (ipTM, pLDDT, Interface PAE) are extracted per complex [4]. (4) A self-normalized T-score filter identifies variants that outperform their own cross-target mean—explicitly selecting for target-preferential binders rather than globally high-confidence structures. Candidates require T>2.0 on ≥2 independent metrics and ipTM ≥ 0.82. (5) All 13 final construct DNA sequences are screened for restriction enzyme recognition sites (BsrGI, BamHI, BsaI) that would interfere with Golden Gate cloning; all 13 passed. (6) Constructs are cloned into a yeast surface display vector, transformed into EBY100 yeast, and screened by flow cytometry. The primary readout is the Positive Median Ratio: the ratio of the APC-A (binding) median to the FITC-A (expression) median within the FITC-positive gate. Dividing by FITC normalizes for surface-display level variation between individual yeast cells while keeping MMP9 and MMP2 values on a shared scale—a higher ratio for MMP9 than MMP2 directly indicates target preference. TIMP3-WT reference lines are drawn at the actual TIMP3-WT Pos Med Ratio per target. Error bars represent 95% confidence intervals (t-distribution). Failed trials (positive control binding efficiency below threshold) are excluded before statistical analysis.</p>
-                    <p style="margin-top: 10px; font-size: 22px; color: rgba(56,189,248,0.8); font-style: italic;">Six-stage workflow illustrated in Figure 2 (center column).</p>
+                    <p style="margin-top: 10px; font-size: 22px; color: rgba(2,132,199,0.85); font-style: italic;">Six-stage workflow illustrated in Figure 2 (center column).</p>
                 </section>
 
             </div>
@@ -112,12 +112,12 @@
 
                     <div class="result-subsection">
                         <div class="result-subsection-title">Computational Stage Outcomes</div>
-                        <p style="margin-bottom: 10px;">Computational Stage Outcomes: The diffusion backbone generator produced structurally diverse loop geometries in the 6–15 residue range not achievable by conventional mutagenesis, including extended beta-hairpin and helix-turn motifs [5]. Following sequence design and structural co-folding, the self-normalized T-score filter reduced the candidate pool from >1,000 generated sequences to 13 final constructs—a >98% reduction—while enriching for the experimentally confirmed MMP9 binders. Top-ranked MMP9 candidates (C-loop and AB-loop variants) achieved interface confidence scores placing them in the top decile of all evaluated structures, consistent with their subsequent experimental validation.</p>
+                        <p style="margin-bottom: 10px;">Computational Stage Outcomes: The diffusion backbone generator produced structurally diverse loop geometries in the 6–15 residue range not achievable by conventional mutagenesis, including extended beta-hairpin and helix-turn motifs [5]. Following sequence design and structural co-folding, the self-normalized T-score filter reduced the candidate pool from >1,000 generated sequences to 13 final constructs—a >98% reduction—while enriching for constructs with MMP9-preferential binding signals. Top-ranked MMP9 candidates (C-loop and AB-loop variants) achieved interface confidence scores placing them in the top decile of all evaluated structures.</p>
                     </div>
 
                     <div class="result-subsection">
                         <div class="result-subsection-title">Experimental Validation</div>
-                        <p>Experimental Validation (MMP9 vs MMP2): Two-group Tukey HSD on the Median Binding Ratio (APC/FITC, FITC+ gate) confirmed statistically significant MMP9 preference over MMP2 for three of four MMP9-targeted constructs (75% PPV). C 12 (loop: ASGPITVNGETIW, C-loop) achieved the highest MMP9 ratio (0.289 vs 0.087 for MMP2), a 3.3× preference (p=0.009). C 15 (2.5× preference; p=0.004) and AB 6 (loop: TDTFPTANWTGEV, 2.7× preference; p<0.001) showed similarly amplified selectivity. AB 1 showed directionally correct binding (0.180 vs 0.080) but did not reach significance (p=0.277). Variants predicted as Low binders (C 13, AB 5) showed non-significant results (p>0.05), confirming that significant results reflect genuine target discrimination.</p>
+                        <p>Experimental Validation (MMP9 vs MMP2): Two-group Tukey HSD on the Median Binding Ratio (APC/FITC, FITC+ gate) indicated statistically significant MMP9 preference over MMP2 for three of four MMP9-targeted constructs in preliminary trials. C 12 achieved the highest MMP9 ratio (0.289 vs 0.087 for MMP2), approximately 3× over MMP2 (p=0.009). C 15 (~2.5× preference; p=0.004) and AB 6 (~2.7× preference; p<0.001) showed similarly amplified selectivity. AB 1 showed directionally correct binding (0.180 vs 0.080) but did not reach significance (p=0.277). Variants predicted as Low binders (C 13, AB 5) showed non-significant results (p>0.05), consistent with genuine target discrimination potential.</p>
                     </div>
 
                     <!-- Specificity Table -->
@@ -351,14 +351,6 @@
 
                     <!-- Result Figures -->
                     
-                    <figure class="poster-figure" style="margin-top: 18px;">
-                        <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/fig_bind_med_expr_pos.png" alt="Result figure"
-                             style="width: 100%; max-height: 780px; object-fit: contain;">
-                        
-                        <figcaption>Figure 3: MMP9 vs MMP2 — Median Binding Ratio (APC-A / FITC-A, expression-positive gate). For each trial, the ratio of the APC-A (binding) median to the FITC-A (expression) median is computed within the FITC+ gate, normalizing for surface-display level variation between cells. Mean ratio ± 95% CI shown. Brackets: Tukey-HSD significant pairs (***p<0.001, **p<0.01, *p<0.05). Dashed lines = TIMP3-WT ratio per target. Construct labels colored by design group (green = ANOVA-confirmed MMP9-selective, amber = ADAM17-targeted, blue = WT reference).</figcaption>
-                        
-                    </figure>
-                    
                 </section>
             </div>
 
@@ -367,13 +359,13 @@
 
                 <section class="poster-section glass-panel" style="flex: 0.80;">
                     <h3>Conclusions</h3>
-                    <p class="multiline">Pipeline Validation — 3 of 4: Three of four computationally predicted MMP9-selective constructs were experimentally confirmed (75% PPV). AB 1 showed directionally correct binding (MMP9 > MMP2) but high trial-to-trial variability (σ = 43%) prevented statistical confirmation. Every 'Low' control showed non-significant ANOVA—0% false positives. This bidirectional concordance validates the T-score multi-metric filter as a reliable predictor of experimental selectivity, not just overall binding strength. A 75% success rate among specific predictions is strong given the vast landscape of possible protein sequences.
+                    <p class="multiline">Preliminary Validation — 3 of 4: Three of four computationally predicted MMP9-selective constructs showed statistically significant MMP9 preference over MMP2 in preliminary flow cytometry data (75% hit rate). AB 1 showed directionally correct binding (MMP9 > MMP2) but high trial-to-trial variability (σ = 43%) prevented statistical confirmation. Every 'Low' control showed non-significant results—0% false positives. These results suggest the T-score multi-metric filter may serve as a useful predictor of experimental target preference, not just overall binding strength. A 75% hit rate in these preliminary results is encouraging given the vast landscape of possible protein sequences.
 
-Scaffold Plasticity: Loop insertions of 6–15 residues into the TIMP3 AB and C loops were structurally tolerated (high interface confidence in co-folding) and biologically functional on the yeast surface. Wild-type TIMP3 showed directional MMP9 preference (0.211 vs 0.107; n.s.), and all three engineered MMP9-selective variants substantially amplified this trend to statistical significance.
+Scaffold Plasticity: Loop insertions of 6–15 residues into the TIMP3 AB and C loops were structurally tolerated (high interface confidence in co-folding) and biologically functional on the yeast surface. Wild-type TIMP3 showed directional MMP9 preference (0.211 vs 0.107; n.s.), and all three engineered MMP9-selective variants amplified this trend to statistical significance in preliminary data.
 
-T-Score vs Z-Score: By normalizing each variant against its own cross-target performance distribution rather than the population, the T-score framework explicitly isolates target-preferential binders. This is the critical distinction: a globally excellent binder (high Z-score) is not necessarily a selective one. The T-score filter directly optimizes for the clinically relevant property.
+T-Score vs Z-Score: By normalizing each variant against its own cross-target performance distribution rather than the population, the T-score framework explicitly selects for target-preferential binders. This is the critical distinction: a globally excellent binder (high Z-score) is not necessarily a selective one. The T-score filter directly targets the clinically relevant property of selectivity.
 
-Pipeline Generalizability: The workflow is target-agnostic. Any protein-protein interaction with available structural data can be addressed using an identical computational pipeline. MMP9 vs MMP2 selectivity serves as the validation case for a generalizable AI-driven precision protein engineering platform.
+Pipeline Generalizability: The workflow is target-agnostic by design. Any protein-protein interaction with available structural data may be addressable using an identical computational pipeline. MMP9 vs MMP2 selectivity serves as the validation case for a generalizable AI-driven precision protein engineering approach, pending further experimental confirmation.
 </p>
                 </section>
 
@@ -401,8 +393,17 @@ Personalized Medicine & CAR-T Cell Analogy: Chimeric Antigen Receptor T-cell (CA
 
                 <section class="poster-section glass-panel acknowledgements">
                     <h3>Acknowledgements</h3>
-                    <p class="multiline">This work was supported by the University of Nevada, Reno College of Engineering and the Raeeszadeh-Sarmazdeh Laboratory. The authors thank members of the Raeeszadeh-Sarmazdeh Laboratory for technical support. Additionally, we thank the University of Nevada, Reno Graduate Student Association for thier financial support towards travel to this conference.
+                    <div style="display: flex; gap: 20px; align-items: flex-start; margin-top: 6px;">
+                        <div style="flex: 0 0 auto; width: 260px; height: 195px;
+                                    background: rgba(0,0,0,0.06); border-radius: 12px;
+                                    border: 2px dashed rgba(0,0,0,0.18);
+                                    display: flex; align-items: center; justify-content: center;
+                                    text-align: center; color: #94a3b8; font-size: 20px; font-style: italic;">
+                            Lab Group Photo
+                        </div>
+                        <p class="multiline" style="flex: 1;">This work was supported by the NSF CAREER Award and NIH R35 MIRA Award to Dr. Maryam Raeeszadeh-Sarmazdeh (PI). R.G. was supported by the Berner Scholarship/Fellowship and the UNR Graduate Student Association Travel Award. The authors thank all members of the Raeeszadeh-Sarmazdeh Laboratory for their technical support and collaboration.
 </p>
+                    </div>
                 </section>
 
                 <section class="poster-section glass-panel references">
