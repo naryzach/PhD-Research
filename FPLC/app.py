@@ -678,7 +678,7 @@ fig = build_figure(
     theme=theme,
 )
 
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width='stretch')
 
 # ── Export plot ───────────────────────────────────────────────────────────────
 st.subheader("Export Plot")
@@ -710,7 +710,7 @@ st.divider()
 st.subheader("Fraction Summary")
 summary_df = fraction_summary(parsed)
 if not summary_df.empty:
-    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+    st.dataframe(summary_df, width='stretch', hide_index=True)
     csv_summary = summary_df.to_csv(index=False).encode()
     st.download_button("Download summary CSV", csv_summary, file_name=f"{export_name}_fraction_summary.csv", mime="text/csv")
 else:
@@ -730,7 +730,7 @@ else:
         pm_cols[2].metric("Peaks detected", table_meta.get("n_peaks", "—"))
         pm_cols[3].metric("Total UV area (mAU·ml)", f"{table_meta.get('total_area', 0):.1f}" if table_meta.get("total_area") else "—")
 
-    st.dataframe(peaks_df, use_container_width=True, hide_index=True)
+    st.dataframe(peaks_df, width='stretch', hide_index=True)
     csv_peaks = peaks_df.to_csv(index=False).encode()
     st.download_button(
         "Download peak table CSV",
@@ -764,7 +764,7 @@ if st.button("Export data CSV"):
             file_name=f"{export_name}_data.csv",
             mime="text/csv",
         )
-        st.dataframe(df_export.head(50), use_container_width=True, hide_index=True)
+        st.dataframe(df_export.head(50), width='stretch', hide_index=True)
         if len(df_export) > 50:
             st.caption(f"Showing first 50 of {len(df_export)} rows.")
 
@@ -822,7 +822,7 @@ if qv:
         cond_range=None,
         theme=theme,
     )
-    st.plotly_chart(fig_qv, use_container_width=True)
+    st.plotly_chart(fig_qv, width='stretch')
 
     qv_img_col, _ = st.columns([1, 3])
     with qv_img_col:
