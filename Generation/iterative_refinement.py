@@ -78,17 +78,19 @@ torch.set_float32_matmul_precision("medium")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 _HERE     = Path(__file__).parent.resolve()
-DATA_DIR  = _HERE / ".." / "Data" / "TIMP_Complexes" / "HADDOCK_PDB"
+DATA_DIR  = _HERE / ".." / "Data" / "TIMP_Complexes" / "HADDOCK_Outputs"
 OUT_BASE  = _HERE / ".." / "Local" / "iterative_refinement"
 CKPT_DIR  = _HERE / ".." / "Tools" / "foundry_checkpoints"
 
 # ── Target definitions ────────────────────────────────────────────────────────
 # binder_chain: chain being redesigned (TIMP3); target_chain: fixed protease chain.
 TARGETS = {
-    "MMP2":   {"pdb": "TIMP3_vs_MMP2_HADDOCK_Xray.pdb",   "binder_chain": "A", "target_chain": "B", "scaffold_len": 121},
-    "MMP9":   {"pdb": "TIMP3_vs_MMP9_HADDOCK_Xray.pdb",   "binder_chain": "A", "target_chain": "B", "scaffold_len": 121},
-    "ADAM10": {"pdb": "TIMP3_vs_ADAM10_HADDOCK_Xray.pdb",  "binder_chain": "A", "target_chain": "B", "scaffold_len": 121},
-    "ADAM17": {"pdb": "TIMP3_vs_ADAM17_HADDOCK_Xray.pdb",  "binder_chain": "A", "target_chain": "B", "scaffold_len": 121},
+    "MMP2":   {"pdb": "MMP2_TIMP3_HADDOCK.pdb",   "binder_chain": "B", "target_chain": "A", "scaffold_len": 121},
+    "MMP9":   {"pdb": "MMP9_TIMP3_HADDOCK.pdb",   "binder_chain": "B", "target_chain": "A", "scaffold_len": 121},
+    "MMP3":   {"pdb": "MMP3_TIMP3_HADDOCK.pdb",   "binder_chain": "B", "target_chain": "A", "scaffold_len": 121},
+    "MMP10":  {"pdb": "MMP10_TIMP3_HADDOCK.pdb",  "binder_chain": "B", "target_chain": "A", "scaffold_len": 121},
+    "ADAM10": {"pdb": "ADAM10_TIMP3_HADDOCK.pdb",  "binder_chain": "B", "target_chain": "A", "scaffold_len": 121},
+    "ADAM17": {"pdb": "ADAM17_TIMP3_HADDOCK.pdb",  "binder_chain": "B", "target_chain": "A", "scaffold_len": 121},
 }
 
 # ── Loop definitions ──────────────────────────────────────────────────────────
@@ -103,14 +105,17 @@ LOOP_CONFIGS = {
 }
 
 # ── Hyperparameters ───────────────────────────────────────────────────────────
-BACKBONES_PER_TARGET   = 10    # RFd3 designs per target per iteration
+BACKBONES_PER_TARGET   = 20    # RFd3 designs per target per iteration
 INIT_TEMPERATURE       = 0.50  # LMPNN sampling temperature (exploration)
 MIN_TEMPERATURE        = 0.10  # LMPNN temperature floor (exploitation)
 TEMP_DECAY             = 0.85  # Temperature multiplier applied each iteration
 HOF_SIZE_PER_TARGET    = 75    # Max Hall of Fame entries per target
 ADAPTIVE_BIAS_START    = 3     # First iteration to apply adaptive loop-length bias
 ADAPTIVE_BIAS_PCT      = 25    # Use top-N% HOF lengths to define new contig range
-AF3_EXPORT_EVERY_N     = 5     # Export AF3 JSON every N full iterations
+# AF3_EXPORT_EVERY_N: at 20 backbones × 2 targets, each iteration is roughly
+# 3–6 h depending on GPU (A100 vs V100).  N=4 targets ~12–24 h between submissions.
+# Adjust down to 3 on a V100, up to 5–6 on an H100.
+AF3_EXPORT_EVERY_N     = 4     # Export AF3 JSON every N full iterations
 AF3_TOP_N              = 20    # Designs to include per AF3 submission
 IPTM_PROMISING         = 0.55  # ipTM threshold to flag a design as "promising"
 RMSD_CLIP              = 5.0   # Å beyond which RMSD contribution scores 0
@@ -804,6 +809,155 @@ class IterativeRefiner:
         self._save_state()
         logger.info("AF3 import complete.")
 
+    def import_af3_zip(self, zip_path: str) -> None:
+        """
+        Parse a batch AF3 Server ZIP (one subdirectory per job) and update the HOF.
+
+        Expected layout inside the ZIP:
+          <af3_job_name>/
+            <af3_job_name>_job_request.json          original name + sequences
+            <af3_job_name>_summary_confidences_0.json  top-ranked model metrics
+            <af3_job_name>_full_data_0.json            PAE matrix, per-atom pLDDT
+
+        AF3 lowercases and optionally prepends "fold_" to the submitted job name.
+        The original name (e.g. "refine_it4_MMP9_01") is recovered from job_request.json.
+        Designs are matched back to HOF entries by binder sequence identity.
+        """
+        import zipfile
+
+        with zipfile.ZipFile(zip_path) as zf:
+            all_names = set(zf.namelist())
+            job_requests = sorted(n for n in all_names if n.endswith("_job_request.json"))
+
+            if not job_requests:
+                logger.error(f"No *_job_request.json found in {zip_path}")
+                return
+
+            logger.info(f"Found {len(job_requests)} AF3 jobs in {zip_path}")
+            results = []
+
+            for jrf in job_requests:
+                try:
+                    raw = json.loads(zf.read(jrf))
+                    job_data = raw[0] if isinstance(raw, list) else raw
+
+                    job_name = job_data.get("name", "")
+                    seqs = job_data.get("sequences", [])
+                    if len(seqs) < 2:
+                        logger.warning(f"Skipping {jrf}: fewer than 2 sequences")
+                        continue
+                    binder_seq = seqs[0]["proteinChain"]["sequence"]
+
+                    # Recover target name from the job name pattern refine_it{N}_{TARGET}_{NN}
+                    m = re.search(r"(?:fold_)?refine_it\d+_([A-Za-z0-9]+)_\d{2}$", job_name, re.I)
+                    target_name = m.group(1).upper() if m else None
+
+                    # Fallback: find target by sequence match across all active HOFs
+                    if target_name not in self.active_targets:
+                        target_name = next(
+                            (t for t in self.active_targets
+                             if any(e.get("full_seq") == binder_seq
+                                    for e in self.state["hof"].get(t, []))),
+                            None,
+                        )
+
+                    if not target_name:
+                        logger.warning(f"Cannot determine target for job '{job_name}'; skipping.")
+                        continue
+
+                    # Sibling files share the same path prefix
+                    prefix = jrf[: -len("_job_request.json")]
+
+                    sc_name = prefix + "_summary_confidences_0.json"
+                    if sc_name not in all_names:
+                        logger.warning(f"Missing summary_confidences for {job_name}")
+                        continue
+                    sc    = json.loads(zf.read(sc_name))
+                    iptm  = float(sc.get("iptm", 0.0))
+                    ptm   = float(sc.get("ptm",  0.0))
+                    has_clash = float(sc.get("has_clash", 0.0))
+
+                    plddt     = 0.0
+                    iface_pae = float("nan")
+
+                    fd_name = prefix + "_full_data_0.json"
+                    if fd_name in all_names:
+                        fd = json.loads(zf.read(fd_name))
+
+                        # Binder pLDDT: chain A = first submitted chain = binder
+                        atom_plddts = np.array(fd.get("atom_plddts", []))
+                        atom_chains = fd.get("atom_chain_ids", [])
+                        if atom_plddts.size and atom_chains:
+                            a_mask = np.array([c == "A" for c in atom_chains])
+                            if a_mask.any():
+                                plddt = float(atom_plddts[a_mask].mean())
+
+                        # Interface PAE: average of both cross-chain PAE blocks
+                        raw_pae      = fd.get("pae")
+                        token_chains = fd.get("token_chain_ids", [])
+                        if raw_pae and token_chains:
+                            pae_mat = np.array(raw_pae)
+                            a_idx   = np.array([i for i, c in enumerate(token_chains) if c == "A"])
+                            b_idx   = np.array([i for i, c in enumerate(token_chains) if c == "B"])
+                            if a_idx.size and b_idx.size:
+                                iface_pae = float(
+                                    (pae_mat[np.ix_(a_idx, b_idx)].mean()
+                                     + pae_mat[np.ix_(b_idx, a_idx)].mean()) / 2
+                                )
+
+                    # Match to HOF entry by sequence; fall back to job name as design_id
+                    design_id = job_name
+                    for e in self.state["hof"].get(target_name, []):
+                        if e.get("full_seq") == binder_seq:
+                            design_id = e["design_id"]
+                            break
+
+                    comp  = calc_composite(iptm, plddt, ptm, float("nan"), iface_pae)
+                    loops = extract_loops(binder_seq, self.selected_loops)
+
+                    results.append({
+                        "design_id":       design_id,
+                        "target_name":     target_name,
+                        "full_seq":        binder_seq,
+                        "iptm":            iptm,
+                        "ptm":             ptm,
+                        "plddt":           plddt,
+                        "interface_pae":   iface_pae,
+                        "rmsd_to_rfd3":    float("nan"),
+                        "composite_score": comp,
+                        "has_clash":       has_clash,
+                        "source":          "AF3",
+                        **loops,
+                    })
+                    logger.info(
+                        f"  {job_name} | {target_name} | "
+                        f"ipTM={iptm:.3f}  pLDDT={plddt:.1f}  iface_PAE={iface_pae:.2f}"
+                        + ("  [CLASH]" if has_clash > 0.5 else "")
+                    )
+
+                except Exception as exc:
+                    logger.error(f"Error parsing {jrf}: {exc}", exc_info=True)
+
+        logger.info(f"Parsed {len(results)} AF3 results from ZIP.")
+
+        # Merge into HOF: replace existing entry if design_id matches, else append
+        for res in results:
+            tname = res["target_name"]
+            if tname not in self.state["hof"]:
+                self.state["hof"][tname] = []
+            existing_ids = {e["design_id"] for e in self.state["hof"][tname]}
+            if res["design_id"] in existing_ids:
+                self.state["hof"][tname] = [
+                    res if e["design_id"] == res["design_id"] else e
+                    for e in self.state["hof"][tname]
+                ]
+            else:
+                self.state["hof"][tname].append(res)
+
+        self.update_hof([])
+        self._save_state()
+        logger.info("AF3 ZIP import complete.")
+
     # ── Core iteration ────────────────────────────────────────────────────────
 
     def run_iteration(self) -> None:
@@ -904,7 +1058,7 @@ def main():
     parser = argparse.ArgumentParser(description="Iterative TIMP3 binder design.")
     parser.add_argument(
         "--targets", nargs="+", default=["MMP2", "MMP9", "ADAM10", "ADAM17"],
-        choices=list(TARGETS.keys()),
+        choices=list(TARGETS.keys()),  # also available: MMP3, MMP10
         help="Protease targets to include.",
     )
     parser.add_argument(
@@ -918,7 +1072,12 @@ def main():
     )
     parser.add_argument(
         "--import-af3", type=str, default=None,
-        help="Path to an AF3 results JSON to import before continuing.",
+        help=(
+            "Path to AF3 results to import before continuing.  "
+            "Accepts either a batch ZIP downloaded directly from the AF3 Server "
+            "(one subdirectory per job) or a hand-crafted JSON list of dicts with keys: "
+            "design_id, iptm, plddt, ptm, interface_pae, full_seq, target_name."
+        ),
     )
     args = parser.parse_args()
 
@@ -928,7 +1087,10 @@ def main():
     )
 
     if args.import_af3:
-        refiner.import_af3_results(args.import_af3)
+        if args.import_af3.lower().endswith(".zip"):
+            refiner.import_af3_zip(args.import_af3)
+        else:
+            refiner.import_af3_results(args.import_af3)
 
     refiner.main_loop(max_iterations=args.max_iterations)
 
