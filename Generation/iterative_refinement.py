@@ -83,7 +83,10 @@ OUT_BASE  = _HERE / ".." / "Local" / "iterative_refinement"
 CKPT_DIR  = _HERE / ".." / "Tools" / "foundry_checkpoints"
 
 # ── Target definitions ────────────────────────────────────────────────────────
-# binder_chain: chain being redesigned (TIMP3); target_chain: fixed protease chain.
+# binder_chain / target_chain refer to chain IDs in the SOURCE PDB only.
+# They are used to read target_seqs and to construct the RFd3 contig string.
+# After RFd3 runs, all output structures (RFd3, LMPNN, RF3) follow a fixed
+# convention regardless of input — see DESIGN_BINDER_CHAIN below.
 TARGETS = {
     "MMP2":   {"pdb": "MMP2_TIMP3_HADDOCK.pdb",   "binder_chain": "B", "target_chain": "A", "scaffold_len": 121},
     "MMP9":   {"pdb": "MMP9_TIMP3_HADDOCK.pdb",   "binder_chain": "B", "target_chain": "A", "scaffold_len": 121},
@@ -92,6 +95,18 @@ TARGETS = {
     "ADAM10": {"pdb": "ADAM10_TIMP3_HADDOCK.pdb",  "binder_chain": "B", "target_chain": "A", "scaffold_len": 121},
     "ADAM17": {"pdb": "ADAM17_TIMP3_HADDOCK.pdb",  "binder_chain": "B", "target_chain": "A", "scaffold_len": 121},
 }
+
+# RFd3 emits chains in contig order: the first contig segment becomes chain A,
+# anything after a "/0" chain break becomes B, etc.  Since our contig always
+# puts the binder template first and the fixed target second, the convention
+# downstream is always:
+#   chain A = designed binder (TIMP3-derived)
+#   chain B = fixed target (protease)
+# These IDs are used everywhere we read from RFd3 / LMPNN / RF3 output arrays,
+# and as the component IDs we hand to RF3.  They are independent of the source
+# PDB's chain assignments above.
+DESIGN_BINDER_CHAIN = "A"
+DESIGN_TARGET_CHAIN = "B"
 
 # ── Loop definitions ──────────────────────────────────────────────────────────
 # pos: 1-indexed last fixed residue before the loop in the native scaffold.
@@ -474,10 +489,12 @@ class IterativeRefiner:
         Design sequences for each backbone using LigandMPNN.
         Returns list of dicts with keys: design_id, array, rfd3_array, full_seq,
         target_seq, seq_recovery, loop_data.
+
+        Reads chains by the RFd3 OUTPUT convention (A = designed binder,
+        B = fixed target), NOT the source-PDB chain IDs in TARGETS.
         """
-        tcfg   = TARGETS[target_name]
-        bc     = tcfg["binder_chain"]
-        fc     = tcfg["target_chain"]
+        bc     = DESIGN_BINDER_CHAIN
+        fc     = DESIGN_TARGET_CHAIN
         out_dir.mkdir(parents=True, exist_ok=True)
 
         engine  = MPNNInferenceEngine(
@@ -544,9 +561,10 @@ class IterativeRefiner:
         if not candidates:
             return []
 
-        tcfg = TARGETS[target_name]
-        bc   = tcfg["binder_chain"]
-        fc   = tcfg["target_chain"]
+        # Use the RFd3 OUTPUT chain convention (binder=A, target=B); the source-PDB
+        # chain IDs in TARGETS apply only to reading target_seqs and building contigs.
+        bc   = DESIGN_BINDER_CHAIN
+        fc   = DESIGN_TARGET_CHAIN
         out_dir.mkdir(parents=True, exist_ok=True)
 
         target_seq = self.target_seqs.get(target_name, "")
