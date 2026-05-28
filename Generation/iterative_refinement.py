@@ -1,28 +1,37 @@
 """
 iterative_refinement.py
 
-Iterative binder design: RFd3 → LigandMPNN → RF3 (complex) with temperature annealing.
+Iterative binder design with a four-stage in-silico funnel before any AF3 call:
 
-Generates and refines TIMP3-scaffold binders for MMP2, MMP9, ADAM10, and ADAM17 by
-redesigning loop regions (AB, C, EF). Each iteration scores all designs against the
-target using RF3 complex-mode prediction to obtain ipTM, pLDDT, interface PAE, and
-backbone RMSD. The best performers are collected into a per-target Hall of Fame; loop
-length ranges for subsequent iterations are narrowed toward successful lengths (adaptive
-contig bias). Temperature is annealed from 0.5 → 0.1 to shift from exploration to
-exploitation. Every AF3_EXPORT_EVERY_N iterations the top AF3_TOP_N designs are written
-to an AF3 Server JSON for manual submission; AF3 results can be imported to update the
-Hall of Fame with higher-quality metrics.
+  RFd3 (backbone) → LigandMPNN (sequence) → RF3 with target template (sanity) →
+  Boltz-2 (local AF3-class ranker) → AF3 Server (gold-standard validation, capped at 30/day)
+
+TIMP3-scaffold binders for MMP2, MMP9, MMP3, MMP10, ADAM10, ADAM17 are produced by
+redesigning loops AB / C / EF (GH optional).  Temperature anneals 0.5 → 0.1 to shift
+LigandMPNN from exploration to exploitation; loop-length ranges are adaptively narrowed
+toward what the HOF actually used (kicks in at iteration 3).
+
+Scoring is source-aware (calc_composite):
+  AF3-validated   →  full-trust composite using all AF3 metrics
+  Boltz-scored    →  Boltz ipTM/pTM/pLDDT/PAE + binding-affinity head
+  RF3-only        →  geometric features only (n_contacts, iface PAE, RMSD);
+                     RF3 ipTM/pTM/pLDDT are excluded because they are anti-correlated
+                     with AF3 ipTM for de novo binders (empirically calibrated).
+                     This branch is capped at RF3_COMPOSITE_CEILING so any Boltz or
+                     AF3 score automatically out-ranks an unvalidated RF3 entry.
 
 Output layout:
   Local/iterative_refinement/
     refinement_state.json             persistent state (HOF, temperature, iteration)
+    target_templates/                 target-only CIFs used as RF3 templates
     it_N/
       rfd3/                           RFd3 backbone CIFs
       lmpnn/                          LigandMPNN sequence CIFs
-      rf3/                            RF3 complex prediction CIFs + metrics JSONs
+      rf3/                            RF3 prediction CIFs + metrics JSONs
+      boltz/                          Boltz-2 prediction outputs (per design)
       round_summary.csv               all scored designs this iteration
-    hof_structures/<target>/          RF3 CIFs for HOF designs (for seeding)
-    af3_submission_itN.json           AF3 Server input batch
+    hof_structures/<target>/          best RF3 CIFs per target (for seeding)
+    af3_submission_itN.json           AF3 Server input batch (top AF3_TOP_N)
     hof_summary.csv                   all-time best per target (updated each round)
 """
 
@@ -127,23 +136,65 @@ TEMP_DECAY             = 0.85  # Temperature multiplier applied each iteration
 HOF_SIZE_PER_TARGET    = 75    # Max Hall of Fame entries per target
 ADAPTIVE_BIAS_START    = 3     # First iteration to apply adaptive loop-length bias
 ADAPTIVE_BIAS_PCT      = 25    # Use top-N% HOF lengths to define new contig range
-# AF3_EXPORT_EVERY_N: at 20 backbones × 2 targets, each iteration is roughly
-# 3–6 h depending on GPU (A100 vs V100).  N=4 targets ~12–24 h between submissions.
-# Adjust down to 3 on a V100, up to 5–6 on an H100.
-AF3_EXPORT_EVERY_N     = 4     # Export AF3 JSON every N full iterations
-AF3_TOP_N              = 20    # Designs to include per AF3 submission
+# AF3_EXPORT_EVERY_N: with RF3 + Boltz-2 both running, each iteration is roughly
+# 6–10 h on an A100.  N=2 targets ~12–20 h between submissions, matching the
+# 30 AF3 jobs/day Google-server cap.
+AF3_EXPORT_EVERY_N     = 2     # Export AF3 JSON every N full iterations
+AF3_TOP_N              = 30    # Designs to include per AF3 submission (max per day)
 IPTM_PROMISING         = 0.55  # ipTM threshold to flag a design as "promising"
 RMSD_CLIP              = 5.0   # Å beyond which RMSD contribution scores 0
 PAE_MAX                = 30.0  # Å² beyond which interface PAE contribution scores 0
+N_CONTACTS_NORM        = 60.0  # n_contacts above this saturates to 1.0
+AFFINITY_FLOOR         = -12.0 # Boltz-2 binding affinity floor (kcal/mol) for normalization
+AFFINITY_CEIL          = 0.0   # Affinity above 0 maps to 0 (non-binder)
 
-# Composite score weights (must sum to 1.0)
-COMPOSITE_WEIGHTS = {
-    "iptm":  0.40,  # Interface quality — primary binding predictor
-    "plddt": 0.20,  # Binder fold confidence
-    "ptm":   0.15,  # Global structure confidence
-    "rmsd":  0.15,  # Backbone fidelity (lower RMSD → higher score)
-    "pae":   0.10,  # Interface PAE (lower → higher score)
+# Composite score weights — source-aware.  Higher-trust sources contribute more
+# and use a richer formula; lower-trust sources use geometric features only.
+#
+# Why split: in our calibration against AF3 (n=18), RF3 single-sequence ipTM/pTM
+# were anti-correlated with AF3 ipTM (r = -0.07 / -0.51).  Including those metrics
+# in a unified ranker introduces noise.  Boltz-2 and AF3, which use MSA/templates,
+# should track each other well — we trust them more.
+#
+# Each formula returns a value in [0, 1].  The fallback RF3 composite is capped
+# at RF3_COMPOSITE_CEILING so any AF3- or Boltz-scored entry naturally ranks
+# above an RF3-only entry of similar geometric quality.
+COMPOSITE_AF3 = {        # AF3-validated entries: full trust
+    "iptm":  0.45,
+    "plddt": 0.25,
+    "ptm":   0.15,
+    "rmsd":  0.05,
+    "pae":   0.10,
 }
+COMPOSITE_BOLTZ = {      # Boltz-2 scored: AF3-class metrics, no affinity head
+    "iptm":   0.45,      # Boltz-2's affinity head only runs for protein-ligand
+    "plddt":  0.25,      # complexes (verified Boltz 2.2.1 — rejects protein-protein
+    "ptm":    0.15,      # in `properties.affinity`), so we rely on the structure-
+    "pae":    0.15,      # confidence metrics, which mirror AF3-class scoring.
+}
+COMPOSITE_RF3_GEOM = {   # RF3-only fallback: geometric features only (no ipTM/pTM/pLDDT)
+    "n_contacts": 0.40,  # interface size
+    "pae":        0.30,  # weak +signal in our calibration
+    "rmsd":       0.30,  # backbone fidelity to RFd3 design
+}
+RF3_COMPOSITE_CEILING = 0.50  # cap RF3-only composite so AF3/Boltz dominate HOF
+
+# ── Boltz-2 configuration ────────────────────────────────────────────────────
+# Boltz-2 is an open-source AF3-class model used here as the pre-AF3 local ranker.
+# Disk footprint ≈ 3 GB weights + ~2 GB ColabFold MSA cache (per-user, in ~/.boltz/).
+#
+# DEPLOYMENT NOTE: Boltz pins numpy<2.0 / cublas<12.5 / older lightning.  When
+# installed into a foundry env that previously had newer versions, those get
+# downgraded — fine on V100 (DISABLE_CUEQUIVARIANCE is auto-set there), but
+# breaks RF3 on A100/H100 which requires cuEquivariance.  If you move this job
+# to A100/H100 hardware, install Boltz in a separate conda env and set
+# BOLTZ_EXECUTABLE to point at it:
+#     export BOLTZ_EXECUTABLE=/x/capa/<user>/miniconda3/envs/boltz/bin/boltz
+BOLTZ_ENABLE            = True
+BOLTZ_EXECUTABLE        = os.environ.get("BOLTZ_EXECUTABLE", "boltz")
+BOLTZ_USE_MSA_SERVER    = True   # use ColabFold's remote MMseqs2 API (no local DB)
+BOLTZ_DIFFUSION_SAMPLES = 1      # samples per design (1 is fastest, good enough for ranking)
+BOLTZ_TIMEOUT_S         = 1200   # 20 min hard timeout per design
 
 
 # ── Utility functions ─────────────────────────────────────────────────────────
@@ -264,19 +315,195 @@ def count_interface_contacts(atom_array, chain_a: str = "A", chain_b: str = "B",
     return int(len(np.unique(arr_a.res_id[contact_mask])))
 
 
-def calc_composite(iptm: float, plddt: float, ptm: float,
-                   rmsd_val: float, iface_pae: float) -> float:
-    """Weighted composite score ∈ [0, 1]. Higher is better."""
-    w = COMPOSITE_WEIGHTS
-    rmsd_s = max(0.0, 1.0 - rmsd_val / RMSD_CLIP)
-    pae_s  = max(0.0, 1.0 - iface_pae / PAE_MAX) if not np.isnan(iface_pae) else 0.0
-    return (
-        w["iptm"]  * float(iptm)
-        + w["plddt"] * (float(plddt) / 100.0)
-        + w["ptm"]   * float(ptm)
-        + w["rmsd"]  * rmsd_s
-        + w["pae"]   * pae_s
+def _safe(x, default=0.0):
+    """Coerce to float, treating None / NaN / missing as `default`."""
+    try:
+        v = float(x)
+        return default if np.isnan(v) else v
+    except (TypeError, ValueError):
+        return default
+
+
+def _rmsd_score(rmsd_val):
+    if rmsd_val is None or np.isnan(_safe(rmsd_val, np.nan)):
+        return 0.0
+    return max(0.0, 1.0 - _safe(rmsd_val) / RMSD_CLIP)
+
+
+def _pae_score(iface_pae):
+    if iface_pae is None or np.isnan(_safe(iface_pae, np.nan)):
+        return 0.0
+    return max(0.0, 1.0 - _safe(iface_pae) / PAE_MAX)
+
+
+def _contacts_score(n_contacts):
+    return min(1.0, _safe(n_contacts) / N_CONTACTS_NORM)
+
+
+def _affinity_score(aff):
+    """Boltz-2 affinity in kcal/mol → [0, 1]; more negative = stronger binder."""
+    if aff is None or np.isnan(_safe(aff, np.nan)):
+        return 0.0
+    a = max(AFFINITY_FLOOR, min(AFFINITY_CEIL, _safe(aff)))
+    return (AFFINITY_CEIL - a) / (AFFINITY_CEIL - AFFINITY_FLOOR)
+
+
+def calc_composite(entry: dict) -> float:
+    """
+    Source-aware composite score in [0, 1].  Selects metrics based on the
+    highest-trust prediction available for the entry:
+
+        AF3-validated  →  COMPOSITE_AF3   (full trust)
+        Boltz-scored   →  COMPOSITE_BOLTZ (includes affinity head)
+        RF3-only       →  COMPOSITE_RF3_GEOM (geometric features only, capped)
+
+    The RF3-only branch deliberately excludes RF3's iptm/pTM/pLDDT because they
+    are anti-correlated with AF3 ipTM for de novo binders (calibrated empirically).
+    It is also capped at RF3_COMPOSITE_CEILING so any AF3 or Boltz score dominates.
+    """
+    src = entry.get("source", "RF3")
+
+    # ── AF3-validated ──
+    if src == "AF3":
+        w = COMPOSITE_AF3
+        return (
+            w["iptm"]  * _safe(entry.get("iptm"))
+            + w["plddt"] * (_safe(entry.get("plddt")) / 100.0)
+            + w["ptm"]   * _safe(entry.get("ptm"))
+            + w["rmsd"]  * _rmsd_score(entry.get("rmsd_to_rfd3"))
+            + w["pae"]   * _pae_score(entry.get("interface_pae"))
+        )
+
+    # ── Boltz-2-scored ──
+    if entry.get("boltz_iptm") is not None:
+        w = COMPOSITE_BOLTZ
+        return (
+            w["iptm"]  * _safe(entry.get("boltz_iptm"))
+            + w["plddt"] * (_safe(entry.get("boltz_plddt")) / 100.0)
+            + w["ptm"]   * _safe(entry.get("boltz_ptm"))
+            + w["pae"]   * _pae_score(entry.get("boltz_iface_pae"))
+        )
+
+    # ── RF3-only fallback (geometric features, capped) ──
+    w = COMPOSITE_RF3_GEOM
+    raw = (
+        w["n_contacts"] * _contacts_score(entry.get("n_contacts"))
+        + w["pae"]        * _pae_score(entry.get("interface_pae"))
+        + w["rmsd"]       * _rmsd_score(entry.get("rmsd_to_rfd3"))
     )
+    return min(raw, RF3_COMPOSITE_CEILING)
+
+
+def _parse_boltz_output(run_dir: Path, binder_chain: str, target_chain: str,
+                        binder_len: int) -> dict:
+    """
+    Pull metrics from a Boltz-2 prediction directory.
+
+    Boltz 2.2.x layout (verified on caprine, 2026-05):
+      <run_dir>/
+        boltz_results_<job>/
+          predictions/
+            <job>/
+              confidence_<job>_model_0.json   summary scores (iptm, ptm, complex_plddt, ...)
+              pae_<job>_model_0.npz           PAE matrix (per-token)
+              plddt_<job>_model_0.npz         per-residue pLDDT
+              pde_<job>_model_0.npz           predicted distance error (unused)
+              <job>_model_0.cif               predicted structure
+              affinity_<job>_model_0.json     ONLY if affinity head was requested
+                                              via `properties: [{affinity: ...}]` in YAML
+    """
+    out: dict = {}
+
+    # Step into boltz_results_<job>/predictions/<job>/
+    results_dirs = sorted(run_dir.glob("boltz_results_*"))
+    if not results_dirs:
+        return out
+    pred_root = results_dirs[0] / "predictions"
+    if not pred_root.exists():
+        return out
+    job_dirs = [p for p in pred_root.iterdir() if p.is_dir()]
+    if not job_dirs:
+        return out
+    job_dir  = job_dirs[0]
+    job_name = job_dir.name
+
+    # ── Confidence JSON (iptm, ptm, summary plddt) ──
+    conf_path = job_dir / f"confidence_{job_name}_model_0.json"
+    if conf_path.exists():
+        try:
+            with open(conf_path) as f:
+                conf = json.load(f)
+            out["iptm"] = conf.get("iptm", conf.get("complex_iptm", conf.get("protein_iptm")))
+            out["ptm"]  = conf.get("ptm",  conf.get("complex_ptm"))
+            plddt = conf.get("complex_plddt", conf.get("plddt"))
+            if plddt is not None:
+                plddt = float(plddt)
+                if 0.0 < plddt <= 1.0:
+                    plddt *= 100.0
+                out["plddt"] = plddt
+        except Exception as e:
+            logger.warning(f"Failed to read Boltz confidence: {e}")
+
+    # ── PAE matrix → interface PAE (binder ↔ target sub-blocks) ──
+    pae_path = job_dir / f"pae_{job_name}_model_0.npz"
+    if pae_path.exists():
+        try:
+            arr = np.load(pae_path, allow_pickle=False)
+            pae_mat = arr["pae"] if "pae" in arr.files else arr[arr.files[0]]
+            if pae_mat.ndim == 2 and pae_mat.shape[0] > binder_len:
+                out["iface_pae"] = float(
+                    (pae_mat[:binder_len, binder_len:].mean()
+                     + pae_mat[binder_len:, :binder_len].mean()) / 2
+                )
+        except Exception as e:
+            logger.warning(f"Failed to read Boltz PAE: {e}")
+
+    # ── Binder-only pLDDT (more informative than complex pLDDT) ──
+    # Prefer per-residue plddt npz; fall back to complex_plddt from confidence JSON
+    plddt_path = job_dir / f"plddt_{job_name}_model_0.npz"
+    cif_path   = job_dir / f"{job_name}_model_0.cif"
+    if plddt_path.exists():
+        try:
+            arr = np.load(plddt_path, allow_pickle=False)
+            plddt_arr = (arr["plddt"] if "plddt" in arr.files else arr[arr.files[0]]).flatten()
+
+            n_binder_res = binder_len  # default assumption
+            if cif_path.exists():
+                try:
+                    from biotite.structure.io.pdbx import CIFFile, get_structure
+                    struct = get_structure(CIFFile.read(str(cif_path)), model=1)
+                    ca = struct[struct.atom_name == "CA"]
+                    n_binder_res = int((ca.chain_id == binder_chain).sum()) or binder_len
+                except Exception:
+                    pass
+
+            # plddt may be per-residue (len == total residues) or per-atom (longer)
+            if len(plddt_arr) >= n_binder_res:
+                binder_mean = float(plddt_arr[:n_binder_res].mean())
+                if 0.0 < binder_mean <= 1.0:
+                    binder_mean *= 100.0
+                out["plddt"] = binder_mean   # overrides complex_plddt with binder-only
+        except Exception as e:
+            logger.warning(f"Failed to read Boltz pLDDT: {e}")
+
+    # ── Affinity head (Boltz-2 only; requires explicit request in YAML `properties`) ──
+    aff_path = job_dir / f"affinity_{job_name}_model_0.json"
+    if aff_path.exists():
+        try:
+            with open(aff_path) as f:
+                aff = json.load(f)
+            out["affinity"] = aff.get(
+                "affinity_pred", aff.get("affinity", aff.get("delta_g",
+                                          aff.get("affinity_pred_value")))
+            )
+        except Exception as e:
+            logger.warning(f"Failed to read Boltz affinity: {e}")
+
+    # ── Structure path ──
+    if cif_path.exists():
+        out["cif_path"] = str(cif_path)
+
+    return out
 
 
 def backbone_rmsd(ref_array, query_array) -> float:
@@ -396,6 +623,136 @@ class IterativeRefiner:
                     logger.info(f"Adaptive bias: loop {name} → [{lo}, {hi}] "
                                 f"(from {len(lens)} top designs)")
         return ranges
+
+    # ── Target template (target-chain-only CIF, cached) ───────────────────────
+
+    def _ensure_target_template(self, target_name: str) -> Path:
+        """
+        Extract just the target chain from the source HADDOCK PDB and save as a
+        CIF that RF3 can consume as a template.  Cached per target.
+
+        We deliberately do NOT template the binder chain — that would bias RF3
+        toward the native TIMP3 conformation, defeating the point of redesign.
+        """
+        tcfg     = TARGETS[target_name]
+        tpl_dir  = OUT_BASE / "target_templates"
+        tpl_dir.mkdir(parents=True, exist_ok=True)
+        cif_path = tpl_dir / f"{target_name}_target_only.cif"
+        if cif_path.exists():
+            return cif_path
+
+        src_pdb = DATA_DIR / tcfg["pdb"]
+        arr     = PDBFile.read(str(src_pdb)).get_structure()[0]
+        keep    = arr[arr.chain_id == tcfg["target_chain"]]
+        keep    = renumber(keep)
+        to_cif_file(keep, str(cif_path), file_type="cif")
+        logger.info(f"[{target_name}] target template cached: {cif_path}")
+        return cif_path
+
+    # ── Boltz-2 (local AF3-class ranker) ──────────────────────────────────────
+
+    def run_boltz(self, target_name: str, candidates: list, out_dir: Path) -> list:
+        """
+        Score each candidate with Boltz-2.  Boltz-2 is an open-source AF3-class
+        model used here as the local pre-AF3 ranker — much better correlated
+        with AF3 ipTM than RF3 single-sequence (calibrated empirically).
+
+        Adds boltz_iptm / boltz_ptm / boltz_plddt / boltz_iface_pae /
+        boltz_affinity fields to each candidate and recomputes composite_score.
+        Returns the (in-place mutated) candidates list.
+
+        If `boltz` is not installed on the system, logs a warning and returns
+        the candidates unchanged.  Set BOLTZ_ENABLE = False to skip explicitly.
+        """
+        if not BOLTZ_ENABLE or not candidates:
+            return candidates
+
+        out_dir.mkdir(parents=True, exist_ok=True)
+        bc = DESIGN_BINDER_CHAIN
+        fc = DESIGN_TARGET_CHAIN
+        t0 = time.time()
+        n_done = 0
+
+        for cand in candidates:
+            did  = cand["design_id"]
+            bseq = cand.get("full_seq", "")
+            tseq = cand.get("target_seq") or self.target_seqs.get(target_name, "")
+            if not bseq or not tseq:
+                continue
+
+            # Boltz YAML input (one job per design).
+            # NOTE: Boltz-2's affinity head is protein-LIGAND only (verified
+            # 2.2.1 raises "Chain A is not a ligand!" on a protein binder).
+            # We rely on its structure-confidence metrics (ipTM, pTM, pLDDT,
+            # PAE), which are still AF3-class for ranking.
+            yaml_path = out_dir / f"{did}.yaml"
+            yaml_path.write_text(
+                "version: 1\n"
+                "sequences:\n"
+                f"  - protein:\n"
+                f"      id: {bc}\n"
+                f"      sequence: {bseq}\n"
+                f"  - protein:\n"
+                f"      id: {fc}\n"
+                f"      sequence: {tseq}\n"
+            )
+
+            run_dir = out_dir / f"{did}_run"
+            cmd = [
+                BOLTZ_EXECUTABLE, "predict", str(yaml_path),
+                "--out_dir", str(run_dir),
+                "--diffusion_samples", str(BOLTZ_DIFFUSION_SAMPLES),
+                "--output_format", "mmcif",
+            ]
+            if BOLTZ_USE_MSA_SERVER:
+                cmd.append("--use_msa_server")
+
+            try:
+                # Boltz runs in its own conda env (different numpy/cublas/lightning).
+                # Wipe PYTHONPATH so the subprocess sees only its own site-packages.
+                child_env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+                proc = subprocess.run(
+                    cmd, capture_output=True, text=True,
+                    timeout=BOLTZ_TIMEOUT_S, env=child_env,
+                )
+                if proc.returncode != 0:
+                    logger.warning(f"Boltz failed on {did}: {proc.stderr[-300:].strip()}")
+                    continue
+            except FileNotFoundError:
+                logger.error(
+                    f"Boltz binary not found at: {BOLTZ_EXECUTABLE}\n"
+                    "  Install Boltz in a separate conda env (NOT foundry — version conflicts):\n"
+                    "    conda create -n boltz python=3.12 -y\n"
+                    "    conda activate boltz && pip install boltz\n"
+                    "  Then set BOLTZ_EXECUTABLE in iterative_refinement.py to the path of\n"
+                    "  that env's `boltz` binary (e.g. ~/miniconda3/envs/boltz/bin/boltz),\n"
+                    "  or export BOLTZ_EXECUTABLE=... before running.\n"
+                    "  Or set BOLTZ_ENABLE=False to skip Boltz entirely."
+                )
+                return candidates
+            except subprocess.TimeoutExpired:
+                logger.warning(f"Boltz timed out on {did} (>{BOLTZ_TIMEOUT_S}s)")
+                continue
+
+            metrics = _parse_boltz_output(run_dir, bc, fc, len(bseq))
+            if metrics:
+                cand.update({
+                    "boltz_iptm":      metrics.get("iptm"),
+                    "boltz_ptm":       metrics.get("ptm"),
+                    "boltz_plddt":     metrics.get("plddt"),
+                    "boltz_iface_pae": metrics.get("iface_pae"),
+                    "boltz_affinity":  metrics.get("affinity"),
+                    "boltz_cif":       metrics.get("cif_path"),
+                    "source":          "Boltz",  # promote from "RF3"
+                })
+                cand["composite_score"] = calc_composite(cand)
+                n_done += 1
+
+        logger.info(
+            f"[{target_name}] Boltz-2 done in {(time.time()-t0)/60:.1f} min "
+            f"({n_done}/{len(candidates)} scored)"
+        )
+        return candidates
 
     # ── RFd3 ─────────────────────────────────────────────────────────────────
 
@@ -572,6 +929,12 @@ class IterativeRefiner:
             logger.warning(f"No target sequence for {target_name}; RF3 complex skipped.")
             return []
 
+        # Materialize a target-only template CIF for this target (cached).
+        # AF3-style API: pass via `useStructureTemplate: true` on the target chain
+        # plus a templates list with the CIF path.  The binder chain gets no
+        # template so it's free to fold to whatever the designed sequence prefers.
+        target_template_cif = self._ensure_target_template(target_name)
+
         precision = "bf16-mixed"
         if torch.cuda.is_available():
             device_name = torch.cuda.get_device_name(0)
@@ -590,8 +953,15 @@ class IterativeRefiner:
                 rf3_data = {
                     "name": did,
                     "components": [
+                        # Binder: free design, no template
                         {"id": bc, "sequence": bseq},
-                        {"id": fc, "sequence": target_seq},
+                        # Target: anchored on the HADDOCK protease structure
+                        {
+                            "id": fc,
+                            "sequence": target_seq,
+                            "useStructureTemplate": True,
+                            "templates": [{"mmcifPath": str(target_template_cif)}],
+                        },
                     ],
                 }
                 rf3_input = InferenceInput.from_json_dict(rf3_data)
@@ -601,9 +971,12 @@ class IterativeRefiner:
                 rf3_out  = rf3_outs[rf3_key][0]
                 rf3_arr  = renumber(rf3_out.atom_array)
 
-                # Confidence metrics
+                # Confidence metrics.  Normalize pLDDT to 0–100 so it lives on
+                # the same scale as AF3's atom_plddts (RF3 returns 0–1 here).
                 conf  = rf3_out.summary_confidences or {}
-                plddt = conf.get("overall_plddt", conf.get("plddt", 0.0))
+                plddt = float(conf.get("overall_plddt", conf.get("plddt", 0.0)))
+                if 0.0 < plddt <= 1.0:
+                    plddt *= 100.0
                 ptm   = conf.get("ptm", 0.0)
                 iptm  = (conf.get("iptm")
                          or conf.get("ipTM")
@@ -629,8 +1002,6 @@ class IterativeRefiner:
                 # Interface contacts from RF3 predicted complex
                 n_contacts = count_interface_contacts(rf3_arr, bc, fc, cutoff=5.0)
 
-                comp = calc_composite(iptm, plddt, ptm, rmsd_val, iface_pae)
-
                 # Persist structure
                 cif_path = out_dir / f"{did}_rf3.cif"
                 to_cif_file(rf3_arr, str(cif_path), file_type="cif")
@@ -642,13 +1013,15 @@ class IterativeRefiner:
                     "interface_pae":  iface_pae,
                     "rmsd_to_rfd3":   rmsd_val,
                     "n_contacts":     n_contacts,
-                    "composite_score": comp,
+                    "source":         "RF3",
                 }
+                # Source-aware composite (RF3-only branch uses geometric features only)
+                metrics_rec["composite_score"] = calc_composite(metrics_rec)
                 with open(out_dir / f"{did}_metrics.json", "w") as mf:
                     json.dump(metrics_rec, mf, indent=2)
 
                 scored.append({
-                    **{k: v for k, v in cand.items() if k not in ("array", "rfd3_array")},
+                    **{k: v for k, v in cand.items() if k not in ("array",)},
                     **metrics_rec,
                     "iteration":    self.state["iteration"],
                     "temperature":  self.state["temperature"],
@@ -736,33 +1109,39 @@ class IterativeRefiner:
 
     def export_for_af3(self, force: bool = False) -> None:
         """
-        Export the top AF3_TOP_N designs (across all targets) to an AF3 Server
-        JSON file.  Designs with AF3 source already in HOF are de-prioritised
-        so new candidates always surface.
+        Export AF3_TOP_N designs to an AF3 Server JSON file, allocated as an
+        equal per-target quota so every target gets AF3 validation each cycle.
+        Within each target we take the highest-composite unique sequences.
         """
         it = self.state["iteration"]
         if not force and (it - self.state.get("last_af3_it", -1)) < AF3_EXPORT_EVERY_N:
             return
 
-        # Gather all HOF entries, prefer RF3-validated over AF3-already-seen
-        all_entries = []
-        for tname in self.active_targets:
-            for e in self.state["hof"].get(tname, []):
-                all_entries.append(e)
-
-        if not all_entries:
-            logger.warning("HOF empty; skipping AF3 export.")
-            return
+        n_targets = max(1, len(self.active_targets))
+        per_target_quota = max(1, AF3_TOP_N // n_targets)
 
         seen_seqs = set()
         unique_entries = []
-        for e in sorted(all_entries, key=lambda x: x.get("composite_score", 0), reverse=True):
-            seq = e.get("full_seq", "")
-            if seq and seq not in seen_seqs:
-                seen_seqs.add(seq)
-                unique_entries.append(e)
-            if len(unique_entries) >= AF3_TOP_N:
-                break
+        for tname in self.active_targets:
+            target_hof = sorted(
+                self.state["hof"].get(tname, []),
+                key=lambda x: x.get("composite_score", 0),
+                reverse=True,
+            )
+            picked = 0
+            for e in target_hof:
+                seq = e.get("full_seq", "")
+                if seq and seq not in seen_seqs:
+                    seen_seqs.add(seq)
+                    unique_entries.append(e)
+                    picked += 1
+                if picked >= per_target_quota:
+                    break
+            logger.info(f"AF3 export: {tname} contributing {picked} design(s)")
+
+        if not unique_entries:
+            logger.warning("HOF empty; skipping AF3 export.")
+            return
 
         # Build AF3 Server JSON
         target_seqs_by_entry = {
@@ -930,23 +1309,22 @@ class IterativeRefiner:
                             design_id = e["design_id"]
                             break
 
-                    comp  = calc_composite(iptm, plddt, ptm, float("nan"), iface_pae)
                     loops = extract_loops(binder_seq, self.selected_loops)
-
-                    results.append({
-                        "design_id":       design_id,
-                        "target_name":     target_name,
-                        "full_seq":        binder_seq,
-                        "iptm":            iptm,
-                        "ptm":             ptm,
-                        "plddt":           plddt,
-                        "interface_pae":   iface_pae,
-                        "rmsd_to_rfd3":    float("nan"),
-                        "composite_score": comp,
-                        "has_clash":       has_clash,
-                        "source":          "AF3",
+                    entry = {
+                        "design_id":     design_id,
+                        "target_name":   target_name,
+                        "full_seq":      binder_seq,
+                        "iptm":          iptm,
+                        "ptm":           ptm,
+                        "plddt":         plddt,
+                        "interface_pae": iface_pae,
+                        "rmsd_to_rfd3":  float("nan"),
+                        "has_clash":     has_clash,
+                        "source":        "AF3",
                         **loops,
-                    })
+                    }
+                    entry["composite_score"] = calc_composite(entry)
+                    results.append(entry)
                     logger.info(
                         f"  {job_name} | {target_name} | "
                         f"ipTM={iptm:.3f}  pLDDT={plddt:.1f}  iface_PAE={iface_pae:.2f}"
@@ -1021,9 +1399,21 @@ class IterativeRefiner:
                 logger.warning(f"[{tname}] No LMPNN sequences; skipping RF3.")
                 continue
 
-            # 3. RF3 complex scoring
+            # 3. RF3 complex scoring (templated, sanity check + geometric features)
             rf3_dir = it_dir / "rf3" / tname
             scored  = self.run_rf3_complex(tname, candidates, rf3_dir)
+
+            # 4. Boltz-2 local AF3-class scoring — the real pre-AF3 ranker.
+            # Adds boltz_* fields and promotes source from "RF3" to "Boltz".
+            # If BOLTZ_ENABLE is False or boltz CLI is missing, this is a no-op
+            # and the pipeline continues with RF3-only geometric composites.
+            boltz_dir = it_dir / "boltz" / tname
+            scored    = self.run_boltz(tname, scored, boltz_dir)
+
+            # Drop the heavy atom arrays before HOF storage
+            for s in scored:
+                s.pop("rfd3_array", None)
+                s.pop("array", None)
             all_scored.extend(scored)
 
         # Update HOF and write summaries
