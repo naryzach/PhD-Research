@@ -141,12 +141,10 @@ ADAPTIVE_BIAS_PCT      = 25    # Use top-N% HOF lengths to define new contig ran
 # 30 AF3 jobs/day Google-server cap.
 AF3_EXPORT_EVERY_N     = 2     # Export AF3 JSON every N full iterations
 AF3_TOP_N              = 30    # Designs to include per AF3 submission (max per day)
-IPTM_PROMISING         = 0.55  # ipTM threshold to flag a design as "promising"
+IPTM_PROMISING         = 0.55  # Boltz ipTM threshold to flag a design as "promising"
 RMSD_CLIP              = 5.0   # Å beyond which RMSD contribution scores 0
 PAE_MAX                = 30.0  # Å² beyond which interface PAE contribution scores 0
 N_CONTACTS_NORM        = 60.0  # n_contacts above this saturates to 1.0
-AFFINITY_FLOOR         = -12.0 # Boltz-2 binding affinity floor (kcal/mol) for normalization
-AFFINITY_CEIL          = 0.0   # Affinity above 0 maps to 0 (non-binder)
 
 # Composite score weights — source-aware.  Higher-trust sources contribute more
 # and use a richer formula; lower-trust sources use geometric features only.
@@ -194,7 +192,7 @@ BOLTZ_ENABLE            = True
 BOLTZ_EXECUTABLE        = os.environ.get("BOLTZ_EXECUTABLE", "boltz")
 BOLTZ_USE_MSA_SERVER    = True   # use ColabFold's remote MMseqs2 API (no local DB)
 BOLTZ_DIFFUSION_SAMPLES = 1      # samples per design (1 is fastest, good enough for ranking)
-BOLTZ_TIMEOUT_S         = 1200   # 20 min hard timeout per design
+BOLTZ_TIMEOUT_S         = 300    # 5 min hard timeout (real runs are ~30s post-cache-warm)
 
 
 # ── Utility functions ─────────────────────────────────────────────────────────
@@ -340,12 +338,12 @@ def _contacts_score(n_contacts):
     return min(1.0, _safe(n_contacts) / N_CONTACTS_NORM)
 
 
-def _affinity_score(aff):
-    """Boltz-2 affinity in kcal/mol → [0, 1]; more negative = stronger binder."""
-    if aff is None or np.isnan(_safe(aff, np.nan)):
+def _normalize_plddt(val) -> float:
+    """Coerce pLDDT to the 0–100 scale (Boltz/RF3 return 0–1, AF3 returns 0–100)."""
+    v = _safe(val, np.nan)
+    if np.isnan(v):
         return 0.0
-    a = max(AFFINITY_FLOOR, min(AFFINITY_CEIL, _safe(aff)))
-    return (AFFINITY_CEIL - a) / (AFFINITY_CEIL - AFFINITY_FLOOR)
+    return v * 100.0 if 0.0 < v <= 1.0 else v
 
 
 def calc_composite(entry: dict) -> float:
@@ -353,8 +351,8 @@ def calc_composite(entry: dict) -> float:
     Source-aware composite score in [0, 1].  Selects metrics based on the
     highest-trust prediction available for the entry:
 
-        AF3-validated  →  COMPOSITE_AF3   (full trust)
-        Boltz-scored   →  COMPOSITE_BOLTZ (includes affinity head)
+        AF3-validated  →  COMPOSITE_AF3      (full trust)
+        Boltz-scored   →  COMPOSITE_BOLTZ    (structure-confidence metrics)
         RF3-only       →  COMPOSITE_RF3_GEOM (geometric features only, capped)
 
     The RF3-only branch deliberately excludes RF3's iptm/pTM/pLDDT because they
@@ -368,7 +366,7 @@ def calc_composite(entry: dict) -> float:
         w = COMPOSITE_AF3
         return (
             w["iptm"]  * _safe(entry.get("iptm"))
-            + w["plddt"] * (_safe(entry.get("plddt")) / 100.0)
+            + w["plddt"] * (_normalize_plddt(entry.get("plddt")) / 100.0)
             + w["ptm"]   * _safe(entry.get("ptm"))
             + w["rmsd"]  * _rmsd_score(entry.get("rmsd_to_rfd3"))
             + w["pae"]   * _pae_score(entry.get("interface_pae"))
@@ -379,7 +377,7 @@ def calc_composite(entry: dict) -> float:
         w = COMPOSITE_BOLTZ
         return (
             w["iptm"]  * _safe(entry.get("boltz_iptm"))
-            + w["plddt"] * (_safe(entry.get("boltz_plddt")) / 100.0)
+            + w["plddt"] * (_normalize_plddt(entry.get("boltz_plddt")) / 100.0)
             + w["ptm"]   * _safe(entry.get("boltz_ptm"))
             + w["pae"]   * _pae_score(entry.get("boltz_iface_pae"))
         )
@@ -929,11 +927,16 @@ class IterativeRefiner:
             logger.warning(f"No target sequence for {target_name}; RF3 complex skipped.")
             return []
 
-        # Materialize a target-only template CIF for this target (cached).
-        # AF3-style API: pass via `useStructureTemplate: true` on the target chain
-        # plus a templates list with the CIF path.  The binder chain gets no
-        # template so it's free to fold to whatever the designed sequence prefers.
-        target_template_cif = self._ensure_target_template(target_name)
+        # NOTE: an earlier attempt passed AF3-style `useStructureTemplate` +
+        # `templates` fields per chain, but this RF3 build's SequenceComponent
+        # rejects them with `unexpected keyword argument 'useStructureTemplate'`.
+        # Until we identify the correct RF3 template API (likely a kwarg on
+        # engine.run() or a separate templates= parameter on InferenceInput),
+        # RF3 runs single-sequence.  Boltz-2 remains the trusted local ranker;
+        # RF3 contributes geometric features (n_contacts, RMSD, iface PAE) only.
+        # _ensure_target_template still caches the target-only CIF on disk so
+        # it's ready the moment we wire up the right API.
+        self._ensure_target_template(target_name)
 
         precision = "bf16-mixed"
         if torch.cuda.is_available():
@@ -953,15 +956,8 @@ class IterativeRefiner:
                 rf3_data = {
                     "name": did,
                     "components": [
-                        # Binder: free design, no template
                         {"id": bc, "sequence": bseq},
-                        # Target: anchored on the HADDOCK protease structure
-                        {
-                            "id": fc,
-                            "sequence": target_seq,
-                            "useStructureTemplate": True,
-                            "templates": [{"mmcifPath": str(target_template_cif)}],
-                        },
+                        {"id": fc, "sequence": target_seq},
                     ],
                 }
                 rf3_input = InferenceInput.from_json_dict(rf3_data)
