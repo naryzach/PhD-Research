@@ -392,38 +392,19 @@ def calc_composite(entry: dict) -> float:
     return min(raw, RF3_COMPOSITE_CEILING)
 
 
-def _parse_boltz_output(run_dir: Path, binder_chain: str, target_chain: str,
-                        binder_len: int) -> dict:
+def _parse_boltz_output(run_dir: Path, job_name: str, binder_len: int) -> dict:
     """
     Pull metrics from a Boltz-2 prediction directory.
 
-    Boltz 2.2.x layout (verified on caprine, 2026-05):
-      <run_dir>/
-        boltz_results_<job>/
-          predictions/
-            <job>/
-              confidence_<job>_model_0.json   summary scores (iptm, ptm, complex_plddt, ...)
-              pae_<job>_model_0.npz           PAE matrix (per-token)
-              plddt_<job>_model_0.npz         per-residue pLDDT
-              pde_<job>_model_0.npz           predicted distance error (unused)
-              <job>_model_0.cif               predicted structure
-              affinity_<job>_model_0.json     ONLY if affinity head was requested
-                                              via `properties: [{affinity: ...}]` in YAML
+    Boltz 2.2.x writes to <run_dir>/boltz_results_<job>/predictions/<job>/ with
+    confidence_<job>_model_0.json, pae_<job>_model_0.npz, plddt_<job>_model_0.npz,
+    and <job>_model_0.cif.  Returns {iptm, ptm, plddt, iface_pae, cif_path};
+    missing files are silently skipped.
     """
     out: dict = {}
-
-    # Step into boltz_results_<job>/predictions/<job>/
-    results_dirs = sorted(run_dir.glob("boltz_results_*"))
-    if not results_dirs:
+    job_dir = run_dir / f"boltz_results_{job_name}" / "predictions" / job_name
+    if not job_dir.exists():
         return out
-    pred_root = results_dirs[0] / "predictions"
-    if not pred_root.exists():
-        return out
-    job_dirs = [p for p in pred_root.iterdir() if p.is_dir()]
-    if not job_dirs:
-        return out
-    job_dir  = job_dirs[0]
-    job_name = job_dir.name
 
     # ── Confidence JSON (iptm, ptm, summary plddt) ──
     conf_path = job_dir / f"confidence_{job_name}_model_0.json"
@@ -431,14 +412,9 @@ def _parse_boltz_output(run_dir: Path, binder_chain: str, target_chain: str,
         try:
             with open(conf_path) as f:
                 conf = json.load(f)
-            out["iptm"] = conf.get("iptm", conf.get("complex_iptm", conf.get("protein_iptm")))
-            out["ptm"]  = conf.get("ptm",  conf.get("complex_ptm"))
-            plddt = conf.get("complex_plddt", conf.get("plddt"))
-            if plddt is not None:
-                plddt = float(plddt)
-                if 0.0 < plddt <= 1.0:
-                    plddt *= 100.0
-                out["plddt"] = plddt
+            out["iptm"]  = conf.get("iptm", conf.get("complex_iptm", conf.get("protein_iptm")))
+            out["ptm"]   = conf.get("ptm",  conf.get("complex_ptm"))
+            out["plddt"] = _normalize_plddt(conf.get("complex_plddt", conf.get("plddt")))
         except Exception as e:
             logger.warning(f"Failed to read Boltz confidence: {e}")
 
@@ -456,48 +432,21 @@ def _parse_boltz_output(run_dir: Path, binder_chain: str, target_chain: str,
         except Exception as e:
             logger.warning(f"Failed to read Boltz PAE: {e}")
 
-    # ── Binder-only pLDDT (more informative than complex pLDDT) ──
-    # Prefer per-residue plddt npz; fall back to complex_plddt from confidence JSON
+    # ── Binder-only pLDDT (overrides complex pLDDT from confidence JSON) ──
+    # plddt array is per-residue with binder residues first (binder is chain A in
+    # the YAML we wrote), so the first binder_len entries are the binder.
     plddt_path = job_dir / f"plddt_{job_name}_model_0.npz"
-    cif_path   = job_dir / f"{job_name}_model_0.cif"
     if plddt_path.exists():
         try:
             arr = np.load(plddt_path, allow_pickle=False)
             plddt_arr = (arr["plddt"] if "plddt" in arr.files else arr[arr.files[0]]).flatten()
-
-            n_binder_res = binder_len  # default assumption
-            if cif_path.exists():
-                try:
-                    from biotite.structure.io.pdbx import CIFFile, get_structure
-                    struct = get_structure(CIFFile.read(str(cif_path)), model=1)
-                    ca = struct[struct.atom_name == "CA"]
-                    n_binder_res = int((ca.chain_id == binder_chain).sum()) or binder_len
-                except Exception:
-                    pass
-
-            # plddt may be per-residue (len == total residues) or per-atom (longer)
-            if len(plddt_arr) >= n_binder_res:
-                binder_mean = float(plddt_arr[:n_binder_res].mean())
-                if 0.0 < binder_mean <= 1.0:
-                    binder_mean *= 100.0
-                out["plddt"] = binder_mean   # overrides complex_plddt with binder-only
+            if len(plddt_arr) >= binder_len:
+                out["plddt"] = _normalize_plddt(float(plddt_arr[:binder_len].mean()))
         except Exception as e:
             logger.warning(f"Failed to read Boltz pLDDT: {e}")
 
-    # ── Affinity head (Boltz-2 only; requires explicit request in YAML `properties`) ──
-    aff_path = job_dir / f"affinity_{job_name}_model_0.json"
-    if aff_path.exists():
-        try:
-            with open(aff_path) as f:
-                aff = json.load(f)
-            out["affinity"] = aff.get(
-                "affinity_pred", aff.get("affinity", aff.get("delta_g",
-                                          aff.get("affinity_pred_value")))
-            )
-        except Exception as e:
-            logger.warning(f"Failed to read Boltz affinity: {e}")
-
     # ── Structure path ──
+    cif_path = job_dir / f"{job_name}_model_0.cif"
     if cif_path.exists():
         out["cif_path"] = str(cif_path)
 
@@ -622,30 +571,11 @@ class IterativeRefiner:
                                 f"(from {len(lens)} top designs)")
         return ranges
 
-    # ── Target template (target-chain-only CIF, cached) ───────────────────────
-
-    def _ensure_target_template(self, target_name: str) -> Path:
-        """
-        Extract just the target chain from the source HADDOCK PDB and save as a
-        CIF that RF3 can consume as a template.  Cached per target.
-
-        We deliberately do NOT template the binder chain — that would bias RF3
-        toward the native TIMP3 conformation, defeating the point of redesign.
-        """
-        tcfg     = TARGETS[target_name]
-        tpl_dir  = OUT_BASE / "target_templates"
-        tpl_dir.mkdir(parents=True, exist_ok=True)
-        cif_path = tpl_dir / f"{target_name}_target_only.cif"
-        if cif_path.exists():
-            return cif_path
-
-        src_pdb = DATA_DIR / tcfg["pdb"]
-        arr     = PDBFile.read(str(src_pdb)).get_structure()[0]
-        keep    = arr[arr.chain_id == tcfg["target_chain"]]
-        keep    = renumber(keep)
-        to_cif_file(keep, str(cif_path), file_type="cif")
-        logger.info(f"[{target_name}] target template cached: {cif_path}")
-        return cif_path
+    # NOTE: a target-only template CIF extractor (_ensure_target_template) lived
+    # here briefly to feed RF3 a template.  This RF3 build's SequenceComponent
+    # doesn't accept the AF3-style `useStructureTemplate` field, so the helper
+    # was removed.  When the correct RF3 template API is identified, re-add an
+    # extractor using PDBFile.read + chain filter + renumber + to_cif_file.
 
     # ── Boltz-2 (local AF3-class ranker) ──────────────────────────────────────
 
@@ -655,8 +585,9 @@ class IterativeRefiner:
         model used here as the local pre-AF3 ranker — much better correlated
         with AF3 ipTM than RF3 single-sequence (calibrated empirically).
 
-        Adds boltz_iptm / boltz_ptm / boltz_plddt / boltz_iface_pae /
-        boltz_affinity fields to each candidate and recomputes composite_score.
+        Adds boltz_iptm / boltz_ptm / boltz_plddt / boltz_iface_pae fields to
+        each candidate and recomputes composite_score (the Boltz-2 affinity
+        head only applies to protein-ligand and is not invoked here).
         Returns the (in-place mutated) candidates list.
 
         If `boltz` is not installed on the system, logs a warning and returns
@@ -732,16 +663,17 @@ class IterativeRefiner:
                 logger.warning(f"Boltz timed out on {did} (>{BOLTZ_TIMEOUT_S}s)")
                 continue
 
-            metrics = _parse_boltz_output(run_dir, bc, fc, len(bseq))
+            metrics = _parse_boltz_output(run_dir, did, len(bseq))
             if metrics:
+                boltz_iptm = metrics.get("iptm")
                 cand.update({
-                    "boltz_iptm":      metrics.get("iptm"),
+                    "boltz_iptm":      boltz_iptm,
                     "boltz_ptm":       metrics.get("ptm"),
                     "boltz_plddt":     metrics.get("plddt"),
                     "boltz_iface_pae": metrics.get("iface_pae"),
-                    "boltz_affinity":  metrics.get("affinity"),
                     "boltz_cif":       metrics.get("cif_path"),
                     "source":          "Boltz",  # promote from "RF3"
+                    "promising":       _safe(boltz_iptm) >= IPTM_PROMISING,
                 })
                 cand["composite_score"] = calc_composite(cand)
                 n_done += 1
@@ -927,17 +859,12 @@ class IterativeRefiner:
             logger.warning(f"No target sequence for {target_name}; RF3 complex skipped.")
             return []
 
-        # NOTE: an earlier attempt passed AF3-style `useStructureTemplate` +
-        # `templates` fields per chain, but this RF3 build's SequenceComponent
-        # rejects them with `unexpected keyword argument 'useStructureTemplate'`.
-        # Until we identify the correct RF3 template API (likely a kwarg on
-        # engine.run() or a separate templates= parameter on InferenceInput),
-        # RF3 runs single-sequence.  Boltz-2 remains the trusted local ranker;
-        # RF3 contributes geometric features (n_contacts, RMSD, iface PAE) only.
-        # _ensure_target_template still caches the target-only CIF on disk so
-        # it's ready the moment we wire up the right API.
-        self._ensure_target_template(target_name)
-
+        # NOTE: RF3 runs single-sequence here.  An earlier attempt to pass
+        # target structure as an AF3-style template was rejected by this RF3
+        # build (`SequenceComponent` doesn't accept `useStructureTemplate`).
+        # Boltz-2 is the trusted local ranker; RF3 contributes only geometric
+        # features (n_contacts, RMSD, iface PAE) until the right template API
+        # is identified.
         precision = "bf16-mixed"
         if torch.cuda.is_available():
             device_name = torch.cuda.get_device_name(0)
@@ -1017,12 +944,12 @@ class IterativeRefiner:
                     json.dump(metrics_rec, mf, indent=2)
 
                 scored.append({
-                    **{k: v for k, v in cand.items() if k not in ("array",)},
+                    **{k: v for k, v in cand.items() if k not in ("array", "rfd3_array")},
                     **metrics_rec,
                     "iteration":    self.state["iteration"],
                     "temperature":  self.state["temperature"],
                     "rf3_cif":      str(cif_path),
-                    "promising":    iptm >= IPTM_PROMISING,
+                    "promising":    False,  # set by run_boltz once Boltz ipTM is in hand
                 })
 
             except Exception as exc:
@@ -1218,6 +1145,15 @@ class IterativeRefiner:
         """
         import zipfile
 
+        # One-time index of binder sequences across all HOFs so we can resolve
+        # (target_name, design_id) in O(1) per job instead of scanning each HOF.
+        seq_index: dict[str, tuple[str, str]] = {}
+        for t in self.active_targets:
+            for e in self.state["hof"].get(t, []):
+                seq = e.get("full_seq")
+                if seq and seq not in seq_index:
+                    seq_index[seq] = (t, e["design_id"])
+
         with zipfile.ZipFile(zip_path) as zf:
             all_names = set(zf.namelist())
             job_requests = sorted(n for n in all_names if n.endswith("_job_request.json"))
@@ -1245,14 +1181,9 @@ class IterativeRefiner:
                     m = re.search(r"(?:fold_)?refine_it\d+_([A-Za-z0-9]+)_\d{2}$", job_name, re.I)
                     target_name = m.group(1).upper() if m else None
 
-                    # Fallback: find target by sequence match across all active HOFs
+                    # Fallback: sequence-match against the precomputed seq_index
                     if target_name not in self.active_targets:
-                        target_name = next(
-                            (t for t in self.active_targets
-                             if any(e.get("full_seq") == binder_seq
-                                    for e in self.state["hof"].get(t, []))),
-                            None,
-                        )
+                        target_name = seq_index.get(binder_seq, (None, None))[0]
 
                     if not target_name:
                         logger.warning(f"Cannot determine target for job '{job_name}'; skipping.")
@@ -1298,12 +1229,9 @@ class IterativeRefiner:
                                      + pae_mat[np.ix_(b_idx, a_idx)].mean()) / 2
                                 )
 
-                    # Match to HOF entry by sequence; fall back to job name as design_id
-                    design_id = job_name
-                    for e in self.state["hof"].get(target_name, []):
-                        if e.get("full_seq") == binder_seq:
-                            design_id = e["design_id"]
-                            break
+                    # Resolve design_id via the precomputed seq_index (O(1));
+                    # fall back to the AF3 job name if no HOF match found.
+                    design_id = seq_index.get(binder_seq, (None, job_name))[1]
 
                     loops = extract_loops(binder_seq, self.selected_loops)
                     entry = {
@@ -1403,13 +1331,9 @@ class IterativeRefiner:
             # Adds boltz_* fields and promotes source from "RF3" to "Boltz".
             # If BOLTZ_ENABLE is False or boltz CLI is missing, this is a no-op
             # and the pipeline continues with RF3-only geometric composites.
+            # (run_rf3_complex already strips array/rfd3_array from its output.)
             boltz_dir = it_dir / "boltz" / tname
             scored    = self.run_boltz(tname, scored, boltz_dir)
-
-            # Drop the heavy atom arrays before HOF storage
-            for s in scored:
-                s.pop("rfd3_array", None)
-                s.pop("array", None)
             all_scored.extend(scored)
 
         # Update HOF and write summaries
