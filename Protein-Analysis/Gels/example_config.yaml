@@ -1,0 +1,31 @@
+# gel_annotator config — copy and edit this for each gel
+#
+# gel_type: 'protein' (SDS-PAGE) or 'dna'
+gel_type: protein
+
+ladder:
+  # Named ladder key OR catalog number (e.g. "26619", "N3232")
+  # Run: python gel_annotator.py --list-ladders  for full list
+  type: pierce_unstained_mw
+
+  # Which lane holds the ladder (1-indexed). Default: 1 (leftmost)
+  lane: 1
+
+  # ── Custom ladder (uncomment and fill in to override 'type') ──
+  # type: custom
+  # name: "My Lab Ladder"
+  # unit: kDa          # kDa for protein, bp for DNA
+  # bands: [10, 25, 50, 75, 100, 150, 200]
+
+lanes:
+  # Uncomment to force a specific lane count (overrides auto-detection)
+  count: 15
+
+  # One label per lane, left → right (including the ladder lane)
+  labels:
+    - "Ladder"
+    - "Sample A"
+    - "Sample B"
+    - "Sample C"
+    - "Control"
+    - "Empty"
