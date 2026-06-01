@@ -1099,6 +1099,96 @@ class IterativeRefiner:
         print(f"  plddt, ptm, interface_pae, full_seq, target_name")
         print("=" * 60 + "\n")
 
+    def export_for_af3_stratified(self, n_total: int = 30, n_bands: int = 3) -> None:
+        """
+        One-time VALIDATION export: instead of sending the top-composite designs
+        (which all sit in a narrow high-Boltz band and cause range restriction),
+        sample evenly across Boltz-ipTM bands so the returned AF3 scores reveal
+        whether Boltz coarsely separates good binders from bad.
+
+        Pools ALL designs from every it_*/round_summary.csv (the unbiased pool,
+        not the range-restricted HOF).  Per target, bins designs into `n_bands`
+        equal-frequency Boltz-ipTM bands (low / mid / high) and samples evenly
+        from each.  Writes the AF3 submission JSON plus a sidecar manifest
+        (stratified_manifest.json) recording each job's band and boltz_iptm, so
+        the follow-up analysis can compute per-band AF3 hit-rates without relying
+        on fragile job-name parsing.
+        """
+        # Gather the full design pool from round summaries (unique by sequence)
+        pool_frames = []
+        for it_dir in sorted(OUT_BASE.glob("it_*")):
+            csv = it_dir / "round_summary.csv"
+            if csv.exists():
+                pool_frames.append(pd.read_csv(csv))
+        if not pool_frames:
+            logger.warning("No round_summary.csv found; cannot stratify.")
+            return
+
+        pool = pd.concat(pool_frames, ignore_index=True)
+        pool["boltz_iptm"] = pd.to_numeric(pool.get("boltz_iptm"), errors="coerce")
+        pool = pool.dropna(subset=["boltz_iptm"]).drop_duplicates(subset=["full_seq"])
+
+        n_targets       = max(1, len(self.active_targets))
+        per_target      = max(n_bands, n_total // n_targets)
+        per_band        = max(1, per_target // n_bands)
+
+        jobs, manifest = [], []
+        for tname in self.active_targets:
+            tpool = pool[pool["target_name"] == tname].sort_values("boltz_iptm")
+            if len(tpool) < n_bands:
+                logger.warning(f"[{tname}] too few designs ({len(tpool)}) to stratify; skipping.")
+                continue
+
+            # Equal-frequency bands (low → high Boltz ipTM)
+            band_labels = ["LO", "MID", "HI"][:n_bands]
+            bands = np.array_split(tpool, n_bands)   # ascending, so [0]=low ... [-1]=high
+            for label, band_df in zip(band_labels, bands):
+                # Even spread within the band rather than all from one end
+                take = band_df.iloc[np.linspace(0, len(band_df) - 1, min(per_band, len(band_df))).astype(int)]
+                for _, e in take.iterrows():
+                    idx  = len(jobs)
+                    tseq = self.target_seqs.get(tname, "") or e.get("target_seq", "")
+                    name = f"strat_{tname}_{label}_{idx:02d}"
+                    jobs.append({
+                        "name":       name,
+                        "modelSeeds": [42],
+                        "sequences": [
+                            {"proteinChain": {"sequence": e.get("full_seq", ""), "count": 1}},
+                            {"proteinChain": {"sequence": tseq,                  "count": 1}},
+                        ],
+                    })
+                    manifest.append({
+                        "job_name":   name,
+                        "design_id":  e.get("design_id"),
+                        "target":     tname,
+                        "band":       label,
+                        "boltz_iptm": float(e["boltz_iptm"]),
+                        "full_seq":   e.get("full_seq", ""),
+                    })
+            logger.info(f"[{tname}] stratified: "
+                        + ", ".join(f"{lbl}={sum(1 for mm in manifest if mm['target']==tname and mm['band']==lbl)}"
+                                    for lbl in band_labels))
+
+        if not jobs:
+            logger.warning("Stratified export produced no jobs.")
+            return
+
+        sub_path = OUT_BASE / "af3_submission_stratified.json"
+        man_path = OUT_BASE / "stratified_manifest.json"
+        with open(sub_path, "w") as f:
+            json.dump(jobs, f, indent=2)
+        with open(man_path, "w") as f:
+            json.dump(manifest, f, indent=2)
+
+        logger.info(f"Stratified AF3 export: {len(jobs)} designs → {sub_path}")
+        print("\n" + "=" * 64)
+        print(f"  STRATIFIED validation submission ready: {sub_path}")
+        print(f"  Manifest (band assignments): {man_path}")
+        print(f"  Upload the submission to AF3, then run:")
+        print(f"    python Generation/validate_boltz_filter.py <af3_results.zip>")
+        print(f"  to see AF3 hit-rate per Boltz band (LO / MID / HI).")
+        print("=" * 64 + "\n")
+
     def import_af3_results(self, results_path: str) -> None:
         """
         Import AF3 Server results to update HOF with higher-quality metrics.
@@ -1399,6 +1489,15 @@ def main():
         help="Stop after this many iterations (default: run indefinitely).",
     )
     parser.add_argument(
+        "--stratified-export", type=int, default=None, metavar="N",
+        help=(
+            "Write a one-time STRATIFIED AF3 submission of N designs sampled "
+            "evenly across Boltz-ipTM bands (validation of the Boltz filter), "
+            "then exit without running iterations.  Use ~30 to match the daily "
+            "AF3 cap.  Pair with validate_boltz_filter.py on the returned results."
+        ),
+    )
+    parser.add_argument(
         "--import-af3", type=str, default=None,
         help=(
             "Path to AF3 results to import before continuing.  "
@@ -1419,6 +1518,11 @@ def main():
             refiner.import_af3_zip(args.import_af3)
         else:
             refiner.import_af3_results(args.import_af3)
+
+    if args.stratified_export:
+        # Validation mode: write the stratified batch and stop (no iterations).
+        refiner.export_for_af3_stratified(n_total=args.stratified_export)
+        return
 
     refiner.main_loop(max_iterations=args.max_iterations)
 
