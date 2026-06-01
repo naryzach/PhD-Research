@@ -172,23 +172,91 @@ python Generation/validate_boltz_filter.py <af3_results.zip>
   cost is not buying filtering → drop it, or replace with the §4.2 best signal
   (Boltz pLDDT) or another model (§6).
 
+### 5.1 Stratified results (24 designs, run 2026-06-01)
+
+| Boltz band | n | Boltz ipTM | AF3 ipTM mean | AF3 ≥ 0.55 |
+|------------|---|-----------:|--------------:|-----------:|
+| LO  | 8 | 0.316 | 0.479 | 50% |
+| MID | 8 | 0.559 | 0.379 | 38% |
+| HI  | 8 | 0.745 | **0.599** | **62%** |
+
+- HI vs rest contrast: **+0.170** AF3 ipTM. Full-range Spearman **+0.11** (weak, positive).
+- **Not monotonic** — MID dips below LO. Per-target breakdown explains why:
+
+  | Target | LO | MID | HI | behavior |
+  |--------|----|----|----|----------|
+  | MMP2   | 0.20 | 0.44 | 0.56 | clean rise |
+  | MMP9   | 0.42 | 0.24 | 0.62 | top works |
+  | ADAM17 | 0.64 | 0.16 | 0.67 | bimodal |
+  | ADAM10 | 0.64 | 0.67 | 0.54 | **inverted** |
+
+- Precision down the Boltz ranking: top-4 = 75% hits; top-6/8/12 = 50% (= pool baseline).
+
+**Verdict.** Boltz is a **weak, top-concentrated, target-inconsistent** filter. It enriches
+only the extreme top (~top 15%), is no better than random past that, has poor recall
+(good binders sit in LO/MID — e.g. ADAM17_LO 0.74, ADAM10_LO 0.70), and is *anti*-correlated
+for ADAM10. Usable as a soft "send the very top per target" heuristic, but **not** the
+reliable AF3 surrogate we wanted. This motivates trialing ESMFold2 (§6) on the same 24.
+
+### 5.2 ESMFold2 head-to-head (same 24 designs)
+
+ESMFold2 now has a zero-AF3-cost evaluation path. On the cluster:
+```bash
+python Generation/score_with_esmfold2.py            # scores the 24 manifest designs
+python Generation/validate_boltz_filter.py <af3_results.zip>   # prints the 3-way table
+```
+`validate_boltz_filter.py` auto-detects `esmfold2_scores.csv` and reports Pearson/Spearman
+and top-K AF3 hit-rate for Boltz ipTM vs ESMFold2 ipTM vs ESMFold2 pLDDT. **Decision rule:**
+adopt ESMFold2 as the pre-filter if its Spearman vs AF3 and its top-K hit-rate both beat
+Boltz's (ρ≈+0.11, top-4=75%). If neither model clears ρ≈0.3, accept that no cheap local
+surrogate ranks these de novo binders and pivot to sending stratified/diverse batches to
+AF3 rather than top-ranked ones.
+
 ---
 
 ## 6. Alternative local predictors considered
 
-| Tool | MSA? | Complex ipTM? | Disk | Verdict |
-|------|------|---------------|------|---------|
-| **RF3** (in foundry) | no (single-seq) | yes | installed | Anti-correlated (§4.1); geometric features only. |
+| Tool | MSA? | Complex ipTM? | Footprint | Verdict |
+|------|------|---------------|-----------|---------|
+| **RF3** (in foundry) | no (MSA-*starved*) | yes | installed | Anti-correlated (§4.1); geometric features only. |
 | **Boltz-2** | yes (ColabFold API) | yes | ~5 GB | Current pre-filter; under validation (§5). Affinity head is protein-ligand only, not usable here. |
-| **ESMFold** | **no (single-seq)** | not native (monomer-focused) | ~2.5–5 GB | Fast/small, but single-sequence like RF3 — **likely shares RF3's de-novo blindness**; no native interface ipTM. Low expected value as a complex filter. |
-| **Chai-1** | yes (MSA) | yes | ~5 GB | Closest true Boltz/AF3 alternative if a second opinion is wanted; MSA-based, outputs ipTM. Better candidate than ESMFold for this task. |
+| **ESMFold2** (Biohub/Rives, 2026) | **no (MSA-free *by design*)** | **yes — pLDDT/pTM/ipTM** | large (ESMC-6B base; VRAM TBD on V100) | **Strong candidate.** Language-model-based; explicitly best on no-MSA cases (antibodies) — the closest analog to our de novo binders. MIT, open weights on HuggingFace. See note below. |
+| **Chai-1** | yes (MSA) | yes | ~5 GB | MSA-based Boltz/AF3 alternative; outputs ipTM. Secondary option if a MSA-based second opinion is wanted. |
 
-**On "ESMFold2":** the relevant tool is ESMFold (ESM-2 language model + folding head).
-It is single-sequence and monomer-oriented; it does not natively emit interface ipTM for
-two-chain complexes. Because the failure mode we already documented for RF3 (§4.1) is
-*single-sequence blindness on de novo binders*, ESMFold is expected to inherit the same
-weakness. If we want a second AF3-class opinion alongside Boltz, **Chai-1** (also
-MSA-based, also emits ipTM, similar footprint) is the stronger candidate to trial.
+**On ESMFold2 (corrected 2026-06-01).** Earlier this row dismissed "ESMFold" as
+single-sequence and therefore likely to share RF3's de novo blindness. **That was wrong
+and conflated two different things.** RF3 fails here because it is a *structure* model run
+**without the MSA it was trained to expect** (MSA-*starved*). ESMFold2 (Chan Zuckerberg
+Biohub, Alex Rives's team) is built on the ESMC protein **language model** (trained on
+billions of sequences) and is MSA-free **by design** — the evolutionary signal is baked
+into the weights, not supplied per-query. Crucially, Biohub reports it is *strongest* on
+targets that lack MSAs, such as antibodies — which is the closest published analog to our
+engineered TIMP3-loop binders (no natural homologs → no informative MSA). It predicts
+protein–protein and antibody–antigen complexes and **emits pLDDT, pTM, and ipTM** — the
+exact metrics our pipeline consumes. Open source (MIT), weights on HuggingFace,
+`pip install esm@git+https://github.com/Biohub/esm.git`.
+
+This makes ESMFold2 a **better-motivated pre-filter than Boltz for this specific problem**:
+Boltz's ColabFold MSA is informative for the protease target but near-empty for the
+designed binder, so Boltz is partially MSA-starved on the side we care about; ESMFold2
+sidesteps that entirely and skips the ~26 s/design MSA fetch.
+
+Open practical questions before adopting:
+1. **VRAM on V100.** ESMC-6B is ~12 GB of weights at bf16 before activations; may not fit
+   a 16 GB V100 (tight on 32 GB). Must test on the actual node; a smaller ESMC variant may
+   be available for the folding trunk.
+2. **Independent benchmarks.** "Rivals/surpasses AF3" is from Biohub's own release + Nature
+   news, not yet independent peer review on *de novo designed* binders specifically.
+3. **Env isolation.** Like Boltz, install in a separate conda env and invoke via subprocess
+   to avoid the numpy/cublas/lightning conflicts that hit the foundry env.
+
+**Zero-cost evaluation path:** the 24 stratified designs (§5) become a labeled benchmark
+once AF3 returns. Run ESMFold2 on those same 24 and compare Boltz-vs-AF3 and
+ESMFold2-vs-AF3 on identical sequences — a clean three-way comparison that spends **no
+extra AF3 budget**. Keep whichever local model best separates AF3 hits from non-hits.
+
+Sources: Nature news (d41586-026-01686-3); Biohub release (biohub.org/news/world-model-of-protein-biology);
+Modal ESMFold2 example (modal.com/docs/examples/esmfold2); Latent Space interview (latent.space/p/esmfold2).
 
 ---
 

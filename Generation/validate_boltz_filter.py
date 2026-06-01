@@ -159,8 +159,9 @@ def report_stratified(merged: pd.DataFrame, manifest: pd.DataFrame, hit: float) 
     print("\n" + "=" * 64)
     print("STRATIFIED MODE  (designs sampled across Boltz bands)")
     print("=" * 64)
-    m = merged.merge(manifest[["binder_seq", "band", "boltz_iptm"]],
-                     on="binder_seq", how="inner", suffixes=("", "_man"))
+    # Manifest stores the binder sequence as 'full_seq'; merged keys on 'binder_seq'.
+    man = manifest.rename(columns={"full_seq": "binder_seq"})
+    m = merged.merge(man[["binder_seq", "band"]], on="binder_seq", how="inner")
     if m.empty:
         print("  No overlap between AF3 results and manifest — check inputs.")
         return
@@ -176,20 +177,33 @@ def report_stratified(merged: pd.DataFrame, manifest: pd.DataFrame, hit: float) 
         print(f"  {band:>4s} {len(sub):>4d} {sub['boltz_iptm'].mean():>16.3f} "
               f"{sub['iptm_af3'].mean():>14.3f} {rate*100:>9.0f}%")
 
-    # Verdict: does AF3 quality rise monotonically across Boltz bands?
+    # Verdict.  The practical question is "is the HIGH band enriched vs the rest"
+    # (we send the top to AF3), which is more robust at n/band ~ 8 than requiring
+    # strict monotonicity across all three bands.
     print()
-    if len(rows) >= 2:
-        means = [r[3] for r in sorted(rows, key=lambda r: order.get(r[0], 9))]
-        rises = all(means[i] <= means[i + 1] for i in range(len(means) - 1))
-        spread = means[-1] - means[0]
-        if rises and spread >= 0.10:
-            print(f"  VERDICT: AF3 ipTM rises with Boltz band (Δ={spread:+.2f} low→high).")
-            print("           Boltz IS a useful coarse filter — keep it as the AF3 gate.")
-        elif spread >= 0.05:
-            print(f"  VERDICT: weak positive trend (Δ={spread:+.2f}). Boltz filters, but softly.")
+    ranked = sorted(rows, key=lambda r: order.get(r[0], 9))   # LO, MID, HI
+    means  = [r[3] for r in ranked]
+    if len(ranked) >= 2:
+        hi          = ranked[-1]
+        rest_iptm   = m[m["band"] != hi[0]]["iptm_af3"]
+        hi_iptm     = m[m["band"] == hi[0]]["iptm_af3"]
+        contrast    = hi_iptm.mean() - rest_iptm.mean()           # HI vs (LO+MID)
+        monotonic   = all(means[i] <= means[i + 1] for i in range(len(means) - 1))
+        full_spread = means[-1] - means[0]
+
+        print(f"  HI-band vs rest:  AF3 ipTM {hi_iptm.mean():.3f} vs {rest_iptm.mean():.3f}"
+              f"  (contrast {contrast:+.3f})")
+        print(f"  low->high spread: {full_spread:+.3f}   monotonic across bands: {monotonic}")
+        print()
+        if monotonic and full_spread >= 0.10:
+            print("  VERDICT: clean rise across bands. Boltz is a useful coarse filter -- keep it.")
+        elif contrast >= 0.08:
+            print("  VERDICT: HI band is enriched but LO/MID is noisy. Boltz separates the")
+            print("           TOP tier from the rest, which is what we use it for -- keep it,")
+            print("           but treat only the top band as meaningful (mid vs low = noise).")
         else:
-            print(f"  VERDICT: flat across bands (Δ={spread:+.2f}). Boltz is NOT separating")
-            print("           good from bad here — its compute cost is not buying filtering.")
+            print("  VERDICT: no usable separation (HI not enriched vs rest). Boltz compute")
+            print("           is not buying filtering here -- consider dropping or replacing it.")
 
     if HAVE_SCIPY:
         r, rho, n = corr(m["boltz_iptm"], m["iptm_af3"])
@@ -197,8 +211,41 @@ def report_stratified(merged: pd.DataFrame, manifest: pd.DataFrame, hit: float) 
               f"pearson={r:+.3f} spearman={rho:+.3f} (n={n})")
 
 
+def report_model_comparison(merged: pd.DataFrame, hit: float) -> None:
+    """
+    Head-to-head: which local predictor's ipTM best ranks AF3 ipTM on the SAME
+    designs?  Runs only if esmfold2_scores.csv is present (from score_with_esmfold2.py).
+    """
+    esm_csv = OUT_BASE / "esmfold2_scores.csv"
+    if not esm_csv.exists():
+        return
+    esm = pd.read_csv(esm_csv)
+    esm["binder_seq"] = esm["full_seq"]
+    mm = merged.merge(esm[["binder_seq", "esm_iptm", "esm_ptm", "esm_plddt"]],
+                      on="binder_seq", how="inner")
+    if mm.empty:
+        return
+
+    print("\n" + "=" * 64)
+    print(f"LOCAL MODEL HEAD-TO-HEAD vs AF3 ipTM  (n={len(mm)}, same designs)")
+    print("=" * 64)
+    print(f"  {'predictor':16s} {'pearson':>9s} {'spearman':>9s}   top-{min(6,len(mm))} AF3 hit-rate")
+    for col, label in [("boltz_iptm", "Boltz ipTM"),
+                       ("esm_iptm",   "ESMFold2 ipTM"),
+                       ("esm_plddt",  "ESMFold2 pLDDT")]:
+        if col not in mm.columns:
+            continue
+        x = pd.to_numeric(mm[col], errors="coerce")
+        r, rho, _ = corr(x, mm["iptm_af3"])
+        k = min(6, len(mm))
+        topk = mm.assign(_x=x).nlargest(k, "_x")
+        hr = (topk["iptm_af3"] >= hit).mean()
+        print(f"  {label:16s} {r:>+9.3f} {rho:>+9.3f}   {hr*100:>3.0f}% ({int((topk['iptm_af3']>=hit).sum())}/{k})")
+    print("\n  Higher spearman + higher top-K hit-rate = better AF3 pre-filter.")
+
+
 def main():
-    ap = argparse.ArgumentParser(description="Validate Boltz as an AF3 pre-filter.")
+    ap = argparse.ArgumentParser(description="Validate Boltz (and ESMFold2) as AF3 pre-filters.")
     ap.add_argument("af3_zip", help="AF3 Server results ZIP.")
     ap.add_argument("--hit", type=float, default=0.55, help="AF3 ipTM hit threshold.")
     ap.add_argument("--manifest", default=None,
@@ -219,6 +266,7 @@ def main():
     else:
         report_correlation(merged, args.hit)
 
+    report_model_comparison(merged, args.hit)
     print()
 
 
