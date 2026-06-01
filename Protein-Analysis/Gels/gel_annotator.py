@@ -31,9 +31,10 @@ from ladders import LADDER_DB, LADDER_ALIASES, Ladder, LadderBand, resolve as re
 
 # ── Tuneable constants ────────────────────────────────────────────────────────
 
-LABEL_ANGLE_DEG = -45          # rotation for lane labels
+LABEL_ANGLE_DEG = 45           # rotation for lane labels (+45 → first char at bottom/gel side)
 BAND_LINE_ALPHA = 55           # 0–255, opacity of horizontal guide lines
 FRAMING_MARGIN = 18            # px of blank space outside the outermost labels
+LANE_EDGE_MARGIN_FRAC = 0.04  # fraction of gel width reserved on each side for gel walls
 FONT_SIZE_LANE = 14
 FONT_SIZE_LADDER = 12
 WELL_ROI_FRAC = 0.25           # top fraction of gel to search for wells
@@ -246,10 +247,15 @@ def detect_lanes_from_wells(gel_rgb: np.ndarray) -> Optional[List[int]]:
 
 
 def even_lanes(gel_rgb: np.ndarray, n: int) -> List[int]:
-    """Divide the gel width into n evenly spaced lane centres."""
+    """
+    Divide the usable gel width into n evenly spaced lane centres.
+    A small margin is left on each side for the gel casing/wall that forms the wells.
+    """
     w = gel_rgb.shape[1]
-    step = w / n
-    return [int(step * (i + 0.5)) for i in range(n)]
+    margin = int(w * LANE_EDGE_MARGIN_FRAC)
+    usable = w - 2 * margin
+    step = usable / n
+    return [int(margin + step * (i + 0.5)) for i in range(n)]
 
 
 # ── Ladder band detection ──────────────────────────────────────────────────────
@@ -336,8 +342,10 @@ def _paste_rotated_text(
 ) -> Image.Image:
     """
     Render text rotated by `angle` degrees and composite it onto canvas.
-    The bottom-centre of the rendered text lands at (tip_x, tip_y).
-    Returns the (possibly new) canvas.
+
+    With angle=+45 (CCW in PIL): text goes lower-left → upper-right.
+    The first character's lower-left corner lands at (tip_x, tip_y) so the
+    identifying start of the label points directly at the lane.
     """
     pad = 3
     tw, th = _text_bbox(text, font)
@@ -345,7 +353,9 @@ def _paste_rotated_text(
     ImageDraw.Draw(surf).text((pad, pad), text, font=font, fill=color + (255,))
     rotated = surf.rotate(angle, expand=True, resample=Image.BICUBIC)
     rw, rh = rotated.size
-    px = tip_x - rw // 2
+    # For +45° the first character is at the lower-left of the bounding box.
+    # Place that corner at (tip_x, tip_y) so it points at the lane.
+    px = tip_x
     py = tip_y - rh
     if canvas.mode != "RGBA":
         canvas = canvas.convert("RGBA")
@@ -437,23 +447,27 @@ def annotate(input_path: Path, config_path: Path, output_path: Optional[Path] = 
     lane_count_cfg: Optional[int] = lanes_cfg.get("count")
     lane_labels_cfg: List[str] = lanes_cfg.get("labels", [])
 
-    # Explicit count wins; if absent, infer from label list
-    expected_n = lane_count_cfg or (len(lane_labels_cfg) if lane_labels_cfg else None)
-
-    lane_xs = detect_lanes_from_wells(gel)
-    if lane_xs is not None:
-        n_detected = len(lane_xs)
-        if expected_n and n_detected != expected_n:
-            print(f"Detected {n_detected} lanes but config expects {expected_n}; using evenly-spaced.")
-            lane_xs = even_lanes(gel, expected_n)
-        else:
-            print(f"Auto-detected {n_detected} lanes.")
+    # If count is explicitly set, always use even spacing — skip detection entirely.
+    # If count is absent, try detection and fall back to label-list length.
+    if lane_count_cfg:
+        lane_xs = even_lanes(gel, lane_count_cfg)
+        print(f"Using {lane_count_cfg} evenly-spaced lanes (from config count).")
     else:
-        if expected_n is None:
-            print("Error: lane detection failed and no count/labels provided in config.")
-            sys.exit(1)
-        lane_xs = even_lanes(gel, expected_n)
-        print(f"Well detection failed; using {expected_n} evenly-spaced lanes from config.")
+        fallback_n = len(lane_labels_cfg) if lane_labels_cfg else None
+        lane_xs = detect_lanes_from_wells(gel)
+        if lane_xs is not None:
+            n_detected = len(lane_xs)
+            if fallback_n and n_detected != fallback_n:
+                print(f"Detected {n_detected} lanes but {fallback_n} labels given; using evenly-spaced.")
+                lane_xs = even_lanes(gel, fallback_n)
+            else:
+                print(f"Auto-detected {n_detected} lanes.")
+        else:
+            if fallback_n is None:
+                print("Error: lane detection failed and no count/labels in config.")
+                sys.exit(1)
+            lane_xs = even_lanes(gel, fallback_n)
+            print(f"Well detection failed; using {fallback_n} evenly-spaced lanes from label count.")
 
     n_lanes = len(lane_xs)
     lane_width = (
@@ -485,14 +499,17 @@ def annotate(input_path: Path, config_path: Path, output_path: Optional[Path] = 
         for i in range(n_lanes)
     ]
     max_lw, max_lh = max((_text_bbox(lbl, font_lane) for lbl in all_labels), key=lambda x: x[0])
-    diag_len = int(np.hypot(max_lw, max_lh)) + 6
-    top_pad = diag_len + FRAMING_MARGIN
+    # With +45° labels starting at lane x and extending upper-right:
+    #   vertical extent  = (max_lw + max_lh) * sin(45°)
+    #   horizontal overhang beyond last lane = max_lw * cos(45°)
+    _a = abs(LABEL_ANGLE_DEG) * np.pi / 180
+    top_pad = int((max_lw + max_lh) * np.sin(_a)) + FRAMING_MARGIN
 
     ladder_labels = [f"{b.size} {ladder.unit}" for b in ladder.bands]
     max_ll_w = max((_text_bbox(t, font_ladder)[0] for t in ladder_labels), default=60)
     left_pad = max_ll_w + FRAMING_MARGIN * 2
 
-    right_pad = FRAMING_MARGIN
+    right_pad = int(max_lw * np.cos(_a)) + FRAMING_MARGIN
     bottom_pad = FRAMING_MARGIN
 
     canvas_w = gel_w + left_pad + right_pad
