@@ -137,6 +137,9 @@ def select_designs(pool: pd.DataFrame, score_all: bool) -> pd.DataFrame:
 def main():
     ap = argparse.ArgumentParser(description="Score designs with ESMFold2.")
     ap.add_argument("--all", action="store_true", help="Score every design, not just the manifest.")
+    ap.add_argument("--input", default=None,
+                    help="Explicit CSV of designs to score (cols: design_id, full_seq, "
+                         "target_seq[, target_name]). Used by the pipeline's run_esmfold2.")
     ap.add_argument("--device", default="cuda", help="torch device (cuda / cuda:0 / cpu).")
     ap.add_argument("--out", default=str(OUT_BASE / "esmfold2_scores.csv"))
     ap.add_argument("--seed", type=int, default=0)
@@ -161,8 +164,13 @@ def main():
                      "  Reinstall torch to match the cluster driver (see above).")
         print(f"CUDA OK: {torch.cuda.get_device_name(0)} | torch {torch.__version__} (CUDA {torch.version.cuda})")
 
-    pool     = load_pool()
-    designs  = select_designs(pool, args.all)
+    if args.input:
+        designs = pd.read_csv(args.input)
+        if "target_name" not in designs.columns:
+            designs["target_name"] = ""
+        print(f"Scoring {len(designs)} designs from {args.input}")
+    else:
+        designs = select_designs(load_pool(), args.all)
     if designs.empty:
         sys.exit("No designs selected to score.")
 

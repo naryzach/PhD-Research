@@ -3,8 +3,12 @@ iterative_refinement.py
 
 Iterative binder design with a four-stage in-silico funnel before any AF3 call:
 
-  RFd3 (backbone) → LigandMPNN (sequence) → RF3 with target template (sanity) →
-  Boltz-2 (local AF3-class ranker) → AF3 Server (gold-standard validation, capped at 30/day)
+  RFd3 (backbone) → LigandMPNN (sequence) → RF3 (sanity + geometric features) →
+  ESMFold2 (local AF3-class ranker) → AF3 Server (gold-standard validation, capped at 30/day)
+
+ESMFold2 replaced Boltz-2 as the ranker after AF3 calibration (see
+BOLTZ_FILTER_METHODS.md §5.2): MSA-free, faster, and a better AF3 predictor.
+Boltz-2 support is retained but OFF by default (BOLTZ_ENABLE).
 
 TIMP3-scaffold binders for MMP2, MMP9, MMP3, MMP10, ADAM10, ADAM17 are produced by
 redesigning loops AB / C / EF (GH optional).  Temperature anneals 0.5 → 0.1 to shift
@@ -148,15 +152,24 @@ N_CONTACTS_NORM        = 60.0  # n_contacts above this saturates to 1.0
 
 # Composite score weights — source-aware.  Higher-trust sources contribute more
 # and use a richer formula; lower-trust sources use geometric features only.
+# Trust order:  AF3  >  ESMFold2  >  Boltz-2  >  RF3-geometric.
 #
-# Why split: in our calibration against AF3 (n=18), RF3 single-sequence ipTM/pTM
-# were anti-correlated with AF3 ipTM (r = -0.07 / -0.51).  Including those metrics
-# in a unified ranker introduces noise.  Boltz-2 and AF3, which use MSA/templates,
-# should track each other well — we trust them more.
+# Calibration history (all vs AF3 ipTM ground truth):
+#   - RF3 single-sequence ipTM/pTM were ANTI-correlated (r ≈ -0.07 / -0.51, n=18):
+#     excluded from ranking entirely; RF3 contributes geometric features only.
+#   - Boltz-2: weak, target-inconsistent (Spearman +0.11, top-6 50%, n=24).
+#   - ESMFold2: best local predictor (binder pLDDT rho +0.34 / ipTM rho +0.28,
+#     top-6 100%, n=24).  Now the primary pre-AF3 ranker.
 #
-# Each formula returns a value in [0, 1].  The fallback RF3 composite is capped
-# at RF3_COMPOSITE_CEILING so any AF3- or Boltz-scored entry naturally ranks
-# above an RF3-only entry of similar geometric quality.
+# ESMFold2 weighting rationale: pLDDT correlated slightly better than ipTM, but
+# both are noisy at n=24 and both are mechanistically informative (foldability +
+# interface quality).  We weight them EQUALLY on purpose — leaning harder on
+# pLDDT would overfit a low-n ranking difference and bias toward "foldable" over
+# "binding".  Per-target selection (AF3 export) handles pLDDT's target-dependent
+# magnitude, so no per-target special-casing is needed (avoids systematic bias).
+#
+# Each formula returns a value in [0, 1].  The RF3-only fallback is capped at
+# RF3_COMPOSITE_CEILING so any model-scored entry outranks an unvalidated one.
 COMPOSITE_AF3 = {        # AF3-validated entries: full trust
     "iptm":  0.45,
     "plddt": 0.25,
@@ -164,35 +177,47 @@ COMPOSITE_AF3 = {        # AF3-validated entries: full trust
     "rmsd":  0.05,
     "pae":   0.10,
 }
-COMPOSITE_BOLTZ = {      # Boltz-2 scored: AF3-class metrics, no affinity head
-    "iptm":   0.45,      # Boltz-2's affinity head only runs for protein-ligand
-    "plddt":  0.25,      # complexes (verified Boltz 2.2.1 — rejects protein-protein
-    "ptm":    0.15,      # in `properties.affinity`), so we rely on the structure-
-    "pae":    0.15,      # confidence metrics, which mirror AF3-class scoring.
+COMPOSITE_ESMFOLD2 = {   # ESMFold2-scored: primary local ranker (equal ipTM + pLDDT)
+    "iptm":  0.50,
+    "plddt": 0.50,
+}
+COMPOSITE_BOLTZ = {      # Boltz-2 scored: retained but no longer the default ranker
+    "iptm":   0.45,
+    "plddt":  0.25,
+    "ptm":    0.15,
+    "pae":    0.15,
 }
 COMPOSITE_RF3_GEOM = {   # RF3-only fallback: geometric features only (no ipTM/pTM/pLDDT)
     "n_contacts": 0.40,  # interface size
     "pae":        0.30,  # weak +signal in our calibration
     "rmsd":       0.30,  # backbone fidelity to RFd3 design
 }
-RF3_COMPOSITE_CEILING = 0.50  # cap RF3-only composite so AF3/Boltz dominate HOF
+RF3_COMPOSITE_CEILING = 0.50  # cap RF3-only composite so model-scored entries dominate HOF
 
-# ── Boltz-2 configuration ────────────────────────────────────────────────────
-# Boltz-2 is an open-source AF3-class model used here as the pre-AF3 local ranker.
-# Disk footprint ≈ 3 GB weights + ~2 GB ColabFold MSA cache (per-user, in ~/.boltz/).
-#
-# DEPLOYMENT NOTE: Boltz pins numpy<2.0 / cublas<12.5 / older lightning.  When
-# installed into a foundry env that previously had newer versions, those get
-# downgraded — fine on V100 (DISABLE_CUEQUIVARIANCE is auto-set there), but
-# breaks RF3 on A100/H100 which requires cuEquivariance.  If you move this job
-# to A100/H100 hardware, install Boltz in a separate conda env and set
-# BOLTZ_EXECUTABLE to point at it:
-#     export BOLTZ_EXECUTABLE=/x/capa/<user>/miniconda3/envs/boltz/bin/boltz
-BOLTZ_ENABLE            = True
+# ── ESMFold2 configuration (primary pre-AF3 ranker) ──────────────────────────
+# ESMFold2 (Chan Zuckerberg Biohub, Rives lab) is MSA-free and faster than Boltz,
+# and beat Boltz in our AF3 calibration (§5.2 of BOLTZ_FILTER_METHODS.md).  It is
+# the default local ranker.  It cannot share the foundry env (torch/CUDA pins),
+# so we invoke score_with_esmfold2.py in a separate `esmfold2` conda env via
+# subprocess.  Configure the env's python + the scorer path:
+#     export ESMFOLD2_PYTHON=/x/capa/<user>/miniconda3/envs/esmfold2/bin/python
+ESMFOLD2_ENABLE     = True
+ESMFOLD2_PYTHON     = os.environ.get(
+    "ESMFOLD2_PYTHON",
+    str(Path.home() / "miniconda3" / "envs" / "esmfold2" / "bin" / "python"),
+)
+ESMFOLD2_SCRIPT     = str(_HERE / "score_with_esmfold2.py")
+ESMFOLD2_TIMEOUT_S  = 3600   # whole-batch timeout (model load + N designs)
+
+# ── Boltz-2 configuration (retained, OFF by default) ─────────────────────────
+# Superseded by ESMFold2 as the ranker but kept available for A/B comparison.
+# Boltz pins numpy<2.0 / cublas<12.5 / older lightning; install in a separate env
+# and set BOLTZ_EXECUTABLE if you re-enable it.
+BOLTZ_ENABLE            = False
 BOLTZ_EXECUTABLE        = os.environ.get("BOLTZ_EXECUTABLE", "boltz")
-BOLTZ_USE_MSA_SERVER    = True   # use ColabFold's remote MMseqs2 API (no local DB)
-BOLTZ_DIFFUSION_SAMPLES = 1      # samples per design (1 is fastest, good enough for ranking)
-BOLTZ_TIMEOUT_S         = 300    # 5 min hard timeout (real runs are ~30s post-cache-warm)
+BOLTZ_USE_MSA_SERVER    = True
+BOLTZ_DIFFUSION_SAMPLES = 1
+BOLTZ_TIMEOUT_S         = 300
 
 
 # ── Utility functions ─────────────────────────────────────────────────────────
@@ -351,13 +376,14 @@ def calc_composite(entry: dict) -> float:
     Source-aware composite score in [0, 1].  Selects metrics based on the
     highest-trust prediction available for the entry:
 
-        AF3-validated  →  COMPOSITE_AF3      (full trust)
-        Boltz-scored   →  COMPOSITE_BOLTZ    (structure-confidence metrics)
-        RF3-only       →  COMPOSITE_RF3_GEOM (geometric features only, capped)
+        AF3-validated   →  COMPOSITE_AF3      (full trust)
+        ESMFold2-scored →  COMPOSITE_ESMFOLD2 (primary local ranker: ipTM + pLDDT)
+        Boltz-scored    →  COMPOSITE_BOLTZ    (retained; off by default)
+        RF3-only        →  COMPOSITE_RF3_GEOM (geometric features only, capped)
 
     The RF3-only branch deliberately excludes RF3's iptm/pTM/pLDDT because they
     are anti-correlated with AF3 ipTM for de novo binders (calibrated empirically).
-    It is also capped at RF3_COMPOSITE_CEILING so any AF3 or Boltz score dominates.
+    It is capped at RF3_COMPOSITE_CEILING so any model-scored entry dominates.
     """
     src = entry.get("source", "RF3")
 
@@ -370,6 +396,14 @@ def calc_composite(entry: dict) -> float:
             + w["ptm"]   * _safe(entry.get("ptm"))
             + w["rmsd"]  * _rmsd_score(entry.get("rmsd_to_rfd3"))
             + w["pae"]   * _pae_score(entry.get("interface_pae"))
+        )
+
+    # ── ESMFold2-scored (primary local ranker: equal ipTM + binder pLDDT) ──
+    if entry.get("esm_iptm") is not None:
+        w = COMPOSITE_ESMFOLD2
+        return (
+            w["iptm"]  * _safe(entry.get("esm_iptm"))
+            + w["plddt"] * (_normalize_plddt(entry.get("esm_plddt")) / 100.0)
         )
 
     # ── Boltz-2-scored ──
@@ -684,6 +718,86 @@ class IterativeRefiner:
         )
         return candidates
 
+    # ── ESMFold2 (primary local ranker) ──────────────────────────────────────
+
+    def run_esmfold2(self, target_name: str, candidates: list, out_dir: Path) -> list:
+        """
+        Score candidates with ESMFold2 by shelling out to score_with_esmfold2.py
+        in the separate `esmfold2` conda env (it can't share the foundry env's
+        torch/CUDA pins).  We write the candidates to an input CSV, run the
+        scorer, and merge esm_iptm / esm_plddt / esm_ptm back in.
+
+        Adds those fields, sets source="ESMFold2", recomputes composite_score,
+        and flags `promising` on esm_iptm.  No-op if ESMFOLD2_ENABLE is False or
+        the env python is missing (pipeline then falls back to RF3 geometric).
+        """
+        if not ESMFOLD2_ENABLE or not candidates:
+            return candidates
+
+        out_dir.mkdir(parents=True, exist_ok=True)
+        in_csv  = out_dir / "esm_input.csv"
+        out_csv = out_dir / "esm_scores.csv"
+
+        rows = []
+        for c in candidates:
+            tseq = c.get("target_seq") or self.target_seqs.get(target_name, "")
+            if c.get("full_seq") and tseq:
+                rows.append({"design_id": c["design_id"], "target_name": target_name,
+                             "full_seq": c["full_seq"], "target_seq": tseq})
+        if not rows:
+            return candidates
+        pd.DataFrame(rows).to_csv(in_csv, index=False)
+
+        cmd = [ESMFOLD2_PYTHON, ESMFOLD2_SCRIPT,
+               "--input", str(in_csv), "--out", str(out_csv)]
+        t0 = time.time()
+        try:
+            # Separate env → strip PYTHONPATH so it uses its own site-packages.
+            child_env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=ESMFOLD2_TIMEOUT_S, env=child_env)
+            if proc.returncode != 0:
+                logger.warning(f"[{target_name}] ESMFold2 failed: {proc.stderr[-400:].strip()}")
+                return candidates
+        except FileNotFoundError:
+            logger.error(
+                f"ESMFold2 python not found at: {ESMFOLD2_PYTHON}\n"
+                "  Create the env and set ESMFOLD2_PYTHON (see config block), or set\n"
+                "  ESMFOLD2_ENABLE=False to skip. Falling back to RF3 geometric scoring."
+            )
+            return candidates
+        except subprocess.TimeoutExpired:
+            logger.warning(f"[{target_name}] ESMFold2 timed out (>{ESMFOLD2_TIMEOUT_S}s)")
+            return candidates
+
+        if not out_csv.exists():
+            logger.warning(f"[{target_name}] ESMFold2 produced no scores.")
+            return candidates
+
+        scores = pd.read_csv(out_csv).set_index("design_id")
+        n_done = 0
+        for c in candidates:
+            did = c["design_id"]
+            if did not in scores.index:
+                continue
+            row = scores.loc[did]
+            esm_iptm = float(row.get("esm_iptm", float("nan")))
+            c.update({
+                "esm_iptm":   esm_iptm,
+                "esm_ptm":    float(row.get("esm_ptm", float("nan"))),
+                "esm_plddt":  float(row.get("esm_plddt", float("nan"))),
+                "source":     "ESMFold2",
+                "promising":  _safe(esm_iptm) >= IPTM_PROMISING,
+            })
+            c["composite_score"] = calc_composite(c)
+            n_done += 1
+
+        logger.info(
+            f"[{target_name}] ESMFold2 done in {(time.time()-t0)/60:.1f} min "
+            f"({n_done}/{len(candidates)} scored)"
+        )
+        return candidates
+
     # ── RFd3 ─────────────────────────────────────────────────────────────────
 
     def _build_contig(self, tcfg: dict, fix_chain_len: int,
@@ -964,7 +1078,14 @@ class IterativeRefiner:
     # ── Hall of Fame ──────────────────────────────────────────────────────────
 
     def update_hof(self, new_scored: list) -> None:
-        """Add new scored designs to per-target HOF; keep top HOF_SIZE_PER_TARGET."""
+        """
+        Add new scored designs to per-target HOF; keep top HOF_SIZE_PER_TARGET.
+
+        AF3-validated entries are NEVER trimmed: AF3 results are the scarce
+        ground truth (30/day) and the local composite is only a proxy, so an
+        un-validated ESMFold2 entry must not displace a validated one. We keep
+        all AF3 entries, then fill the remaining slots with the best others.
+        """
         for entry in new_scored:
             tname = entry.get("target_name")
             if tname not in self.state["hof"]:
@@ -973,9 +1094,14 @@ class IterativeRefiner:
 
         for tname in self.active_targets:
             hof = self.state["hof"].get(tname, [])
+            af3   = [e for e in hof if e.get("source") == "AF3"]
+            other = [e for e in hof if e.get("source") != "AF3"]
+            other.sort(key=lambda x: x.get("composite_score", 0), reverse=True)
+            keep_other = max(0, HOF_SIZE_PER_TARGET - len(af3))
+            merged = af3 + other[:keep_other]
             self.state["hof"][tname] = sorted(
-                hof, key=lambda x: x.get("composite_score", 0), reverse=True
-            )[:HOF_SIZE_PER_TARGET]
+                merged, key=lambda x: x.get("composite_score", 0), reverse=True
+            )
 
         # Save best HOF structures for later seeding/inspection
         self._save_hof_structures()
@@ -1413,17 +1539,17 @@ class IterativeRefiner:
                 logger.warning(f"[{tname}] No LMPNN sequences; skipping RF3.")
                 continue
 
-            # 3. RF3 complex scoring (templated, sanity check + geometric features)
+            # 3. RF3 complex scoring (sanity check + geometric features)
             rf3_dir = it_dir / "rf3" / tname
             scored  = self.run_rf3_complex(tname, candidates, rf3_dir)
 
-            # 4. Boltz-2 local AF3-class scoring — the real pre-AF3 ranker.
-            # Adds boltz_* fields and promotes source from "RF3" to "Boltz".
-            # If BOLTZ_ENABLE is False or boltz CLI is missing, this is a no-op
-            # and the pipeline continues with RF3-only geometric composites.
-            # (run_rf3_complex already strips array/rfd3_array from its output.)
-            boltz_dir = it_dir / "boltz" / tname
-            scored    = self.run_boltz(tname, scored, boltz_dir)
+            # 4. Local AF3-class ranker. ESMFold2 is the default (best in our
+            # AF3 calibration); Boltz is retained but off by default. Each is a
+            # no-op if disabled or its env is missing — the pipeline then keeps
+            # RF3-only geometric composites. (run_rf3_complex already strips
+            # the heavy atom arrays from its output.)
+            scored = self.run_esmfold2(tname, scored, it_dir / "esmfold2" / tname)
+            scored = self.run_boltz(tname, scored, it_dir / "boltz" / tname)
             all_scored.extend(scored)
 
         # Update HOF and write summaries

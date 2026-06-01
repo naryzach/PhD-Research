@@ -198,19 +198,55 @@ only the extreme top (~top 15%), is no better than random past that, has poor re
 for ADAM10. Usable as a soft "send the very top per target" heuristic, but **not** the
 reliable AF3 surrogate we wanted. This motivates trialing ESMFold2 (§6) on the same 24.
 
-### 5.2 ESMFold2 head-to-head (same 24 designs)
+### 5.2 ESMFold2 head-to-head results (same 24 designs, 2026-06-01)
 
-ESMFold2 now has a zero-AF3-cost evaluation path. On the cluster:
-```bash
-python Generation/score_with_esmfold2.py            # scores the 24 manifest designs
-python Generation/validate_boltz_filter.py <af3_results.zip>   # prints the 3-way table
-```
-`validate_boltz_filter.py` auto-detects `esmfold2_scores.csv` and reports Pearson/Spearman
-and top-K AF3 hit-rate for Boltz ipTM vs ESMFold2 ipTM vs ESMFold2 pLDDT. **Decision rule:**
-adopt ESMFold2 as the pre-filter if its Spearman vs AF3 and its top-K hit-rate both beat
-Boltz's (ρ≈+0.11, top-4=75%). If neither model clears ρ≈0.3, accept that no cheap local
-surrogate ranks these de novo binders and pivot to sending stratified/diverse batches to
-AF3 rather than top-ranked ones.
+ESMFold2 (ESMC-6B base, ~25 GB weights, MSA-free) scored the same 24 designs on the
+cluster; compared against AF3 ipTM ground truth via `validate_boltz_filter.py`:
+
+| Predictor | Pearson | Spearman | p | top-6 AF3 hit-rate |
+|-----------|--------:|---------:|--:|-------------------:|
+| Boltz ipTM | +0.148 | +0.109 | 0.61 | 50% (3/6) |
+| ESMFold2 ipTM | +0.250 | +0.283 | 0.18 | 83% (5/6) |
+| **ESMFold2 pLDDT** | **+0.340** | **+0.335** | 0.11 | **100% (6/6)** |
+| ESMFold2 pLDDT×ipTM (rank-prod) | — | +0.346 | 0.10 | — |
+
+**ESMFold2 clearly beats Boltz** on both correlation (ρ 0.34 vs 0.11) and precision
+(top-6 100% vs 50%; top-8 88% vs 50%). The best single signal is **ESMFold2 binder
+pLDDT** — consistent with §4.2, where Boltz's own best signal was also pLDDT. The most
+transferable predictor of AF3 success for these de novo binders is *"does the binder fold
+confidently in the complex context,"* not either model's interface ipTM.
+
+**Honest caveats (do not over-trust yet):**
+1. **n=24; nothing is significant.** Critical |ρ|≈0.34 at p<0.05; ESMFold2 pLDDT lands
+   right at the edge (p=0.11). The top-K hit-rates are the trustworthy practical signal,
+   not the p-values.
+2. **Per-target signal is noisy (n=6 each) and inconsistent across models:**
+
+   | Target | Boltz ρ | ESMFold2-pLDDT ρ |
+   |--------|--------:|-----------------:|
+   | MMP2   | +0.72 | **−0.84** (inverted!) |
+   | MMP9   | +0.43 | +0.71 |
+   | ADAM10 | −0.49 (Boltz inverted) | +0.66 (ESMFold2 fixes it) |
+   | ADAM17 | +0.14 | +0.49 |
+
+   ESMFold2 pLDDT **fixes the ADAM10 inversion** that broke Boltz, and improves MMP9/ADAM17
+   — but looks **inverted for MMP2** (n=6, so fragile). Neither model is uniformly right.
+3. **pLDDT magnitude is target-dependent.** Top-8 by ESMFold2 pLDDT contained 0 MMP2
+   designs (ADAM10/ADAM17/MMP9 get systematically higher pLDDT). A *global* pLDDT ranker
+   would starve MMP2 of AF3 slots → **selection must be per-target top-K**, as the AF3
+   export already does.
+
+**Verdict (per the pre-registered rule in the prior §5.2):** ESMFold2 beat Boltz on both
+Spearman and top-K, so **adopt ESMFold2 (rank by binder pLDDT, per-target) as the pre-AF3
+filter** — but confirm on one more batch before fully trusting, since n=24 is
+underpowered and MMP2 is a flag to watch.
+
+**Recommended next step.** Score the full design pool with ESMFold2
+(`score_with_esmfold2.py --all`, hours on the cluster), select the next 30-job AF3 batch
+as per-target top-K by ESMFold2 binder pLDDT, and re-run `validate_boltz_filter.py`. If
+the batch hit-rate is ~80%+ (and MMP2 doesn't crater), the filter is real and confirmed at
+n≈48; then wire ESMFold2 into the pipeline as the ranking stage (subprocess to the
+`esmfold2` env, mirroring Boltz).
 
 ---
 
