@@ -3,24 +3,26 @@ specificity_refinement.py
 
 Specificity-focused iterative binder design for TIMP3-scaffold loops.
 
-Extends the iterative_refinement pipeline by scoring every designed binder
-against BOTH the on-target and off-target protease in a specificity pair:
-  - MMP2 (on-target) vs MMP9 (off-target)
+Extends iterative_refinement by scoring every designed binder against BOTH the
+on-target and off-target protease in a specificity pair:
+  - MMP2 (on-target)   vs MMP9 (off-target)
   - ADAM10 (on-target) vs ADAM17 (off-target)
 
-Additional metrics computed per design:
-  selectivity_score  = ipTM_on - ipTM_off
-      > 0 : prefers on-target
-      < 0 : prefers off-target (discard)
-  selectivity_ratio  = ipTM_on / max(ipTM_off, 1e-3)
+Scoring uses ESMFold2 (the validated local ranker — see BOLTZ_FILTER_METHODS.md),
+NOT RF3 (RF3 confidence was anti-correlated with AF3). Each binder is folded
+against the on- and off-target; we record:
+  selectivity_score = esm_iptm_on - esm_iptm_off   (>0 prefers on-target)
+  composite         = reward on-target binding (ipTM_on, pLDDT_on) + selectivity
 
-The Hall of Fame is ranked by a composite that balances absolute binding
-affinity (composite_score) with selectivity (selectivity_score).
+Inherits all the main-pipeline machinery: RFd3 → LigandMPNN → (RF3 off) →
+ESMFold2, per-target failure isolation, AF3-protected/deduped HOF, multi-GPU
+ESMFold2, and AF3 ZIP import. RFd3/LigandMPNN design against the ON-target only;
+off-target sequences are used purely for cross-scoring.
 
 Usage:
   python specificity_refinement.py --pair MMP --loops AB C EF
-  python specificity_refinement.py --pair ADAM --loops AB C EF
-  python specificity_refinement.py --pair MMP ADAM --loops AB C EF
+  python specificity_refinement.py --pair MMP ADAM --esmfold2-gpus auto
+  python specificity_refinement.py --pair MMP --import-af3 <results.zip>
 
 Output: Local/specificity_refinement/
 """
@@ -29,53 +31,42 @@ import os
 import subprocess
 
 # --- PORTABILITY: GPU-Aware Environment Setup ---
-# We must detect the GPU and set DISABLE_CUEQUIVARIANCE before importing heavy ML libraries.
-# cuEquivariance checks this at import time, so inside main() is too late.
+# Detect the GPU and set DISABLE_CUEQUIVARIANCE before importing heavy ML libs
+# (RFd3/LigandMPNN still run in-process in the foundry env).
 try:
     smi_out = subprocess.check_output(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"]).decode()
     if "V100" in smi_out:
         os.environ["DISABLE_CUEQUIVARIANCE"] = "1"
-        print(f"Detected V100 GPU. Automatically setting DISABLE_CUEQUIVARIANCE=1 for compatibility.")
+        print("Detected V100 GPU. Automatically setting DISABLE_CUEQUIVARIANCE=1 for compatibility.")
 except Exception:
     pass
 
+import re
 import json
 import logging
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import torch
 
+import iterative_refinement as ir  # for setting module globals (ESMFOLD2_GPUS)
 from iterative_refinement import (
     IterativeRefiner,
     TARGETS,
     LOOP_CONFIGS,
     DATA_DIR,
-    OUT_BASE as _IR_OUT_BASE,
-    BACKBONES_PER_TARGET,
-    HOF_SIZE_PER_TARGET,
     AF3_EXPORT_EVERY_N,
     AF3_TOP_N,
     IPTM_PROMISING,
-    MIN_TEMPERATURE,
-    TEMP_DECAY,
-    INIT_TEMPERATURE,
-    setup_env,
-    get_seq,
-    renumber,
+    ESMFOLD2_ENABLE,
     pdb_chain_seq,
     extract_loops,
-    get_fixed_residues,
-    calc_composite,
-    backbone_rmsd,
-    count_interface_contacts,
+    _safe,
+    _normalize_plddt,
 )
-from atomworks.io.utils.io_utils import to_cif_file
-from rf3.inference_engines.rf3 import RF3InferenceEngine
-from rf3.utils.inference import InferenceInput
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -87,395 +78,316 @@ logger = logging.getLogger(__name__)
 for _noisy in ("transforms", "atomworks.io", "atomworks.ml", "foundry", "lightning"):
     logging.getLogger(_noisy).setLevel(logging.ERROR)
 
-torch.set_float32_matmul_precision("medium")
-
 # ── Paths ─────────────────────────────────────────────────────────────────────
 _HERE    = Path(__file__).parent.resolve()
 OUT_BASE = _HERE / ".." / "Local" / "specificity_refinement"
 
 # ── Specificity pair definitions ──────────────────────────────────────────────
-# on_target: the protease we want to bind
-# off_target: the protease to avoid
 SPECIFICITY_PAIRS = {
     "MMP":  {"on_target": "MMP2",  "off_target": "MMP9"},
     "ADAM": {"on_target": "ADAM10", "off_target": "ADAM17"},
 }
 
-# Composite score weights for the combined specificity HOF ranking.
-# Selectivity is given a dedicated weight alongside the standard affinity metrics.
+# Specificity composite (ESMFold2 signals only).  Mirrors the main pipeline's
+# 0.5·ipTM + 0.5·pLDDT philosophy but reallocates weight to selectivity — the
+# whole point here.  Equal-ish on-target binding vs selectivity, no per-target
+# special-casing (avoids overfitting / systematic bias):
+#   binding (iptm_on 0.35 + plddt_on 0.25 = 0.60)   selectivity 0.40
 SPECIFICITY_COMPOSITE_WEIGHTS = {
-    "iptm_on":      0.35,  # Binding to on-target
-    "selectivity":  0.25,  # ipTM_on - ipTM_off (selectivity)
-    "plddt":        0.15,  # Fold confidence
-    "ptm":          0.10,  # Global structure quality
-    "rmsd":         0.10,  # Backbone fidelity
-    "pae_on":       0.05,  # Interface PAE on-target
+    "iptm_on":     0.35,   # on-target interface quality (ESMFold2 ipTM)
+    "plddt_on":    0.25,   # binder foldability in the on-target complex
+    "selectivity": 0.40,   # (ipTM_on - ipTM_off), rescaled to [0, 1]
 }
-RMSD_CLIP  = 5.0
-PAE_MAX    = 30.0
-HOF_SIZE   = 75           # Per specificity pair
+HOF_SIZE = 75   # per specificity pair
 
 
-def calc_specificity_composite(iptm_on: float, iptm_off: float, plddt: float,
-                                ptm: float, rmsd_val: float,
-                                iface_pae_on: float) -> float:
-    """Composite score that rewards both on-target binding and selectivity."""
+def calc_specificity_composite(iptm_on, iptm_off, plddt_on) -> float:
+    """Composite in [0, 1] rewarding on-target binding AND selectivity (ESMFold2)."""
     w   = SPECIFICITY_COMPOSITE_WEIGHTS
-    sel = float(iptm_on) - float(iptm_off)          # in [-1, 1]
-    sel_norm = (sel + 1.0) / 2.0                    # rescale to [0, 1]
-    rmsd_s   = max(0.0, 1.0 - rmsd_val / RMSD_CLIP)
-    pae_s    = max(0.0, 1.0 - iface_pae_on / PAE_MAX) if not np.isnan(iface_pae_on) else 0.0
-    return (
-        w["iptm_on"]      * float(iptm_on)
-        + w["selectivity"]  * sel_norm
-        + w["plddt"]        * (float(plddt) / 100.0)
-        + w["ptm"]          * float(ptm)
-        + w["rmsd"]         * rmsd_s
-        + w["pae_on"]       * pae_s
-    )
+    io  = _safe(iptm_on)
+    off = _safe(iptm_off, 0.0)
+    if np.isnan(off):
+        off = 0.0
+    sel_norm = (io - off + 1.0) / 2.0                 # [-1,1] → [0,1]
+    pl = _normalize_plddt(plddt_on) / 100.0
+    return w["iptm_on"] * io + w["plddt_on"] * pl + w["selectivity"] * sel_norm
 
 
 class SpecificityRefiner(IterativeRefiner):
     """
-    Extends IterativeRefiner to score each design against both the on-target
-    and off-target protease and compute a selectivity score.
-
-    Parameters
-    ----------
-    pair_keys : list[str]
-        Keys from SPECIFICITY_PAIRS to run (e.g. ["MMP", "ADAM"]).
-    active_loops : list[str]
-        Subset of LOOP_CONFIGS keys.
+    Score each design against both the on- and off-target (ESMFold2) and rank by
+    a selectivity-aware composite. Design happens against the on-target only.
     """
 
     def __init__(self, pair_keys: list, active_loops: list):
-        # Collect all targets needed across pairs
-        all_targets = list({
-            t
-            for pk in pair_keys
-            for t in (SPECIFICITY_PAIRS[pk]["on_target"], SPECIFICITY_PAIRS[pk]["off_target"])
-        })
-        self.pair_keys  = pair_keys
-        self.pairs      = {pk: SPECIFICITY_PAIRS[pk] for pk in pair_keys}
+        self.pair_keys = pair_keys
+        self.pairs     = {pk: SPECIFICITY_PAIRS[pk] for pk in pair_keys}
+        # Design (and the per-target HOF) operate on the ON-targets only.
+        on_targets = list({self.pairs[pk]["on_target"] for pk in pair_keys})
+        self._pair_for_on_target = {self.pairs[pk]["on_target"]: pk for pk in pair_keys}
 
         super().__init__(
-            active_targets=all_targets,
+            active_targets=on_targets,
             active_loops=active_loops,
             state_path=OUT_BASE / "specificity_state.json",
         )
 
-        # Specificity HOF: per pair
+        # Per-pair specificity HOF (separate from the inherited per-target HOF)
         if "specificity_hof" not in self.state:
             self.state["specificity_hof"] = {pk: [] for pk in pair_keys}
 
-        # Ensure off-target sequences are loaded
+        # Load off-target sequences for cross-scoring (not designed against)
         for pk, pair in self.pairs.items():
             off = pair["off_target"]
             if off not in self.target_seqs:
                 pdb_path = DATA_DIR / TARGETS[off]["pdb"]
                 if pdb_path.exists():
-                    self.target_seqs[off] = pdb_chain_seq(
-                        str(pdb_path), TARGETS[off]["target_chain"]
-                    )
+                    self.target_seqs[off] = pdb_chain_seq(str(pdb_path), TARGETS[off]["target_chain"])
 
-    # ── RF3 on a specific target (not necessarily the design target) ──────────
+    # ── ESMFold2 dual (on + off) scoring — replaces the old RF3 override ───────
 
-    def _score_against_target(self, binder_seq: str, target_name: str,
-                               rf3_engine, design_id: str,
-                               out_dir: Path, suffix: str = "") -> dict:
+    def run_esmfold2(self, target_name: str, candidates: list, out_dir: Path) -> list:
         """
-        Run RF3 complex prediction for binder_seq vs target_name.
-        Returns dict with iptm, plddt, ptm, interface_pae.
+        Score each candidate against the on-target AND off-target with ESMFold2
+        (one combined, GPU-sharded batch via the inherited helper), then rank by
+        the selectivity-aware composite and update the specificity HOF.
         """
-        target_seq = self.target_seqs.get(target_name, "")
-        if not target_seq:
-            return {"iptm": 0.0, "plddt": 0.0, "ptm": 0.0, "interface_pae": float("nan")}
+        if not ESMFOLD2_ENABLE or not candidates:
+            return candidates
 
-        tcfg = TARGETS[target_name]
-        bc   = tcfg["binder_chain"]
-        fc   = tcfg["target_chain"]
+        pk = self._pair_for_on_target.get(target_name)
+        if pk is None:   # not an on-target (shouldn't happen) → standard scoring
+            return super().run_esmfold2(target_name, candidates, out_dir)
 
-        rf3_data = {
-            "name": f"{design_id}_{suffix or target_name}",
-            "components": [
-                {"id": bc, "sequence": binder_seq},
-                {"id": fc, "sequence": target_seq},
-            ],
-        }
-        rf3_input = InferenceInput.from_json_dict(rf3_data)
-        rf3_outs  = rf3_engine.run(inputs=rf3_input, annotate_b_factor_with_plddt=True)
-        rf3_key   = next(iter(rf3_outs))
-        rf3_out   = rf3_outs[rf3_key][0]
-        rf3_arr   = renumber(rf3_out.atom_array)
+        on_t, off_t = self.pairs[pk]["on_target"], self.pairs[pk]["off_target"]
+        on_seq  = self.target_seqs.get(on_t, "")
+        off_seq = self.target_seqs.get(off_t, "")
 
-        conf  = rf3_out.summary_confidences or {}
-        plddt = conf.get("overall_plddt", conf.get("plddt", 0.0))
-        ptm   = conf.get("ptm", 0.0)
-        iptm  = (conf.get("iptm") or conf.get("ipTM") or
-                 conf.get("interface_ptm") or conf.get("complex_pTM") or 0.0)
-
-        iface_pae = float("nan")
-        if hasattr(rf3_out, "confidences") and rf3_out.confidences:
-            raw_pae = rf3_out.confidences.get("pae")
-            if raw_pae is not None:
-                pae_mat = np.array(raw_pae)
-                nb = len(binder_seq)
-                if pae_mat.shape[0] > nb:
-                    iface_pae = float(
-                        (np.mean(pae_mat[:nb, nb:]) + np.mean(pae_mat[nb:, :nb])) / 2
-                    )
-
-        # Save CIF for inspection
-        cif_out = out_dir / f"{design_id}_{suffix or target_name}_rf3.cif"
-        to_cif_file(rf3_arr, str(cif_out), file_type="cif")
-
-        return {
-            "iptm":          float(iptm),
-            "plddt":         float(plddt),
-            "ptm":           float(ptm),
-            "interface_pae": iface_pae,
-            "cif":           str(cif_out),
-        }
-
-    # ── Override RF3 scoring to include off-target cross-scoring ─────────────
-
-    def run_rf3_complex(self, target_name: str, candidates: list,
-                        out_dir: Path) -> list:
-        """
-        For each candidate, score against its designed target AND any off-targets
-        in which it participates as an on-target (via SPECIFICITY_PAIRS).
-
-        Falls back to parent implementation for targets not in any specificity pair.
-        """
-        # Determine if this target is an on-target for any pair
-        pair_for_target = {
-            v["on_target"]: pk for pk, v in self.pairs.items()
-        }
-
-        if target_name not in pair_for_target:
-            # Not an on-target; use standard scoring
-            return super().run_rf3_complex(target_name, candidates, out_dir)
-
-        pk        = pair_for_target[target_name]
-        on_tname  = self.pairs[pk]["on_target"]
-        off_tname = self.pairs[pk]["off_target"]
-
-        if not candidates:
-            return []
-
-        precision = "bf16-mixed"
-        if torch.cuda.is_available():
-            device_name = torch.cuda.get_device_name(0)
-            if "V100" in device_name:
-                precision = "16-mixed"
-        engine = RF3InferenceEngine(ckpt_path="rf3", verbose=False, trainer_overrides={"precision": precision})
-        scored = []
-        t0     = time.time()
-
-        for cand in candidates:
-            did  = cand["design_id"]
-            bseq = cand.get("full_seq", "")
+        # One batch with two rows per design (::on / ::off); helper shards across GPUs.
+        rows = []
+        for c in candidates:
+            bseq = c.get("full_seq", "")
             if not bseq:
                 continue
-            try:
-                # Score against on-target
-                on_metrics = self._score_against_target(
-                    bseq, on_tname, engine, did, out_dir, suffix="on"
-                )
-                # Score against off-target
-                off_metrics = self._score_against_target(
-                    bseq, off_tname, engine, did, out_dir, suffix="off"
-                )
+            if on_seq:
+                rows.append({"design_id": f"{c['design_id']}::on",  "target_name": on_t,
+                             "full_seq": bseq, "target_seq": on_seq})
+            if off_seq:
+                rows.append({"design_id": f"{c['design_id']}::off", "target_name": off_t,
+                             "full_seq": bseq, "target_seq": off_seq})
 
-                sel_score = on_metrics["iptm"] - off_metrics["iptm"]
-                sel_ratio = on_metrics["iptm"] / max(off_metrics["iptm"], 1e-3)
+        t0 = time.time()
+        scores = self._score_sequences_esmfold2(rows, out_dir)
 
-                # RMSD: RFd3 backbone vs on-target RF3 prediction
-                # Load the on-target CIF to get the atom array for RMSD
-                rmsd_val = float("nan")
-                try:
-                    from biotite.structure.io.pdbx import CIFFile as _CIF, get_structure as _gs
-                    on_cif_path = on_metrics.get("cif", "")
-                    if on_cif_path and Path(on_cif_path).exists():
-                        on_arr = renumber(_gs(_CIF.read(on_cif_path), model=1))
-                        rmsd_val = backbone_rmsd(cand["rfd3_array"], on_arr)
-                except Exception:
-                    pass
+        n_done = 0
+        for c in candidates:
+            on_m  = scores.get(f"{c['design_id']}::on")
+            off_m = scores.get(f"{c['design_id']}::off")
+            if not on_m:
+                continue
+            iptm_on  = on_m["esm_iptm"]
+            plddt_on = on_m["esm_plddt"]
+            iptm_off = off_m["esm_iptm"] if off_m else float("nan")
+            sel = _safe(iptm_on) - (_safe(iptm_off) if not np.isnan(_safe(iptm_off, np.nan)) else 0.0)
 
-                comp = calc_specificity_composite(
-                    iptm_on=on_metrics["iptm"],
-                    iptm_off=off_metrics["iptm"],
-                    plddt=on_metrics["plddt"],
-                    ptm=on_metrics["ptm"],
-                    rmsd_val=cand.get("rmsd_to_rfd3", 2.5),
-                    iface_pae_on=on_metrics["interface_pae"],
-                )
+            c.update({
+                "esm_iptm_on":   iptm_on,
+                "esm_plddt_on":  plddt_on,
+                "esm_ptm_on":    on_m.get("esm_ptm"),
+                "esm_iptm_off":  iptm_off,
+                "esm_plddt_off": off_m.get("esm_plddt") if off_m else float("nan"),
+                "selectivity_score": sel,
+                "selectivity_ratio": (_safe(iptm_on) / max(_safe(iptm_off), 1e-3)
+                                      if not np.isnan(_safe(iptm_off, np.nan)) else float("inf")),
+                # esm_iptm/esm_plddt aliases = on-target (so inherited code/CSVs read sensibly)
+                "esm_iptm":   iptm_on,
+                "esm_plddt":  plddt_on,
+                "esm_cif":    on_m.get("esm_cif"),
+                "specificity_pair": pk,
+                "on_target": on_t, "off_target": off_t,
+                "source": "ESMFold2",
+                "promising": (_safe(iptm_on) >= IPTM_PROMISING and sel > 0),
+            })
+            c["composite_score"] = calc_specificity_composite(iptm_on, iptm_off, plddt_on)
+            self.state["specificity_hof"].setdefault(pk, []).append(c)
+            n_done += 1
 
-                entry = {
-                    **{k: v for k, v in cand.items() if k not in ("array", "rfd3_array")},
-                    # On-target metrics
-                    "iptm_on":           on_metrics["iptm"],
-                    "plddt_on":          on_metrics["plddt"],
-                    "ptm_on":            on_metrics["ptm"],
-                    "interface_pae_on":  on_metrics["interface_pae"],
-                    # Off-target metrics
-                    "iptm_off":          off_metrics["iptm"],
-                    "plddt_off":         off_metrics["plddt"],
-                    "ptm_off":           off_metrics["ptm"],
-                    "interface_pae_off": off_metrics["interface_pae"],
-                    # Selectivity
-                    "selectivity_score": sel_score,
-                    "selectivity_ratio": sel_ratio,
-                    # Also alias iptm/plddt/ptm to the on-target values for HOF compat
-                    "iptm":              on_metrics["iptm"],
-                    "plddt":             on_metrics["plddt"],
-                    "ptm":               on_metrics["ptm"],
-                    "interface_pae":     on_metrics["interface_pae"],
-                    "rmsd_to_rfd3":      rmsd_val,
-                    "composite_score":   comp,
-                    "specificity_pair":  pk,
-                    "on_target":         on_tname,
-                    "off_target":        off_tname,
-                    "promising":         (on_metrics["iptm"] >= IPTM_PROMISING and sel_score > 0),
-                    "rf3_cif":           on_metrics["cif"],
-                    "iteration":         self.state["iteration"],
-                    "temperature":       self.state["temperature"],
-                }
-                scored.append(entry)
+        # Consolidate specificity HOF with the same dedup + AF3-protection as the parent
+        for pk2 in self.pair_keys:
+            self.state["specificity_hof"][pk2] = self._consolidate_hof(
+                self.state["specificity_hof"].get(pk2, []), HOF_SIZE
+            )
 
-                # Update specificity HOF
-                self.state["specificity_hof"].setdefault(pk, []).append(entry)
-
-            except Exception as exc:
-                logger.error(f"Specificity RF3 error on {did}: {exc}")
-
-        # Trim specificity HOF
-        for pk in self.pair_keys:
-            self.state["specificity_hof"][pk] = sorted(
-                self.state["specificity_hof"].get(pk, []),
-                key=lambda x: x.get("composite_score", 0),
-                reverse=True,
-            )[:HOF_SIZE]
-
-        logger.info(
-            f"[{target_name}→{off_tname}] RF3 specificity scoring done in "
-            f"{(time.time()-t0)/60:.1f} min ({len(scored)}/{len(candidates)} scored)"
-        )
-        del engine
-        torch.cuda.empty_cache()
-        return scored
+        logger.info(f"[{on_t}↔{off_t}] ESMFold2 specificity scoring done in "
+                    f"{(time.time()-t0)/60:.1f} min ({n_done}/{len(candidates)} scored)")
+        return candidates
 
     # ── Specificity HOF summary ───────────────────────────────────────────────
 
     def _write_hof_summary(self) -> None:
-        """Write both the standard HOF summary and a selectivity-focused table."""
         super()._write_hof_summary()
-
-        # Specificity HOF summary
         rows = []
         for pk in self.pair_keys:
-            for rank, entry in enumerate(self.state["specificity_hof"].get(pk, []), start=1):
+            for rank, e in enumerate(self.state["specificity_hof"].get(pk, []), start=1):
                 rows.append({"pair": pk, "rank": rank,
-                             **{k: v for k, v in entry.items()
-                                if k not in ("array", "rfd3_array")}})
+                             **{k: v for k, v in e.items() if k not in ("array", "rfd3_array")}})
         if rows:
-            df = pd.DataFrame(rows)
-            df.to_csv(OUT_BASE / "specificity_hof_summary.csv", index=False)
-            # Log top entry per pair
+            pd.DataFrame(rows).to_csv(OUT_BASE / "specificity_hof_summary.csv", index=False)
             for pk in self.pair_keys:
-                sub = df[df["pair"] == pk]
-                if not sub.empty:
-                    best = sub.iloc[0]
+                pkrows = [r for r in rows if r["pair"] == pk]
+                if pkrows:
+                    b = pkrows[0]
                     logger.info(
-                        f"Specificity HOF best [{pk}]: {best.get('design_id')} | "
-                        f"ipTM_on={best.get('iptm_on', 0):.3f} | "
-                        f"ipTM_off={best.get('iptm_off', 0):.3f} | "
-                        f"selectivity={best.get('selectivity_score', 0):.3f}"
+                        f"Specificity HOF best [{pk}]: {b.get('design_id')} | "
+                        f"ipTM_on={_safe(b.get('esm_iptm_on')):.3f} | "
+                        f"ipTM_off={_safe(b.get('esm_iptm_off')):.3f} | "
+                        f"selectivity={_safe(b.get('selectivity_score')):.3f} | "
+                        f"src={b.get('source')}"
                     )
 
-    # ── AF3 export (specificity-aware) ────────────────────────────────────────
+    # ── AF3 export (on-target AND off-target jobs for selectivity validation) ──
 
     def export_for_af3(self, force: bool = False) -> None:
-        """
-        Export AF3 submissions with both on-target AND off-target chains,
-        so that AF3 Server can validate the selectivity predictions.
-        """
         it = self.state["iteration"]
         if not force and (it - self.state.get("last_af3_it", -1)) < AF3_EXPORT_EVERY_N:
             return
 
-        jobs = []
-        seen_seqs: set = set()
+        # Each design needs an on AND an off job, so it consumes TWO of the daily
+        # 30 slots — budget designs accordingly.
+        designs_per_pair = max(1, AF3_TOP_N // (2 * max(1, len(self.pair_keys))))
 
+        jobs, seen = [], set()
         for pk in self.pair_keys:
-            pair  = self.pairs[pk]
-            on_t  = pair["on_target"]
-            off_t = pair["off_target"]
-            on_seq  = self.target_seqs.get(on_t, "")
-            off_seq = self.target_seqs.get(off_t, "")
-
-            hof_entries = self.state["specificity_hof"].get(pk, [])[:AF3_TOP_N // len(self.pair_keys)]
-            for i, e in enumerate(hof_entries):
+            on_t, off_t = self.pairs[pk]["on_target"], self.pairs[pk]["off_target"]
+            on_seq, off_seq = self.target_seqs.get(on_t, ""), self.target_seqs.get(off_t, "")
+            picked = 0
+            for e in self.state["specificity_hof"].get(pk, []):
                 bseq = e.get("full_seq", "")
-                if not bseq or bseq in seen_seqs:
+                if not bseq or bseq in seen:
                     continue
-                seen_seqs.add(bseq)
-                # On-target job
-                jobs.append({
-                    "name":       f"spec_it{it}_{pk}_on_{i:02d}",
-                    "modelSeeds": [42],
-                    "sequences":  [
-                        {"proteinChain": {"sequence": bseq,   "count": 1}},
-                        {"proteinChain": {"sequence": on_seq,  "count": 1}},
-                    ],
-                })
-                # Off-target job (same binder, different protease — for selectivity check)
-                jobs.append({
-                    "name":       f"spec_it{it}_{pk}_off_{i:02d}",
-                    "modelSeeds": [42],
-                    "sequences":  [
-                        {"proteinChain": {"sequence": bseq,    "count": 1}},
-                        {"proteinChain": {"sequence": off_seq,  "count": 1}},
-                    ],
-                })
+                seen.add(bseq)
+                idx = len(jobs)
+                jobs.append({"name": f"spec_it{it}_{pk}_on_{idx:02d}", "modelSeeds": [42],
+                             "sequences": [{"proteinChain": {"sequence": bseq,   "count": 1}},
+                                           {"proteinChain": {"sequence": on_seq, "count": 1}}]})
+                jobs.append({"name": f"spec_it{it}_{pk}_off_{idx:02d}", "modelSeeds": [42],
+                             "sequences": [{"proteinChain": {"sequence": bseq,    "count": 1}},
+                                           {"proteinChain": {"sequence": off_seq, "count": 1}}]})
+                picked += 1
+                if picked >= designs_per_pair:
+                    break
+            logger.info(f"AF3 specificity export: {pk} contributing {picked} design(s)")
 
         if not jobs:
             return
-
         export_path = OUT_BASE / f"af3_specificity_it{it}.json"
-        with open(export_path, "w") as f:
-            json.dump(jobs, f, indent=2)
-
+        export_path.write_text(json.dumps(jobs, indent=2))
         self.state["last_af3_it"] = it
         self._save_state()
 
         logger.info(f"AF3 specificity export: {len(jobs)} jobs → {export_path}")
         print("\n" + "=" * 60)
         print(f"  AF3 specificity submission: {export_path}")
-        print(f"  Contains on-target AND off-target jobs for selectivity validation.")
-        print(f"  Import results via --import-af3 <results.json>")
+        print(f"  {len(jobs)} jobs (on + off per design) for selectivity validation.")
+        print(f"  Import results via --import-af3 <results.zip>")
         print("=" * 60 + "\n")
 
-    # ── Main loop ─────────────────────────────────────────────────────────────
+    # ── AF3 ZIP import (pairs on/off jobs, recomputes selectivity from AF3) ────
 
-    def main_loop(self, max_iterations: int = None) -> None:
-        """Run the specificity-aware iterative loop."""
-        logger.info(
-            f"Starting specificity refinement.\n"
-            f"  Pairs:   {self.pair_keys}\n"
-            f"  Loops:   {self.active_loops}\n"
-            f"  Output:  {OUT_BASE}\n"
-        )
-        it = 0
-        while max_iterations is None or it < max_iterations:
-            self.run_iteration()
-            self.export_for_af3()
-            self.state["temperature"] = max(
-                MIN_TEMPERATURE, self.state["temperature"] * TEMP_DECAY
+    def import_af3_zip(self, zip_path: str) -> None:
+        """
+        Parse a specificity AF3 ZIP whose jobs are named spec_it{N}_{PK}_{on|off}_{NN}.
+        Pairs the on/off jobs for each binder, recomputes the selectivity composite
+        from AF3 ipTM, and updates the specificity HOF (source="AF3", never trimmed).
+        """
+        # group[(pk, binder_seq)] = {"on": {...}, "off": {...}}
+        group: dict = {}
+        with zipfile.ZipFile(zip_path) as zf:
+            names = set(zf.namelist())
+            for jrf in sorted(n for n in names if n.endswith("_job_request.json")):
+                try:
+                    raw = json.loads(zf.read(jrf))
+                    jd  = raw[0] if isinstance(raw, list) else raw
+                    name = jd.get("name", "")
+                    m = re.search(r"(?:fold_)?spec_it\d+_([A-Za-z0-9]+)_(on|off)_\d+", name, re.I)
+                    if not m:
+                        continue
+                    pk, side = m.group(1).upper(), m.group(2).lower()
+                    if pk not in self.pairs:
+                        continue
+                    seqs = jd.get("sequences", [])
+                    if len(seqs) < 2:
+                        continue
+                    binder_seq = seqs[0]["proteinChain"]["sequence"]
+
+                    prefix  = jrf[: -len("_job_request.json")]
+                    sc_name = prefix + "_summary_confidences_0.json"
+                    if sc_name not in names:
+                        continue
+                    sc   = json.loads(zf.read(sc_name))
+                    iptm = float(sc.get("iptm", 0.0))
+                    ptm  = float(sc.get("ptm", 0.0))
+
+                    plddt = float("nan")
+                    fd_name = prefix + "_full_data_0.json"
+                    if fd_name in names:
+                        fd = json.loads(zf.read(fd_name))
+                        ap = np.array(fd.get("atom_plddts", []))
+                        ac = fd.get("atom_chain_ids", [])
+                        if ap.size and ac:
+                            mask = np.array([c == "A" for c in ac])   # chain A = binder
+                            if mask.any():
+                                plddt = float(ap[mask].mean())
+
+                    group.setdefault((pk, binder_seq), {})[side] = {
+                        "iptm": iptm, "ptm": ptm, "plddt": plddt,
+                    }
+                except Exception as exc:
+                    logger.error(f"Error parsing {jrf}: {exc}")
+
+        n = 0
+        for (pk, bseq), sides in group.items():
+            on_m = sides.get("on")
+            if not on_m:
+                continue   # need at least the on-target result
+            iptm_on  = on_m["iptm"]
+            plddt_on = on_m["plddt"]
+            iptm_off = sides.get("off", {}).get("iptm", float("nan"))
+            sel  = _safe(iptm_on) - (_safe(iptm_off) if not np.isnan(_safe(iptm_off, np.nan)) else 0.0)
+            comp = calc_specificity_composite(iptm_on, iptm_off, plddt_on)
+            loops = extract_loops(bseq, self.selected_loops)
+            entry = {
+                "design_id": f"AF3_{pk}_{abs(hash(bseq)) % 10**8}",
+                "target_name": self.pairs[pk]["on_target"],
+                "full_seq": bseq,
+                "esm_iptm_on": iptm_on, "esm_iptm_off": iptm_off, "esm_plddt_on": plddt_on,
+                "selectivity_score": sel,
+                "specificity_pair": pk,
+                "on_target": self.pairs[pk]["on_target"], "off_target": self.pairs[pk]["off_target"],
+                "composite_score": comp, "source": "AF3",
+                "promising": (_safe(iptm_on) >= IPTM_PROMISING and sel > 0),
+                **loops,
+            }
+            # Replace any existing specificity-HOF entry with the same sequence
+            hof = self.state["specificity_hof"].setdefault(pk, [])
+            hof = [e for e in hof if e.get("full_seq") != bseq]
+            # Preserve the original design_id if we had this sequence before
+            for e in self.state["specificity_hof"].get(pk, []):
+                if e.get("full_seq") == bseq:
+                    entry["design_id"] = e.get("design_id", entry["design_id"])
+                    break
+            hof.append(entry)
+            self.state["specificity_hof"][pk] = hof
+            n += 1
+            logger.info(f"  [{pk}] AF3: ipTM_on={iptm_on:.3f} ipTM_off={iptm_off:.3f} "
+                        f"selectivity={sel:.3f}")
+
+        for pk in self.pair_keys:
+            self.state["specificity_hof"][pk] = self._consolidate_hof(
+                self.state["specificity_hof"].get(pk, []), HOF_SIZE
             )
-            self.state["iteration"] += 1
-            self._save_state()
-            it += 1
+        self._save_state()
+        logger.info(f"AF3 specificity import complete: {n} designs updated.")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -483,38 +395,29 @@ class SpecificityRefiner(IterativeRefiner):
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Specificity-focused iterative TIMP3 binder design."
-    )
-    parser.add_argument(
-        "--pair", nargs="+", default=["MMP", "ADAM"],
-        choices=list(SPECIFICITY_PAIRS.keys()),
-        help="Specificity pairs to optimize.",
-    )
-    parser.add_argument(
-        "--loops", nargs="+", default=["AB", "C", "EF"],
-        choices=list(LOOP_CONFIGS.keys()),
-        help="Loop regions to redesign.",
-    )
-    parser.add_argument(
-        "--max-iterations", type=int, default=None,
-        help="Stop after N iterations.",
-    )
-    parser.add_argument(
-        "--import-af3", type=str, default=None,
-        help="Path to AF3 results JSON to import.",
-    )
+    parser = argparse.ArgumentParser(description="Specificity-focused TIMP3 binder design.")
+    parser.add_argument("--pair", nargs="+", default=["MMP", "ADAM"],
+                        choices=list(SPECIFICITY_PAIRS.keys()), help="Specificity pairs.")
+    parser.add_argument("--loops", nargs="+", default=["AB", "C", "EF"],
+                        choices=list(LOOP_CONFIGS.keys()), help="Loop regions to redesign.")
+    parser.add_argument("--max-iterations", type=int, default=None, help="Stop after N iterations.")
+    parser.add_argument("--import-af3", type=str, default=None,
+                        help="AF3 results to import (.zip from the server, or legacy .json).")
+    parser.add_argument("--esmfold2-gpus", default=None, metavar="N|auto",
+                        help="Data-parallel ESMFold2 across GPUs (default 1; N free GPUs, or 'auto').")
     args = parser.parse_args()
 
-    OUT_BASE.mkdir(parents=True, exist_ok=True)
+    if args.esmfold2_gpus is not None:
+        ir.ESMFOLD2_GPUS = args.esmfold2_gpus   # resolved at call time by the parent
 
-    refiner = SpecificityRefiner(
-        pair_keys=args.pair,
-        active_loops=args.loops,
-    )
+    OUT_BASE.mkdir(parents=True, exist_ok=True)
+    refiner = SpecificityRefiner(pair_keys=args.pair, active_loops=args.loops)
 
     if args.import_af3:
-        refiner.import_af3_results(args.import_af3)
+        if args.import_af3.lower().endswith(".zip"):
+            refiner.import_af3_zip(args.import_af3)
+        else:
+            refiner.import_af3_results(args.import_af3)
 
     refiner.main_loop(max_iterations=args.max_iterations)
 

@@ -866,6 +866,12 @@ class IterativeRefiner:
                 merged[r["design_id"]] = rec
         if not merged:
             logger.warning("ESMFold2 produced no scores.")
+        else:
+            # Consolidate the per-GPU shards (esm_scores_g*.csv) into one
+            # authoritative CSV per stage dir; the merged values also flow into
+            # round_summary.csv at end of iteration.
+            pd.DataFrame([{"design_id": did, **m} for did, m in merged.items()]).to_csv(
+                out_dir / "esm_scores.csv", index=False)
         return merged
 
     def run_esmfold2(self, target_name: str, candidates: list, out_dir: Path) -> list:
