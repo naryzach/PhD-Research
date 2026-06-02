@@ -1,5 +1,6 @@
 import os
 import sys
+import subprocess
 import numpy as np
 import pandas as pd
 import argparse
@@ -8,6 +9,7 @@ import gc
 import torch
 from tqdm import tqdm
 from biotite.structure.io.pdbx import CIFFile, get_structure as get_cif_structure
+from biotite.structure.io.pdb import PDBFile as _PDBFile
 from biotite.structure import AtomArray, get_residues, array
 from atomworks.io.utils.io_utils import to_cif_file
 from biotite.sequence import ProteinSequence
@@ -16,11 +18,32 @@ from biotite.sequence import ProteinSequence
 from lightning.fabric import seed_everything
 from rfd3.engine import RFD3InferenceConfig, RFD3InferenceEngine
 from mpnn.inference_engines.mpnn import MPNNInferenceEngine
-from rf3.inference_engines.rf3 import RF3InferenceEngine
-from rf3.utils.inference import InferenceInput
 from biotite.structure import rmsd, superimpose
 from atomworks.constants import PROTEIN_BACKBONE_ATOM_NAMES
 from rfd3.inference.input_parsing import DesignInputSpecification
+
+# ── Chai-1 configuration ──────────────────────────────────────────────────────
+# Chai-1 (Chai Discovery) is an AF3-class model that accepts protein sequences
+# AND arbitrary chemical entities (metals, ligands) in the same prediction.
+# This is critical for EF-hand / lanthanide designs where pLDDT must reflect the
+# metal-bound conformation — ESMFold2 and original ESMFold have no metal input.
+#
+# Chai-1 runs in a separate conda env to avoid torch/numpy version conflicts:
+#   conda create -n chai1 python=3.10 -y
+#   conda activate chai1 && pip install chai-lab
+#
+# Set CHAI1_PYTHON to that env's python before running, e.g.:
+#   export CHAI1_PYTHON=~/miniconda3/envs/chai1/bin/python
+CHAI1_PYTHON  = os.environ.get(
+    "CHAI1_PYTHON",
+    os.path.join(os.path.expanduser("~"), "miniconda3", "envs", "chai1", "bin", "python"),
+)
+CHAI1_SCRIPT  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "score_with_chai1.py")
+# Chai-1 loads the model fresh each design call; allow more time than ESMFold2.
+# Rough estimate: ~2 min model load + ~3 min inference per design on a V100.
+# For 20 designs that is ~100 min; 7200 s gives comfortable headroom.
+CHAI1_TIMEOUT = 7200   # seconds
+SAVE_CHAI1_STRUCTS = True   # write predicted CIFs (free — already computed)
 
 # Custom Utilities
 from utils_foundry import get_ef_hand_loops, create_masked_input, mutate_metals, calculate_binding_metrics
@@ -35,14 +58,24 @@ logging.getLogger("atomworks.ml").setLevel(logging.ERROR)
 logging.getLogger("foundry").setLevel(logging.ERROR)
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Batch RFd3 -> LMPNN -> RF3 relative variable loop generation.")
-    parser.add_argument("--ions", nargs='+', required=True, help="List of target metal ions (e.g. EU ZN TB DY CA)")
-    parser.add_argument("--num-configs", type=int, default=1, help="Number of unique loop length configurations to sample")
-    parser.add_argument("--batch-size", type=int, default=1, help="Number of sequences to generate PER length configuration")
-    parser.add_argument("--input", type=str, default="../Data/8FNS.cif", help="Path to input CIF structure")
-    parser.add_argument("--out-dir", type=str, default="../Local/lanm_output", help="Root directory for outputs")
-    parser.add_argument("--splice-loops", action="store_true", help="Splice generated loops back into the generated backbone instead of running the full structure from LigandMPNN through RF3.")
-    parser.add_argument("--redesign-all", action="store_true", help="Allow LigandMPNN to redesign the entire protein structure. Default is to only redesign the loops modified by RFd3.")
+    parser = argparse.ArgumentParser(
+        description="Batch RFd3 -> LigandMPNN -> Chai-1 metal-aware loop generation.")
+    parser.add_argument("--ions", nargs='+', required=True,
+                        help="List of target metal ions (e.g. EU ZN TB DY CA)")
+    parser.add_argument("--num-configs", type=int, default=1,
+                        help="Number of unique loop length configurations to sample")
+    parser.add_argument("--batch-size", type=int, default=1,
+                        help="Number of sequences to generate PER length configuration")
+    parser.add_argument("--input", type=str, default="../Data/8FNS.cif",
+                        help="Path to input CIF structure")
+    parser.add_argument("--out-dir", type=str, default="../Local/lanm_output",
+                        help="Root directory for outputs")
+    parser.add_argument("--redesign-all", action="store_true",
+                        help="Allow LigandMPNN to redesign the entire protein structure. "
+                             "Default: only redesign loops modified by RFd3.")
+    parser.add_argument("--chai1-python", type=str, default=None,
+                        help="Path to the Chai-1 conda env python (overrides CHAI1_PYTHON "
+                             "env var and the compiled-in default).")
     return parser.parse_args()
 
 def get_sequence_from_array(atom_array, chain_id="A", res_ids=None):
@@ -69,6 +102,11 @@ def get_sequence_from_array(atom_array, chain_id="A", res_ids=None):
 def main():
     args = parse_args()
     seed_everything(42)
+
+    # Allow --chai1-python CLI flag to override the compiled-in default.
+    global CHAI1_PYTHON
+    if args.chai1_python:
+        CHAI1_PYTHON = args.chai1_python
     
     checkpoint_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Tools", "foundry_checkpoints"))
     os.makedirs(checkpoint_dir, exist_ok=True)
@@ -89,7 +127,7 @@ def main():
         ion_dir = f"{args.out_dir}/{ion}"
         os.makedirs(f"{ion_dir}/rfd3", exist_ok=True)
         os.makedirs(f"{ion_dir}/lmpnn", exist_ok=True)
-        os.makedirs(f"{ion_dir}/rf3", exist_ok=True)
+        os.makedirs(f"{ion_dir}/chai1", exist_ok=True)
         
         atom_array = mutate_metals(base_atom_array.copy(), original_res_name="ND", new_res_name=ion)
         loops = get_ef_hand_loops(atom_array, metal_res_name=ion)
@@ -242,7 +280,7 @@ def main():
     # STAGE 2: Sequence Design (LigandMPNN)
     # ---------------------------------------------------------
     print(f"\n--- STAGE 2: Running {len(mpnn_queue)} LigandMPNN Jobs ---", flush=True)
-    rf3_queue = []
+    esm_queue = []
     
     lmpnn_engine = MPNNInferenceEngine(model_type="ligand_mpnn", is_legacy_weights=True, write_structures=False, write_fasta=False)
     
@@ -290,7 +328,7 @@ def main():
                     'full_sequence': get_sequence_from_array(raw_lmpnn_array, chain_id=job['chain_id'])
                 })
                 
-                rf3_queue.append({
+                esm_queue.append({
                     **job,
                     'lmpnn_atom_array': raw_lmpnn_array,
                     'rfd3_atom_array': rfd3_array
@@ -303,116 +341,179 @@ def main():
     torch.cuda.empty_cache()
 
     # ---------------------------------------------------------
-    # STAGE 3: Validation & Scoring (RF3) - SPLICE OR RAW
+    # STAGE 3: Validation & Scoring (Chai-1)
+    #
+    # Chai-1 (AF3-class, Chai Discovery) accepts the metal ion as a separate entity
+    # alongside the protein sequence, so the predicted pLDDT and pTM reflect the
+    # metal-bound conformation of the EF-hand loops.  This is the critical difference
+    # from ESMFold2 / original ESMFold, which have no metal input and therefore
+    # predict disordered loops — giving spuriously low pLDDT for well-designed
+    # metal-coordinating residues.
+    #
+    # Chai-1 runs as a subprocess in its own conda env (chai1) to avoid torch/numpy
+    # version conflicts with the foundry env.  Metal ions are specified as SMILES
+    # (e.g. "[Eu+3]") rather than CCD codes for reliable rare-earth element handling.
+    #
+    # Backbone RMSD vs. the RFd3 design is computed here by loading Chai-1's output
+    # CIF (which contains protein + metal) and filtering to protein backbone atoms only.
+    # Binding geometry metrics are computed from the LMPNN array, which retains the
+    # metal coordinates from RFd3 — these reflect the design intent independent of
+    # Chai-1's predicted metal placement.
     # ---------------------------------------------------------
-    print(f"\n--- STAGE 3: Running {len(rf3_queue)} RF3 Validations ---", flush=True)
-    rf3_engine = RF3InferenceEngine(ckpt_path='rf3', verbose=False)
+    print(f"\n--- STAGE 3: Running {len(esm_queue)} Chai-1 Validations ---", flush=True)
     final_records = []
-    
-    for job in tqdm(rf3_queue, desc="RF3 Validations", unit="fold"):
-        print(f"Running RF3 validation for {job['design_id']}...", flush=True)
+
+    # ── 3a. Build input CSV (design_id, sequence, metal_ccd) and call scorer ──
+    chai_input_csv  = os.path.join(args.out_dir, "chai_input.csv")
+    chai_scores_csv = os.path.join(args.out_dir, "chai_scores.csv")
+    chai_cif_dir    = os.path.join(args.out_dir, "chai1_structures")
+
+    chai_rows = []
+    for job in esm_queue:
+        seq = get_sequence_from_array(job['lmpnn_atom_array'], chain_id=job['chain_id'])
+        chai_rows.append({
+            "design_id": job['design_id'],
+            "sequence":  seq,
+            "metal_ccd": job['ion'],   # e.g. "EU", "TB", "ZN"
+        })
+    pd.DataFrame(chai_rows).to_csv(chai_input_csv, index=False)
+
+    chai_scores = {}   # design_id -> {chai_plddt, chai_ptm[, chai_cif]}
+    if chai_rows:
+        cmd = [CHAI1_PYTHON, CHAI1_SCRIPT,
+               "--input", chai_input_csv,
+               "--out",   chai_scores_csv]
+        if SAVE_CHAI1_STRUCTS:
+            cmd += ["--cif-dir", chai_cif_dir]
+
+        # Strip PYTHONPATH so the subprocess sees only its own site-packages.
+        child_env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
         try:
-            rfd3_array = job['rfd3_atom_array']
-            lmpnn_array = job['lmpnn_atom_array']
-            
-            valid_atoms = ['N', 'CA', 'C', 'O', 'CB', job['ion']]
-            
-            if args.splice_loops:
-                array_for_rf3 = rfd3_array[np.isin(rfd3_array.atom_name, valid_atoms)].copy()
-                for res_id in job['redesign_res_ids']:
-                    lmpnn_ca_mask = (lmpnn_array.res_id == res_id) & (lmpnn_array.atom_name == "CA")
-                    if np.any(lmpnn_ca_mask):
-                        new_res_name = lmpnn_array.res_name[lmpnn_ca_mask][0]
-                        array_for_rf3.res_name[array_for_rf3.res_id == res_id] = new_res_name
-                phase_label = 'RF3_Spliced'
-            else:
-                array_for_rf3 = lmpnn_array[np.isin(lmpnn_array.atom_name, valid_atoms)].copy()
-                phase_label = 'RF3_Raw_LMPNN'
+            print(f"Calling Chai-1 on {len(chai_rows)} designs "
+                  f"(timeout {CHAI1_TIMEOUT}s) ...", flush=True)
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True,
+                timeout=CHAI1_TIMEOUT, env=child_env,
+            )
+            if proc.returncode != 0:
+                print(f"Chai-1 subprocess failed:\n{proc.stderr[-600:].strip()}")
+            elif os.path.exists(chai_scores_csv):
+                chai_df = pd.read_csv(chai_scores_csv)
+                chai_scores = {str(r["design_id"]): r
+                               for r in chai_df.to_dict("records")}
+                print(f"Chai-1 scored {len(chai_scores)}/{len(chai_rows)} designs.",
+                      flush=True)
+        except FileNotFoundError:
+            print(
+                f"Chai-1 python not found at: {CHAI1_PYTHON}\n"
+                "  Set CHAI1_PYTHON env var or pass --chai1-python.\n"
+                "  Install: conda create -n chai1 python=3.10 -y\n"
+                "           conda activate chai1 && pip install chai-lab\n"
+                "  pLDDT/pTM will be NaN; RMSD and binding metrics are unaffected.",
+                flush=True,
+            )
+        except subprocess.TimeoutExpired:
+            print(f"Chai-1 timed out after {CHAI1_TIMEOUT}s. "
+                  "pLDDT/pTM will be NaN for this batch.", flush=True)
 
-            input_structure = InferenceInput.from_atom_array(array_for_rf3, example_id=job['design_id'])
-            rf3_outputs_dict = rf3_engine.run(inputs=input_structure)
-            
-            rf3_target_key = None
-            for key in rf3_outputs_dict.keys():
-                if job['design_id'] in key or key in job['design_id'] or key == job['design_id']:
-                    rf3_target_key = key
-                    break
-            
-            if not rf3_target_key and len(rf3_outputs_dict) > 0:
-                rf3_target_key = list(rf3_outputs_dict.keys())[0]
-                
-            if rf3_target_key in rf3_outputs_dict:
-                rf3_output = rf3_outputs_dict[rf3_target_key][0]
-                rf3_atom_array = rf3_output.atom_array
-                
-                rf3_out_dir = f"{args.out_dir}/{job['ion']}/rf3"
-                os.makedirs(rf3_out_dir, exist_ok=True)
-                to_cif_file(rf3_atom_array, f"{rf3_out_dir}/{job['design_id']}_refolded.cif", file_type="cif")
-                
-                full_rf3_seq = get_sequence_from_array(rf3_atom_array, chain_id=job['chain_id'])
-                full_sequence_records.append({
-                    'ion': job['ion'],
-                    'phase': phase_label,
-                    'design_id': job['design_id'],
-                    'full_sequence': full_rf3_seq
+    # ── 3b. Per-design: RMSD from Chai-1 structure + binding metrics ──────────
+    # Backbone atom names (no OXT): used to filter protein atoms from the Chai-1
+    # CIF which also contains the predicted metal atom position.
+    bb_atom_names = set(PROTEIN_BACKBONE_ATOM_NAMES) - {"OXT"}
+
+    for job in tqdm(esm_queue, desc="Chai-1 Post-processing", unit="design"):
+        print(f"Processing Chai-1 results for {job['design_id']}...", flush=True)
+        try:
+            chai_m   = chai_scores.get(job['design_id'], {})
+            plddt    = float(chai_m.get("chai_plddt", float("nan")))
+            ptm      = float(chai_m.get("chai_ptm",   float("nan")))
+            chai_cif = chai_m.get("chai_cif")
+
+            # ── Backbone alignment (RFd3 design vs Chai-1 predicted) ─────────
+            # Chai-1 CIF contains protein + metal; filtering to bb_atom_names
+            # (N/CA/C/O) automatically excludes the metal atom row.
+            overall_rmsd    = float("nan")
+            rfd3_bb_aligned = None   # held for per-loop RMSD reuse
+            chai_bb_fitted  = None
+
+            if chai_cif and os.path.exists(str(chai_cif)):
+                try:
+                    if str(chai_cif).endswith(".cif"):
+                        chai_array = get_cif_structure(
+                            CIFFile.read(str(chai_cif)), model=1)
+                    else:
+                        chai_array = _PDBFile.read(str(chai_cif)).get_structure()[0]
+
+                    rfd3_bb  = job["rfd3_atom_array"][
+                        np.isin(job["rfd3_atom_array"].atom_name, list(bb_atom_names))]
+                    chai_bb  = chai_array[
+                        np.isin(chai_array.atom_name, list(bb_atom_names))]
+
+                    n = min(len(rfd3_bb), len(chai_bb))
+                    if n > 0:
+                        chai_bb_fitted, _ = superimpose(rfd3_bb[:n], chai_bb[:n])
+                        overall_rmsd      = float(rmsd(rfd3_bb[:n], chai_bb_fitted))
+                        rfd3_bb_aligned   = rfd3_bb[:n]
+                except Exception as exc:
+                    print(f"  RMSD failed for {job['design_id']}: {exc}")
+
+            # ── Binding array: LMPNN (designed residue names + RFd3 metal) ───
+            # LMPNN preserves the metal from RFd3; use it for binding geometry
+            # metrics (coordination number, radius, charge) which are independent
+            # of Chai-1's predicted metal placement.  Fall back to rfd3_atom_array
+            # if LMPNN stripped the metal during sequence design.
+            binding_array = job["lmpnn_atom_array"]
+            if not np.any(binding_array.res_name == job["ion"]):
+                binding_array = job["rfd3_atom_array"]
+
+            # ── Per-loop metrics ──────────────────────────────────────────────
+            for loop_idx, loop_info in enumerate(job["loops"]):
+                loop_start = loop_info["start_res"]
+                loop_end   = loop_info["end_res"]
+
+                # Loop RMSD: reuse the pre-computed full-backbone alignment.
+                # Both arrays have n atoms in positional correspondence, so the
+                # same res_id mask applied to rfd3_bb_aligned selects the matching
+                # rows in chai_bb_fitted.
+                loop_rmsd_val = float("nan")
+                if rfd3_bb_aligned is not None and chai_bb_fitted is not None:
+                    try:
+                        lm = ((rfd3_bb_aligned.res_id >= loop_start) &
+                              (rfd3_bb_aligned.res_id <= loop_end))
+                        if np.any(lm):
+                            loop_rmsd_val = float(
+                                rmsd(rfd3_bb_aligned[lm], chai_bb_fitted[lm]))
+                    except Exception:
+                        pass
+
+                b_metrics = calculate_binding_metrics(
+                    binding_array, loop_info, loop_start, loop_end)
+
+                loop_res_ids = list(range(loop_start, loop_end + 1))
+                loop_seq = get_sequence_from_array(
+                    binding_array, chain_id=job["chain_id"], res_ids=loop_res_ids)
+
+                final_records.append({
+                    "metal_ion":           job["ion"],
+                    "config_index":        job["config_idx"],
+                    "design_id":           job["design_id"],
+                    "design_number":       job["design_number"],
+                    "loop_index":          loop_idx + 1,
+                    "loop_length":         loop_info["loop_length"],
+                    "loop_sequence":       loop_seq,
+                    "overall_rmsd":        overall_rmsd,
+                    "loop_rmsd":           loop_rmsd_val,
+                    "plddt":               plddt,
+                    "ptm":                 ptm,
+                    "binding_radius_A":    b_metrics["binding_radius_A"],
+                    "coordination_number": b_metrics["coordination_number"],
+                    "net_charge":          b_metrics["net_charge"],
+                    "bidentate_count":     b_metrics["bidentate_count"],
                 })
-                
-                bb_mask_rfd3 = np.isin(job['rfd3_atom_array'].atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
-                bb_mask_rf3 = np.isin(rf3_atom_array.atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
-                
-                bb_generated = job['rfd3_atom_array'][bb_mask_rfd3]
-                bb_refolded = rf3_atom_array[bb_mask_rf3]
-                
-                bb_generated = bb_generated[bb_generated.atom_name != "OXT"]
-                bb_refolded = bb_refolded[bb_refolded.atom_name != "OXT"]
-                
-                if len(bb_generated) != len(bb_refolded):
-                    min_len = min(len(bb_generated), len(bb_refolded))
-                    bb_generated = bb_generated[:min_len]
-                    bb_refolded = bb_refolded[:min_len]
 
-                bb_refolded_fitted, _ = superimpose(bb_generated, bb_refolded)
-                overall_rmsd = rmsd(bb_generated, bb_refolded_fitted)
-                
-                summary = rf3_output.summary_confidences
-                plddt = summary['overall_plddt']
-                
-                for loop_idx, loop_info in enumerate(job['loops']):
-                    loop_start = loop_info['start_res']
-                    loop_end = loop_info['end_res']
-                    
-                    loop_mask = (bb_generated.res_id >= loop_start) & (bb_generated.res_id <= loop_end)
-                    loop_bb_generated = bb_generated[loop_mask]
-                    loop_bb_refolded_fitted = bb_refolded_fitted[loop_mask]
-                    
-                    loop_rmsd = rmsd(loop_bb_generated, loop_bb_refolded_fitted) if len(loop_bb_generated) > 0 else float('nan')
-                    b_metrics = calculate_binding_metrics(rf3_atom_array, loop_info, loop_start, loop_end)
-                    
-                    loop_res_ids = list(range(loop_start, loop_end + 1))
-                    loop_seq = get_sequence_from_array(rf3_atom_array, chain_id=job['chain_id'], res_ids=loop_res_ids)
-                    
-                    final_records.append({
-                        "metal_ion": job['ion'],
-                        "config_index": job['config_idx'],
-                        "design_id": job['design_id'],
-                        "design_number": job['design_number'],
-                        "loop_index": loop_idx + 1,
-                        "loop_length": loop_info['loop_length'], 
-                        "loop_sequence": loop_seq,
-                        "overall_rmsd": overall_rmsd,
-                        "loop_rmsd": loop_rmsd,
-                        "plddt": plddt,
-                        "ptm": summary.get('ptm', 0),
-                        "binding_radius_A": b_metrics["binding_radius_A"],
-                        "coordination_number": b_metrics["coordination_number"],
-                        "net_charge": b_metrics["net_charge"],
-                        "bidentate_count": b_metrics["bidentate_count"]
-                    })
+        except Exception as exc:
+            print(f"Error processing Chai-1 results for {job['design_id']}: {exc}")
 
-        except Exception as e:
-            print(f"Error during RF3 validation for {job['design_id']}: {e}")
-
-    del rf3_engine
     gc.collect()
     torch.cuda.empty_cache()
 
