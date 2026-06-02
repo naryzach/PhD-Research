@@ -9,7 +9,7 @@ WHY ESMFold2 here: it is a protein-language-model folder, MSA-free *by design*
 (no ColabFold dependency). Biohub reports it is strongest on no-MSA targets like
 antibodies — the closest analog to our engineered TIMP3-loop binders, which have no
 natural homologs. Our calibration showed Boltz is only a weak, target-inconsistent
-filter (see BOLTZ_FILTER_METHODS.md §4); ESMFold2 may separate AF3 hits better.
+filter (see filter_methods.md §4); ESMFold2 may separate AF3 hits better.
 
 RUN THIS ON THE CLUSTER (needs a GPU; ESMC-6B base is large — verify it fits VRAM).
 Install in a SEPARATE env to avoid the numpy/cublas/lightning conflicts that hit the
@@ -25,8 +25,10 @@ Then, from the repo root (so it can find Local/iterative_refinement/):
 
 Output: Local/iterative_refinement/esmfold2_scores.csv
         columns: design_id, target_name, full_seq, esm_iptm, esm_ptm, esm_plddt
-Then compare:
-    python Generation/validate_boltz_filter.py <af3_results.zip>   # auto-detects the CSV
+To validate against AF3: parse an AF3 results zip, join its jobs to this CSV by
+binder sequence, and correlate each local metric (esm_iptm, esm_plddt) with AF3
+ipTM (Spearman + top-K hit-rate, pooled across batches). See filter_methods.md
+for the calibration method and results.
 
 API NOTE: the ESMFold2 call below follows the published API
 (github.com/atong01/esmfold2 README, 2026-06). If the installed package's module
@@ -248,7 +250,8 @@ def main():
     if rows:
         pd.DataFrame(rows).to_csv(args.out, index=False)
         print(f"\nWrote {n_ok} ESMFold2 scores -> {args.out}")
-        print("Now run: python Generation/validate_boltz_filter.py <af3_results.zip>")
+        print("Validate against AF3 by joining an AF3 results zip to this CSV by "
+              "binder sequence (Spearman + top-K vs AF3 ipTM); see filter_methods.md.")
     else:
         print("\nNo scores produced. Check the ESMFold2 install / API (see load_model).")
 

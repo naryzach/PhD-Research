@@ -8,7 +8,7 @@ on-target and off-target protease in a specificity pair:
   - MMP2 (on-target)   vs MMP9 (off-target)
   - ADAM10 (on-target) vs ADAM17 (off-target)
 
-Scoring uses ESMFold2 (the validated local ranker — see BOLTZ_FILTER_METHODS.md),
+Scoring uses ESMFold2 (the validated local ranker — see filter_methods.md),
 NOT RF3 (RF3 confidence was anti-correlated with AF3). Each binder is folded
 against the on- and off-target; we record:
   selectivity_score = esm_iptm_on - esm_iptm_off   (>0 prefers on-target)

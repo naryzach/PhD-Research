@@ -7,7 +7,7 @@ Iterative binder design with an in-silico funnel before any AF3 call:
   AF3 Server (gold-standard validation, capped at 30/day)
 
 ESMFold2 replaced Boltz-2 as the ranker after AF3 calibration (see
-BOLTZ_FILTER_METHODS.md §5): MSA-free, faster, and a better AF3 predictor.
+filter_methods.md §5): MSA-free, faster, and a better AF3 predictor.
 RF3 and Boltz-2 remain in the code but are OFF by default (RF3_ENABLE / BOLTZ_ENABLE)
 — RF3's confidence was anti-correlated with AF3, so it only added cost. Enable RF3
 with --enable-rf3 to log its geometric features for curiosity.
@@ -198,7 +198,7 @@ RF3_COMPOSITE_CEILING = 0.50  # cap RF3-only composite so model-scored entries d
 
 # ── ESMFold2 configuration (primary pre-AF3 ranker) ──────────────────────────
 # ESMFold2 (Chan Zuckerberg Biohub, Rives lab) is MSA-free and faster than Boltz,
-# and beat Boltz in our AF3 calibration (§5.2 of BOLTZ_FILTER_METHODS.md).  It is
+# and beat Boltz in our AF3 calibration (§5.2 of filter_methods.md).  It is
 # the default local ranker.  It cannot share the foundry env (torch/CUDA pins),
 # so we invoke score_with_esmfold2.py in a separate `esmfold2` conda env via
 # subprocess.  Configure the env's python + the scorer path:
@@ -1477,9 +1477,9 @@ class IterativeRefiner:
         print("\n" + "=" * 64)
         print(f"  STRATIFIED validation submission ready: {sub_path}")
         print(f"  Manifest (band assignments): {man_path}")
-        print(f"  Upload the submission to AF3, then run:")
-        print(f"    python Generation/validate_boltz_filter.py <af3_results.zip>")
-        print(f"  to see AF3 hit-rate per Boltz band (LO / MID / HI).")
+        print(f"  Upload to AF3, then join the results back to the manifest by band")
+        print(f"  to see AF3 hit-rate per band (low/mid/high local score).")
+        print(f"  See filter_methods.md for the calibration method.")
         print("=" * 64 + "\n")
 
     def import_af3_results(self, results_path: str) -> None:
@@ -1789,9 +1789,9 @@ def main():
         "--stratified-export", type=int, default=None, metavar="N",
         help=(
             "Write a one-time STRATIFIED AF3 submission of N designs sampled "
-            "evenly across Boltz-ipTM bands (validation of the Boltz filter), "
+            "evenly across local-score bands (to calibrate the filter against AF3), "
             "then exit without running iterations.  Use ~30 to match the daily "
-            "AF3 cap.  Pair with validate_boltz_filter.py on the returned results."
+            "AF3 cap.  Analyze the returned results per band (see filter_methods.md)."
         ),
     )
     parser.add_argument(

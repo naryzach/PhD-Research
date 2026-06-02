@@ -1,8 +1,8 @@
 # In-Silico Pre-Filtering for AF3: Methods & Decision Log
 
 **Project:** Iterative TIMP3-scaffold binder design (`Generation/iterative_refinement.py`)
-**Question this document answers:** *Why did we add Boltz-2, and how do we know whether it's worth the compute?*
-**Last updated:** 2026-06-01
+**Question this document answers:** *Which local structure predictor (RF3, Boltz-2, ESMFold2) best pre-filters designs before the rate-limited AF3 step, and how do we know it's worth the compute?*
+**Last updated:** 2026-06-02
 
 ---
 
@@ -72,8 +72,14 @@ branch is capped so any AF3- or Boltz-scored design out-ranks an unvalidated one
 - "Hit-rate": fraction of designs with AF3 ipTM ≥ 0.55.
 - For ordinary batches, top-K-by-Boltz hit-rate vs. the random-selection expectation.
 
-**Reproduce any time:** `python Generation/validate_boltz_filter.py <af3_results.zip>`
-(auto-detects stratified vs. correlation mode).
+**Reproduce any time (procedure):** parse the AF3 results zip
+(`*_summary_confidences_0.json` → ipTM/pTM; `*_full_data_0.json` → binder-chain
+pLDDT and the two cross-chain PAE blocks), join its jobs to the local metrics by
+binder sequence, then compute the correlations above. For a stratified batch,
+group by the manifest's band; for an ordinary top-composite batch, also report
+top-K hit-rate and pool across all AF3 batches to neutralize selection-induced
+range restriction (§5.4). (Originally automated by a small helper script,
+since retired; the procedure is self-contained here.)
 
 ---
 
@@ -159,11 +165,8 @@ band). Verified composition on current data (24 jobs, balanced 6/target):
 | MID | 8 | 0.38 – 0.56 – 0.72 |
 | HI | 8 | 0.53 – 0.75 – 0.89 |
 
-After running these through AF3:
-
-```bash
-python Generation/validate_boltz_filter.py <af3_results.zip>
-```
+After running these through AF3, join the results to the band manifest by
+sequence and compute the per-band AF3 hit-rate (procedure in §3).
 
 **Interpretation:**
 - **AF3 ipTM rises LO→MID→HI (Δ ≥ 0.10):** Boltz is a useful coarse filter — keep it as
@@ -201,7 +204,8 @@ reliable AF3 surrogate we wanted. This motivates trialing ESMFold2 (§6) on the 
 ### 5.2 ESMFold2 head-to-head results (same 24 designs, 2026-06-01)
 
 ESMFold2 (ESMC-6B base, ~25 GB weights, MSA-free) scored the same 24 designs on the
-cluster; compared against AF3 ipTM ground truth via `validate_boltz_filter.py`:
+cluster; compared against AF3 ipTM ground truth (parse the AF3 zip, join to the
+ESMFold2 scores by sequence, correlate — §3):
 
 | Predictor | Pearson | Spearman | top-6 AF3 hit-rate |
 |-----------|--------:|---------:|-------------------:|
@@ -256,11 +260,12 @@ magnitude. AF3 is not treated as infallible — ESMFold2 is a legitimate indepen
 
 Full pool: ESMFold2 composite mean 0.49, 59/400 with ipTM≥0.55, 11/400 ≥0.70. The pool
 surfaced strong **untested** candidates that never reached AF3, e.g. `ADAM10_it0_d0`
-(ipTM 0.855, pLDDT 86) and `ADAM17_it3_d7` (ipTM 0.900). The next AF3 batch
-(`select_next_af3.py` → `af3_submission_esmfold2.json`, 28 jobs, per-target top-7 by
-composite, excluding the 24 already tested) leads with these. When its results return,
-`validate_boltz_filter.py` auto-joins them to `esmfold2_scores.csv`, growing the
-ESMFold2-vs-AF3 calibration toward n≈52 — watch whether MMP2 holds.
+(ipTM 0.855, pLDDT 86) and `ADAM17_it3_d7` (ipTM 0.900). The next AF3 batch was built by
+selecting per-target top-K by ESMFold2 composite, excluding the 24 already tested (28
+jobs), and led with these. When its results returned, joining them to the ESMFold2 scores
+by sequence grew the ESMFold2-vs-AF3 calibration toward n≈52 — watch whether MMP2 holds.
+(Both the batch selection and the AF3-vs-local join were one-off helper scripts, since
+retired; the pipeline's `export_for_af3` now does the per-target top-K selection in-loop.)
 
 **Integration:** `run_esmfold2` runs as a pipeline stage (subprocess to the `esmfold2`
 conda env; set `ESMFOLD2_PYTHON`). `update_hof` now never trims AF3-validated entries
@@ -283,8 +288,8 @@ restriction trap as the original §4.3 production batch.
 
 The tell is consistency: across the two differently-selected batches, Boltz swung
 0.11 → 0.64 (unstable), while ESMFold2 pLDDT held 0.41 → 0.36 (stable). Pooling both
-batches (n=52, the robust estimate; now baked into `validate_boltz_filter.py` as the
-auto-pooled report):
+batches (n=52, the robust estimate — pool across all AF3 batches rather than judging
+on any single selected batch):
 
 | Predictor | batch1 | batch2 | **Pooled (n=52)** |
 |-----------|-------:|-------:|------------------:|
