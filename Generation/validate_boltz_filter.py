@@ -244,6 +244,66 @@ def report_model_comparison(merged: pd.DataFrame, hit: float) -> None:
     print("\n  Higher spearman + higher top-K hit-rate = better AF3 pre-filter.")
 
 
+def report_pooled(hit: float) -> None:
+    """
+    Pool EVERY AF3 results zip in the output dir and report per-batch + pooled
+    correlations vs AF3 ipTM, plus a range-restriction (std) diagnostic.
+
+    This is the robust read: a single batch selected by model X range-restricts
+    X and deflates its correlation, so per-batch model comparisons mislead.
+    Pooling across differently-selected batches cancels much of that bias, and
+    a predictor that stays consistent across batches is the trustworthy one.
+    """
+    zips = sorted(OUT_BASE.glob("folds_*.zip"))
+    if len(zips) < 2:
+        return
+
+    esm_csv = OUT_BASE / "esmfold2_scores.csv"
+    local = load_round_summaries()
+    esm = None
+    if esm_csv.exists():
+        esm = pd.read_csv(esm_csv); esm["binder_seq"] = esm["full_seq"]
+
+    frames = []
+    for z in zips:
+        df = parse_af3_zip(str(z))
+        df["batch"] = z.stem
+        frames.append(df)
+    af3 = pd.concat(frames, ignore_index=True).drop_duplicates(subset=["binder_seq"])
+    m = af3.merge(local, on="binder_seq", how="inner")
+    if esm is not None:
+        m = m.merge(esm[["binder_seq", "esm_iptm", "esm_plddt"]], on="binder_seq", how="left")
+    m["boltz_iptm"] = pd.to_numeric(m.get("boltz_iptm"), errors="coerce")
+
+    print("\n" + "=" * 64)
+    print(f"POOLED ACROSS {len(zips)} AF3 BATCHES  (n={len(m)} unique designs)")
+    print("=" * 64)
+    cols = [("boltz_iptm", "Boltz ipTM"), ("esm_iptm", "ESMFold2 ipTM"),
+            ("esm_plddt", "ESMFold2 pLDDT")]
+    batches = list(m["batch"].unique())
+    hdr = "  {:16s}".format("predictor") + "".join(f"{b[:14]:>16s}" for b in batches) + f"{'POOLED':>12s}"
+    print(hdr)
+    for col, label in cols:
+        if col not in m.columns:
+            continue
+        cells = ""
+        for b in batches:
+            sub = m[m["batch"] == b]
+            _, rho, n = corr(pd.to_numeric(sub[col], errors="coerce"), sub["iptm_af3"])
+            cells += f"{rho:>+16.3f}" if not np.isnan(rho) else f"{'-':>16s}"
+        _, rp, _ = corr(pd.to_numeric(m[col], errors="coerce"), m["iptm_af3"])
+        print(f"  {label:16s}{cells}{rp:>+12.3f}")
+
+    print("\n  Range (std) per batch — low std = selected-on = correlation deflated:")
+    for col, label in cols:
+        if col not in m.columns:
+            continue
+        stds = "  ".join(f"{b[:10]}={m[m.batch==b][col].std():.3f}" for b in batches)
+        print(f"    {label:16s} {stds}")
+
+    print("\n  Pooled is the robust estimate; consistency across batches = reliability.")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Validate Boltz (and ESMFold2) as AF3 pre-filters.")
     ap.add_argument("af3_zip", help="AF3 Server results ZIP.")
@@ -259,14 +319,20 @@ def main():
     if merged.empty:
         sys.exit("No matches — are these AF3 results from this campaign?")
 
+    # Stratified report only if THIS batch actually overlaps the stratified
+    # manifest (otherwise it's a different selection — e.g. an ESMFold2 batch).
     man_path = args.manifest or (OUT_BASE / "stratified_manifest.json")
+    ran_stratified = False
     if Path(man_path).exists():
         manifest = pd.DataFrame(json.loads(Path(man_path).read_text()))
-        report_stratified(merged, manifest, args.hit)
-    else:
+        if merged["binder_seq"].isin(set(manifest["full_seq"])).any():
+            report_stratified(merged, manifest, args.hit)
+            ran_stratified = True
+    if not ran_stratified:
         report_correlation(merged, args.hit)
 
     report_model_comparison(merged, args.hit)
+    report_pooled(args.hit)   # robust cross-batch view (auto-runs if >1 AF3 zip)
     print()
 
 
