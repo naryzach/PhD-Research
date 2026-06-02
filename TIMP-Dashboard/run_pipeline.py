@@ -38,11 +38,107 @@ from atomworks.constants import PROTEIN_BACKBONE_ATOM_NAMES
 from lightning.fabric import seed_everything
 from rfd3.engine import RFD3InferenceConfig, RFD3InferenceEngine
 from mpnn.inference_engines.mpnn import MPNNInferenceEngine
-from rf3.inference_engines.rf3 import RF3InferenceEngine
-from rf3.utils.inference import InferenceInput
 from rfd3.inference.input_parsing import DesignInputSpecification
 
 torch.set_float32_matmul_precision('medium')
+
+SAVE_ESM_STRUCTS = True   # write predicted CIFs for downstream inspection
+
+# ── ESMFold2 helpers ──────────────────────────────────────────────────────────
+# ESMFold2 (Chan Zuckerberg Biohub / Rives lab) folds binder + target as a
+# two-chain complex and returns esm_iptm / esm_ptm / esm_plddt (binder mean).
+# Install alongside the foundry env or in a compatible one:
+#   pip install "esm @ git+https://github.com/Biohub/esm.git@main"
+#   pip install transformers
+# The three functions below are the complete interface — no external script needed.
+
+def _esm_load_model(device: str = "cuda"):
+    """Load ESMFold2 once and return (model, input_builder)."""
+    from esm.models.esmfold2 import ESMFold2InputBuilder
+    from transformers.models.esmfold2.modeling_esmfold2 import ESMFold2Model
+    model = ESMFold2Model.from_pretrained("biohub/ESMFold2").to(device).eval()
+    return model, ESMFold2InputBuilder()
+
+
+def _esm_save_structure(res, stub: str):
+    """Write the predicted complex to {stub}.cif (or .pdb). Returns path or None."""
+    comp = getattr(res, "complex", None) or getattr(res, "structure", None)
+    if comp is None:
+        return None
+    for meth, ext in (("to_mmcif", "cif"), ("to_mmcif_string", "cif"),
+                      ("to_pdb", "pdb"), ("to_pdb_string", "pdb")):
+        fn = getattr(comp, meth, None)
+        if callable(fn):
+            try:
+                text = fn()
+                if isinstance(text, str) and text.strip():
+                    path = f"{stub}.{ext}"
+                    with open(path, "w") as fh:
+                        fh.write(text)
+                    return path
+            except Exception:
+                continue
+    for meth, ext in (("save_mmcif", "cif"), ("save_pdb", "pdb"), ("save", "cif")):
+        fn = getattr(comp, meth, None)
+        if callable(fn):
+            try:
+                path = f"{stub}.{ext}"
+                fn(path)
+                return path
+            except Exception:
+                continue
+    return None
+
+
+def _esm_predict_complex(model, builder, binder_seq: str, target_seq: str,
+                          binder_len: int, seed: int = 0,
+                          cif_stub: str = None) -> dict:
+    """
+    Fold a two-chain complex and return {esm_iptm, esm_ptm, esm_plddt[, esm_cif]}.
+    pLDDT is the binder-chain mean (0–100 scale).  If cif_stub is given the
+    predicted structure is written to {cif_stub}.cif/.pdb at no extra GPU cost.
+    """
+    from esm.models.esmfold2 import ProteinInput, StructurePredictionInput
+
+    spi = StructurePredictionInput(sequences=[
+        ProteinInput(id="A", sequence=binder_seq),
+        ProteinInput(id="B", sequence=target_seq),
+    ])
+    res = builder.fold(model, spi, num_loops=3, num_sampling_steps=50,
+                       num_diffusion_samples=1, seed=seed)
+
+    def _get(obj, *names):
+        for n in names:
+            v = getattr(obj, n, None)
+            if v is not None:
+                return v
+        return None
+
+    iptm     = _get(res, "iptm", "interface_ptm")
+    ptm      = _get(res, "ptm")
+    plddt_arr = _get(res, "plddt", "plddts")
+    plddt = np.nan
+    if plddt_arr is not None:
+        arr = np.asarray(plddt_arr, dtype=float).flatten()
+        if arr.size >= binder_len:
+            arr = arr[:binder_len]
+        if arr.size:
+            plddt = float(arr.mean())
+            if 0.0 < plddt <= 1.0:
+                plddt *= 100.0
+
+    def _f(x):
+        try:
+            return float(x)
+        except (TypeError, ValueError):
+            return np.nan
+
+    out = {"esm_iptm": _f(iptm), "esm_ptm": _f(ptm), "esm_plddt": plddt}
+    if cif_stub:
+        saved = _esm_save_structure(res, cif_stub)
+        if saved:
+            out["esm_cif"] = saved
+    return out
 
 import logging
 import warnings
@@ -236,10 +332,10 @@ def main():
 
             combo_rfd3_out_dir = os.path.join(OUT_BASE_DIR, target_name, combo_name, "rfd3")
             combo_lmpnn_out_dir = os.path.join(OUT_BASE_DIR, target_name, combo_name, "lmpnn")
-            combo_rf3_out_dir = os.path.join(OUT_BASE_DIR, target_name, combo_name, "rf3")
+            combo_esm_out_dir = os.path.join(OUT_BASE_DIR, target_name, combo_name, "esmfold2")
             os.makedirs(combo_rfd3_out_dir, exist_ok=True)
             os.makedirs(combo_lmpnn_out_dir, exist_ok=True)
-            os.makedirs(combo_rf3_out_dir, exist_ok=True)
+            os.makedirs(combo_esm_out_dir, exist_ok=True)
 
             selected_loops = [LOOP_DEFINITIONS[name] for name in combo]
             selected_loops.sort(key=lambda x: x["pos"])
@@ -402,92 +498,124 @@ def main():
                 if 'lmpnn_engine' in locals(): del lmpnn_engine
                 torch.cuda.empty_cache()
 
-            # --- STAGE 3: RUN RF3 VALIDATION ---
-            print(f"--- Running RF3 Validations on {len(lmpnn_jobs)} sequences ---")
+            # --- STAGE 3: ESMFold2 VALIDATION ---
+            # ESMFold2 (MSA-free, language-model-based) replaced RF3 as the fold validator.
+            # Binder (chain A) + target (chain B) are folded as a two-chain complex, returning
+            # esm_iptm, esm_ptm, and esm_plddt (binder-chain mean).
+            # Backbone RMSD is computed vs the RFd3 chain A design.
+            # Interface metrics (contacts, area, clashes) are also computed here from the
+            # lmpnn_array, which retains both chains with the RFd3-placed coordinates.
+            print(f"--- Running ESMFold2 Validations on {len(lmpnn_jobs)} sequences ---")
+
+            # ── 3a. Score sequences directly via ESMFold2 (in-process) ──────────
+            esm_scores = {}
+            _esm_model = _esm_builder = None
             try:
-                # Use same precision check here
-                precision = "bf16-mixed"
-                if torch.cuda.is_available():
-                    if "V100" in torch.cuda.get_device_name(0):
-                        precision = "16-mixed"
-                
-                rf3_engine = RF3InferenceEngine(ckpt_path='rf3', verbose=False, trainer_overrides={"precision": precision})
-                for job in tqdm(lmpnn_jobs, desc="Validating Structs", leave=False):
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                print(f"Loading ESMFold2 on {device} ...", flush=True)
+                _esm_model, _esm_builder = _esm_load_model(device)
+
+                for job in tqdm(lmpnn_jobs, desc="ESMFold2 Scoring", leave=False):
+                    design_id  = f"{job['design_id']}_mpnn{job['seq_idx']}"
+                    binder_seq = get_sequence_from_array(job['lmpnn_array'], CHAIN_TO_DESIGN)
+                    target_seq = get_sequence_from_array(job['lmpnn_array'], FIXED_CHAINS[0])
+                    if not binder_seq or not target_seq:
+                        continue
+                    try:
+                        stub = os.path.join(combo_esm_out_dir, design_id) if SAVE_ESM_STRUCTS else None
+                        metrics = _esm_predict_complex(
+                            _esm_model, _esm_builder, binder_seq, target_seq,
+                            len(binder_seq), cif_stub=stub,
+                        )
+                        esm_scores[design_id] = metrics
+                        print(f"  {design_id}: ipTM={metrics['esm_iptm']:.3f}  "
+                              f"pLDDT={metrics['esm_plddt']:.1f}", flush=True)
+                    except Exception as e:
+                        print(f"  ESMFold2 failed on {design_id}: {e}", flush=True)
+
+                if esm_scores:
+                    pd.DataFrame([{"design_id": did, **m} for did, m in esm_scores.items()]).to_csv(
+                        os.path.join(combo_esm_out_dir, "esm_scores.csv"), index=False)
+                    print(f"ESMFold2 scored {len(esm_scores)}/{len(lmpnn_jobs)} designs.", flush=True)
+
+            except ImportError as e:
+                print(
+                    f"ESMFold2 not available ({e}).\n"
+                    "  pip install 'esm @ git+https://github.com/Biohub/esm.git@main' transformers\n"
+                    "  pLDDT/pTM/iPTM will be NaN; interface metrics will still be computed.",
+                    flush=True,
+                )
+            finally:
+                del _esm_model, _esm_builder
+                torch.cuda.empty_cache()
+
+            # ── 3b. Per-design: RMSD from ESMFold2 structure + interface metrics ──
+            bb_atom_names = set(PROTEIN_BACKBONE_ATOM_NAMES) - {"OXT"}
+            try:
+                for job in tqdm(lmpnn_jobs, desc="ESMFold2 Post-processing", leave=False):
                     design_id = f"{job['design_id']}_mpnn{job['seq_idx']}"
                     lmpnn_array = job['lmpnn_array']
                     rfd3_array = job['rfd3_array']
-                    
-                    valid_atoms = ['N', 'CA', 'C', 'O', 'CB']
-                    array_for_rf3 = lmpnn_array[np.isin(lmpnn_array.atom_name, valid_atoms)].copy()
-                    input_structure = InferenceInput.from_atom_array(array_for_rf3, example_id=design_id)
-                    rf3_outputs_dict = rf3_engine.run(inputs=input_structure)
-                    
-                    rf3_target_key = next((k for k in rf3_outputs_dict.keys() if design_id in k), list(rf3_outputs_dict.keys())[0] if rf3_outputs_dict else None)
-                    if rf3_target_key:
-                        rf3_output = rf3_outputs_dict[rf3_target_key][0]
-                        rf3_atom_array = renumber_atom_array_residues(rf3_output.atom_array)
-                        to_cif_file(rf3_atom_array, f"{combo_rf3_out_dir}/{design_id}_refolded.cif", file_type="cif")
 
-                        import json
-                        summary = rf3_output.summary_confidences
-                        with open(f"{combo_rf3_out_dir}/{design_id}_summary_confidences.json", "w") as f:
-                            json.dump(summary, f)
-                        if getattr(rf3_output, "confidences", None):
-                            with open(f"{combo_rf3_out_dir}/{design_id}_confidences.json", "w") as f:
-                                json.dump(rf3_output.confidences, f)
+                    esm_m  = esm_scores.get(design_id, {})
+                    plddt  = float(esm_m.get("esm_plddt", float("nan")))
+                    ptm    = float(esm_m.get("esm_ptm",   float("nan")))
+                    iptm   = float(esm_m.get("esm_iptm",  float("nan")))
+                    esm_cif = esm_m.get("esm_cif")
 
-                        bb_mask_rfd3 = np.isin(rfd3_array.atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
-                        bb_mask_rf3 = np.isin(rf3_atom_array.atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
-                        bb_generated = rfd3_array[bb_mask_rfd3]
-                        bb_refolded = rf3_atom_array[bb_mask_rf3]
-                        bb_generated = bb_generated[bb_generated.atom_name != "OXT"]
-                        bb_refolded = bb_refolded[bb_refolded.atom_name != "OXT"]
-                        
-                        if len(bb_generated) != len(bb_refolded):
-                            min_len = min(len(bb_generated), len(bb_refolded))
-                            bb_generated = bb_generated[:min_len]
-                            bb_refolded = bb_refolded[:min_len]
+                    # ── RMSD: RFd3 chain A backbone vs ESMFold2 monomer refold ──
+                    overall_rmsd = float("nan")
+                    if esm_cif and os.path.exists(str(esm_cif)):
+                        try:
+                            if str(esm_cif).endswith(".cif"):
+                                esm_array = get_cif_structure(CIFFile.read(str(esm_cif)), model=1)
+                            else:
+                                esm_array = PDBFile.read(str(esm_cif)).get_structure()[0]
 
-                        bb_refolded_fitted, _ = superimpose(bb_generated, bb_refolded)
-                        overall_rmsd = rmsd(bb_generated, bb_refolded_fitted)
-                        
-                        plddt = summary.get('overall_plddt', 0.0)
-                        ptm = summary.get('ptm', 0.0)
-                        iptm = summary.get('iptm', 0.0)
-                        if iptm is None: iptm = 0.0
-                        
-                        metrics = calc_protein_protein_metrics(rf3_atom_array, CHAIN_TO_DESIGN, FIXED_CHAINS[0])
-                        heur_score = calculate_heuristic_score(
-                            contacts=metrics["contacts"], 
-                            interface_area=metrics["interface_area"], 
-                            clashes=metrics["clashes"], 
-                            centroid_distance=metrics["centroid_distance"], 
-                            plddt_mean=plddt,
-                            iptm=iptm
-                        )
+                            rfd3_bb = rfd3_array[
+                                (rfd3_array.chain_id == CHAIN_TO_DESIGN) &
+                                np.isin(rfd3_array.atom_name, list(bb_atom_names))]
+                            esm_bb  = esm_array[np.isin(esm_array.atom_name, list(bb_atom_names))]
 
-                        loop_kwargs = {k: v for k, v in job.items() if k.startswith("loop_")}
-                        
-                        final_records.append({
-                            "target": job["target"],
-                            "loop_combo": job["combo"],
-                            "design_id": design_id,
-                            **loop_kwargs,
-                            "overall_rmsd": overall_rmsd,
-                            "plddt": plddt,
-                            "ptm": ptm,
-                            "iptm": iptm,
-                            "contacts": metrics["contacts"],
-                            "clashes": metrics["clashes"],
-                            "interface_area": metrics["interface_area"],
-                            "centroid_distance": metrics["centroid_distance"],
-                            "heuristic_score": heur_score,
-                            "full_seq": job["full_seq"]
-                        })
+                            n = min(len(rfd3_bb), len(esm_bb))
+                            if n > 0:
+                                esm_bb_fitted, _ = superimpose(rfd3_bb[:n], esm_bb[:n])
+                                overall_rmsd = float(rmsd(rfd3_bb[:n], esm_bb_fitted))
+                        except Exception as e:
+                            print(f"  RMSD computation failed for {design_id}: {e}")
+
+                    # ── Interface metrics from lmpnn_array (both chains retained) ──
+                    metrics = calc_protein_protein_metrics(lmpnn_array, CHAIN_TO_DESIGN, FIXED_CHAINS[0])
+                    heur_score = calculate_heuristic_score(
+                        contacts=metrics["contacts"],
+                        interface_area=metrics["interface_area"],
+                        clashes=metrics["clashes"],
+                        centroid_distance=metrics["centroid_distance"],
+                        plddt_mean=plddt,
+                        iptm=iptm if not np.isnan(iptm) else 0.0
+                    )
+
+                    loop_kwargs = {k: v for k, v in job.items() if k.startswith("loop_")}
+
+                    final_records.append({
+                        "target": job["target"],
+                        "loop_combo": job["combo"],
+                        "design_id": design_id,
+                        **loop_kwargs,
+                        "overall_rmsd": overall_rmsd,
+                        "plddt": plddt,
+                        "ptm": ptm,
+                        "iptm": iptm,
+                        "contacts": metrics["contacts"],
+                        "clashes": metrics["clashes"],
+                        "interface_area": metrics["interface_area"],
+                        "centroid_distance": metrics["centroid_distance"],
+                        "heuristic_score": heur_score,
+                        "full_seq": job["full_seq"]
+                    })
             except Exception as e:
-                print(f"Error during RF3 validation: {e}")
+                print(f"Error during ESMFold2 post-processing: {e}")
             finally:
-                if 'rf3_engine' in locals(): del rf3_engine
                 torch.cuda.empty_cache()
                 
             # Intermediately save results after each combination to be safe
