@@ -705,6 +705,113 @@ transition: fade-out
 </div>
 
 ---
+layout: section
+transition: slide-up
+---
+
+# Cross-Reactivity Panel
+### TwistBio Constructs vs MMP1, MMP7, MMP8, MMP10
+
+---
+layout: default
+transition: fade-out
+---
+
+# Cross-Reactivity Binding Profile
+Flow Cytometry assessment of TwistBio constructs against a multi-MMP panel.
+
+<div class="grid grid-cols-2 gap-6 mt-6 items-start">
+  <div class="space-y-3">
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260529_CrossReactivity/Aggregate_FoldChange_Binding.png"
+         alt="Binding Fold Change"
+         class="w-full rounded-lg border border-white/10"
+         style="max-height: 300px; object-fit: contain;">
+  </div>
+  <div class="space-y-4">
+    <div class="p-4 bg-red-500/10 rounded border border-red-500/20">
+      <h4 class="text-red-400 font-bold text-[10px] uppercase tracking-widest mb-2">Observation: Weak Signal Across Panel</h4>
+      <p class="text-[10px] leading-relaxed opacity-70">
+        All constructs (AB 3, 4, 6 and C 12) showed weak/minimal binding across all tested targets (MMP1, 7, 8, 10). The average binding fold change was ~1.18x over background.
+      </p>
+    </div>
+    <div class="p-4 bg-amber-500/10 rounded border border-amber-500/20">
+      <h4 class="text-amber-400 font-bold text-[10px] uppercase tracking-widest mb-2">Control Validation Issue</h4>
+      <p class="text-[10px] leading-relaxed opacity-70">
+        The positive control (TIMP 3) also exhibited extremely low binding (1.17x fold change). This indicates a potential issue with target biotinylation/labeling or the secondary staining protocol, rather than an inherent failure of the novel binders. Assays should be repeated with fresh/validated target batches.
+      </p>
+    </div>
+  </div>
+</div>
+
+---
+layout: section
+transition: slide-up
+---
+
+# Appendix: ADAM10/17 Expression & Purification
+### FPLC and SDS-PAGE Optimization
+
+---
+layout: default
+transition: fade-out
+---
+
+# FPLC Purification — ADAM10 & 17
+Optimization of Anion Exchange Chromatography (HiTrap Q FF).
+
+<div class="grid grid-cols-2 gap-4 mt-6">
+  <div class="space-y-2">
+    <div class="p-3 bg-white/5 rounded border border-white/10">
+      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-2">ADAM10 (Sam's sample)</h4>
+      <p class="text-[10px] leading-relaxed opacity-70">
+        Run on AEC SAMPLE HiTrap Q FF preset. Only UV peak is in sample application.
+      </p>
+      <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM_10_Sam_AEC_1.png" class="w-full rounded mt-2 border border-white/10" style="max-height: 150px; object-fit: contain;">
+    </div>
+  </div>
+  <div class="space-y-2">
+    <div class="p-3 bg-white/5 rounded border border-white/10">
+      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-2">ADAM10-pMopac</h4>
+      <p class="text-[10px] leading-relaxed opacity-70">
+        Diluted 1:4 with Buffer A. Something is eluting during wash. May need a more aggressive NaCl concentration during wash.
+      </p>
+      <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM_10_AEC_T1.png" class="w-full rounded mt-2 border border-white/10" style="max-height: 150px; object-fit: contain;">
+    </div>
+  </div>
+</div>
+
+---
+layout: default
+transition: fade-out
+---
+
+# SDS-PAGE Validation
+FPLC fractions evaluated by SDS-PAGE.
+
+<div class="grid grid-cols-2 gap-6 mt-6 items-start">
+  <div class="space-y-3">
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260522.png"
+         alt="SDS-PAGE Gel"
+         class="w-full rounded-lg border border-white/10"
+         style="max-height: 300px; object-fit: contain;">
+  </div>
+  <div class="space-y-4">
+    <div class="p-4 bg-red-500/10 rounded border border-red-500/20">
+      <h4 class="text-red-400 font-bold text-[10px] uppercase tracking-widest mb-2">Observation: No Visible Bands</h4>
+      <p class="text-[10px] leading-relaxed opacity-70">
+        After 3.5 hour Coomassie stain and overnight de-stain, no visible bands were detected on the gel other than the ladder for both ADAM10 and ADAM17 FPLC fractions.
+      </p>
+    </div>
+    <div class="p-4 bg-amber-500/10 rounded border border-amber-500/20">
+      <h4 class="text-amber-400 font-bold text-[10px] uppercase tracking-widest mb-2">Next Steps</h4>
+      <p class="text-[10px] leading-relaxed opacity-70">
+        Currently optimizing the large-scale induction (500 mL 2xYT + arabinose) and periplasmic extraction buffer protocols to improve initial yield before repeating FPLC.
+      </p>
+    </div>
+  </div>
+</div>
+
+---
 layout: center
 class: text-center
 ---
