@@ -210,6 +210,20 @@ ESMFOLD2_PYTHON     = os.environ.get(
 )
 ESMFOLD2_SCRIPT     = str(_HERE / "score_with_esmfold2.py")
 ESMFOLD2_TIMEOUT_S  = 3600   # whole-batch timeout (model load + N designs)
+# Save the ESMFold2-predicted complex per design. The structure is already
+# computed during folding, so this is ~free (disk I/O only, no extra GPU time);
+# it gives an inspectable predicted complex from the actual ranker, and feeds
+# hof_structures/. Off → scores only.
+SAVE_ESMFOLD2_STRUCTURES = True
+# Multi-GPU for the ESMFold2 stage (the dominant cost). Designs are embarrassingly
+# parallel, so we data-parallel-shard them across GPUs, one scorer process each.
+#   1      → single GPU (default; no behavior change)
+#   N      → use up to N *free* GPUs (skips GPUs already busy with other jobs)
+#   "auto" → use all free GPUs, capped at ESMFOLD2_MAX_GPUS
+# Override per run with --esmfold2-gpus. RFd3/LMPNN stay single-GPU.
+ESMFOLD2_GPUS       = 1
+ESMFOLD2_MAX_GPUS   = 4
+ESMFOLD2_GPU_FREE_MB = 2000   # a GPU counts as "free" if used memory < this
 
 # ── Boltz-2 configuration (retained, OFF by default) ─────────────────────────
 # Superseded by ESMFold2 as the ranker but kept available for A/B comparison.
@@ -242,6 +256,48 @@ def setup_env() -> None:
     CKPT_DIR.mkdir(parents=True, exist_ok=True)
     os.environ["FOUNDRY_CHECKPOINT_DIRS"] = str(CKPT_DIR)
     os.environ["DGLBACKEND"] = "pytorch"
+
+
+def get_free_gpus(max_n: int = None, mem_threshold_mb: int = ESMFOLD2_GPU_FREE_MB) -> list:
+    """
+    Return indices of GPUs whose used memory is below `mem_threshold_mb` (i.e.
+    free / not in use by another job), via nvidia-smi. Empty list if none/no smi
+    (callers fall back to the default device). Respects other users on a shared node.
+    """
+    try:
+        out = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=index,memory.used", "--format=csv,noheader,nounits"]
+        ).decode()
+    except Exception:
+        return []
+    free = []
+    for line in out.strip().splitlines():
+        try:
+            idx, used = (x.strip() for x in line.split(","))
+            if int(used) < mem_threshold_mb:
+                free.append(int(idx))
+        except ValueError:
+            continue
+    return free[:max_n] if max_n else free
+
+
+def resolve_esmfold2_gpus() -> list:
+    """
+    Turn the ESMFOLD2_GPUS setting into a concrete list of GPU ids to shard over.
+    Returns [None] for the single-GPU default (no CUDA_VISIBLE_DEVICES pinning —
+    unchanged behavior); otherwise a list of free GPU indices.
+    """
+    spec = ESMFOLD2_GPUS
+    if isinstance(spec, str) and spec.lower() == "auto":
+        return get_free_gpus(max_n=ESMFOLD2_MAX_GPUS) or [None]
+    try:
+        n = int(spec)
+    except (TypeError, ValueError):
+        n = 1
+    if n <= 1:
+        return [None]
+    free = get_free_gpus(max_n=n)
+    return free if len(free) > 1 else [None]
 
 
 def get_seq(atom_array, chain_id: str = "A") -> str:
@@ -735,49 +791,82 @@ class IterativeRefiner:
 
     # ── ESMFold2 (primary local ranker) ──────────────────────────────────────
 
+    def _esmfold2_one_shard(self, rows: list, out_dir: Path, tag: str, gpu) -> Path:
+        """
+        Launch one ESMFold2 scorer subprocess over `rows`. If `gpu` is an int,
+        pin it via CUDA_VISIBLE_DEVICES (the process then sees it as cuda:0).
+        Returns the Popen handle + its output CSV path (started, not awaited).
+        """
+        in_csv  = out_dir / f"esm_input{tag}.csv"
+        out_csv = out_dir / f"esm_scores{tag}.csv"
+        pd.DataFrame(rows).to_csv(in_csv, index=False)
+
+        cmd = [ESMFOLD2_PYTHON, ESMFOLD2_SCRIPT, "--input", str(in_csv), "--out", str(out_csv)]
+        if SAVE_ESMFOLD2_STRUCTURES:
+            cmd += ["--cif-dir", str(out_dir / "structures")]
+
+        child_env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        if gpu is not None:
+            child_env["CUDA_VISIBLE_DEVICES"] = str(gpu)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, env=child_env)
+        return proc, out_csv
+
     def _score_sequences_esmfold2(self, rows: list, out_dir: Path) -> dict:
         """
         Core ESMFold2 invocation, reused by run_esmfold2 and by the specificity
         subclass (which scores each binder against on- AND off-target).
 
-        `rows`: list of {design_id, target_name, full_seq, target_seq}. design_id
-        must be unique per row (the specificity path suffixes _on / _off).
-        Returns {design_id: {esm_iptm, esm_ptm, esm_plddt}} (empty on any failure).
-        Shells out to score_with_esmfold2.py in the separate `esmfold2` env.
+        `rows`: list of {design_id, target_name, full_seq, target_seq}; design_id
+        must be unique per row (specificity suffixes ::on / ::off).
+        Data-parallel across free GPUs when ESMFOLD2_GPUS > 1 (designs sharded,
+        one scorer process per GPU). Returns {design_id: {esm_iptm, esm_ptm,
+        esm_plddt[, esm_cif]}} (empty on total failure).
         """
         if not ESMFOLD2_ENABLE or not rows:
             return {}
         out_dir.mkdir(parents=True, exist_ok=True)
-        in_csv, out_csv = out_dir / "esm_input.csv", out_dir / "esm_scores.csv"
-        pd.DataFrame(rows).to_csv(in_csv, index=False)
 
-        cmd = [ESMFOLD2_PYTHON, ESMFOLD2_SCRIPT, "--input", str(in_csv), "--out", str(out_csv)]
-        try:
-            child_env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
-            proc = subprocess.run(cmd, capture_output=True, text=True,
-                                  timeout=ESMFOLD2_TIMEOUT_S, env=child_env)
-            if proc.returncode != 0:
-                logger.warning(f"ESMFold2 failed: {proc.stderr[-400:].strip()}")
+        gpus = resolve_esmfold2_gpus()
+        n_shards = min(len(gpus), len(rows))
+        # Round-robin rows into shards (keeps each shard balanced)
+        shards = [rows[i::n_shards] for i in range(n_shards)]
+        if n_shards > 1:
+            logger.info(f"ESMFold2: sharding {len(rows)} jobs across GPUs {gpus[:n_shards]}")
+
+        procs = []
+        for i, shard in enumerate(shards):
+            tag = "" if n_shards == 1 else f"_g{i}"
+            procs.append(self._esmfold2_one_shard(shard, out_dir, tag, gpus[i]))
+
+        merged: dict = {}
+        for proc, out_csv in procs:
+            try:
+                _, stderr = proc.communicate(timeout=ESMFOLD2_TIMEOUT_S)
+                if proc.returncode != 0:
+                    logger.warning(f"ESMFold2 shard failed: {stderr[-400:].strip()}")
+                    continue
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                logger.warning(f"ESMFold2 shard timed out (>{ESMFOLD2_TIMEOUT_S}s)")
+                continue
+            except FileNotFoundError:
+                logger.error(f"ESMFold2 python not found at: {ESMFOLD2_PYTHON}\n"
+                             "  Set ESMFOLD2_PYTHON or ESMFOLD2_ENABLE=False.")
                 return {}
-        except FileNotFoundError:
-            logger.error(
-                f"ESMFold2 python not found at: {ESMFOLD2_PYTHON}\n"
-                "  Create the env and set ESMFOLD2_PYTHON (see config block), or set\n"
-                "  ESMFOLD2_ENABLE=False to skip."
-            )
-            return {}
-        except subprocess.TimeoutExpired:
-            logger.warning(f"ESMFold2 timed out (>{ESMFOLD2_TIMEOUT_S}s)")
-            return {}
-
-        if not out_csv.exists():
+            if not out_csv.exists():
+                continue
+            df = pd.read_csv(out_csv)
+            for _, r in df.iterrows():
+                rec = {"esm_iptm": float(r.get("esm_iptm", float("nan"))),
+                       "esm_ptm":   float(r.get("esm_ptm", float("nan"))),
+                       "esm_plddt": float(r.get("esm_plddt", float("nan")))}
+                if "esm_cif" in r and isinstance(r["esm_cif"], str):
+                    rec["esm_cif"] = r["esm_cif"]
+                merged[r["design_id"]] = rec
+        if not merged:
             logger.warning("ESMFold2 produced no scores.")
-            return {}
-        df = pd.read_csv(out_csv).set_index("design_id")
-        return {did: {"esm_iptm": float(r.get("esm_iptm", float("nan"))),
-                      "esm_ptm":   float(r.get("esm_ptm", float("nan"))),
-                      "esm_plddt": float(r.get("esm_plddt", float("nan")))}
-                for did, r in df.iterrows()}
+        return merged
 
     def run_esmfold2(self, target_name: str, candidates: list, out_dir: Path) -> list:
         """
@@ -1180,18 +1269,19 @@ class IterativeRefiner:
 
     def _save_hof_structures(self) -> None:
         """
-        Copy top-3 RF3 CIFs per target into hof_structures/ if not already there.
-        These can be used as visual reference or seeded into future RFd3 runs.
+        Copy the top-3 predicted complexes per target into hof_structures/ for
+        quick inspection. Prefers the ESMFold2 structure (our ranker's output),
+        falls back to the RF3 CIF if RF3 was enabled. No-op if neither exists.
         """
+        import shutil
         for tname in self.active_targets:
             tdir = self.hof_struct_dir / tname
             tdir.mkdir(parents=True, exist_ok=True)
             for rank, entry in enumerate(self.state["hof"].get(tname, [])[:3], start=1):
-                src = entry.get("rf3_cif")
+                src = entry.get("esm_cif") or entry.get("rf3_cif")
                 if src and Path(src).exists():
-                    dest = tdir / f"hof_rank{rank:02d}_{entry['design_id']}.cif"
+                    dest = tdir / f"hof_rank{rank:02d}_{entry['design_id']}{Path(src).suffix}"
                     if not dest.exists():
-                        import shutil
                         shutil.copy2(src, dest)
 
     def _write_hof_summary(self) -> None:
@@ -1712,11 +1802,20 @@ def main():
         help="Run RF3 too (OFF by default). Adds its geometric features to "
              "round_summary.csv; does not change ranking (ESMFold2 ranks). Slower.",
     )
+    parser.add_argument(
+        "--esmfold2-gpus", default=None, metavar="N|auto",
+        help="Data-parallel the ESMFold2 stage across GPUs (default 1). An integer "
+             "uses up to N *free* GPUs; 'auto' uses all free GPUs (cap "
+             f"{ESMFOLD2_MAX_GPUS}). Skips GPUs busy with other jobs.",
+    )
     args = parser.parse_args()
 
     if args.enable_rf3:
         global RF3_ENABLE
         RF3_ENABLE = True
+    if args.esmfold2_gpus is not None:
+        global ESMFOLD2_GPUS
+        ESMFOLD2_GPUS = args.esmfold2_gpus  # int-like string or "auto"; resolved at call time
 
     refiner = IterativeRefiner(
         active_targets=args.targets,

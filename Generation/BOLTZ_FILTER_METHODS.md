@@ -337,8 +337,9 @@ Open practical questions before adopting:
    be available for the folding trunk.
 2. **Independent benchmarks.** "Rivals/surpasses AF3" is from Biohub's own release + Nature
    news, not yet independent peer review on *de novo designed* binders specifically.
-3. **Env isolation.** Like Boltz, install in a separate conda env and invoke via subprocess
-   to avoid the numpy/cublas/lightning conflicts that hit the foundry env.
+3. **Env isolation.** Like Boltz, install in a separate conda env (**Python ≥ 3.12**,
+   required by ESMFold2) and invoke via subprocess to avoid the numpy/cublas/lightning
+   conflicts that hit the foundry env.
 
 **Zero-cost evaluation path:** the 24 stratified designs (§5) become a labeled benchmark
 once AF3 returns. Run ESMFold2 on those same 24 and compare Boltz-vs-AF3 and

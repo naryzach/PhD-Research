@@ -13,8 +13,8 @@ filter (see BOLTZ_FILTER_METHODS.md §4); ESMFold2 may separate AF3 hits better.
 
 RUN THIS ON THE CLUSTER (needs a GPU; ESMC-6B base is large — verify it fits VRAM).
 Install in a SEPARATE env to avoid the numpy/cublas/lightning conflicts that hit the
-foundry env:
-    conda create -n esmfold2 python=3.11 -y
+foundry env. ESMFold2 requires Python >= 3.12:
+    conda create -n esmfold2 python=3.12 -y
     conda activate esmfold2
     pip install "esm @ git+https://github.com/Biohub/esm.git@main"
     pip install transformers torch pandas
@@ -59,11 +59,49 @@ def load_model(device: str = "cuda"):
     return model, ESMFold2InputBuilder()
 
 
-def predict_complex(model, builder, binder_seq: str, target_seq: str,
-                    binder_len: int, seed: int = 0) -> dict:
+def _save_structure(res, stub: str):
     """
-    Fold a two-chain complex and return {iptm, ptm, plddt} (pLDDT = binder-chain
-    mean, 0-100). Field access is defensive so minor API drift doesn't crash the run.
+    Write the predicted complex to disk if a structure is available. The folded
+    structure is already computed during fold() — saving it is just disk I/O,
+    no extra GPU time. Returns the written path or None. Defensive about the
+    exact serialization API (verify against your installed `esm` if it differs).
+    """
+    comp = getattr(res, "complex", None) or getattr(res, "structure", None)
+    if comp is None:
+        return None
+    # Try mmCIF text, then PDB text, then a direct save method.
+    for meth, ext in (("to_mmcif", "cif"), ("to_mmcif_string", "cif"),
+                      ("to_pdb", "pdb"), ("to_pdb_string", "pdb")):
+        fn = getattr(comp, meth, None)
+        if callable(fn):
+            try:
+                text = fn()
+                if isinstance(text, str) and text.strip():
+                    path = f"{stub}.{ext}"
+                    with open(path, "w") as fh:
+                        fh.write(text)
+                    return path
+            except Exception:
+                continue
+    for meth, ext in (("save_mmcif", "cif"), ("save_pdb", "pdb"), ("save", "cif")):
+        fn = getattr(comp, meth, None)
+        if callable(fn):
+            try:
+                path = f"{stub}.{ext}"
+                fn(path)
+                return path
+            except Exception:
+                continue
+    return None
+
+
+def predict_complex(model, builder, binder_seq: str, target_seq: str,
+                    binder_len: int, seed: int = 0, cif_stub: str = None) -> dict:
+    """
+    Fold a two-chain complex and return {esm_iptm, esm_ptm, esm_plddt[, esm_cif]}.
+    pLDDT is the binder-chain mean (0-100). Field access is defensive so minor
+    API drift doesn't crash the run. If `cif_stub` is given, the predicted
+    structure is written to disk (free — it's already computed by fold()).
     """
     from esm.models.esmfold2 import ProteinInput, StructurePredictionInput
 
@@ -102,7 +140,12 @@ def predict_complex(model, builder, binder_seq: str, target_seq: str,
         except (TypeError, ValueError):
             return np.nan
 
-    return {"esm_iptm": _f(iptm), "esm_ptm": _f(ptm), "esm_plddt": plddt}
+    out = {"esm_iptm": _f(iptm), "esm_ptm": _f(ptm), "esm_plddt": plddt}
+    if cif_stub:
+        saved = _save_structure(res, cif_stub)
+        if saved:
+            out["esm_cif"] = saved
+    return out
 
 
 # ── Design pool ───────────────────────────────────────────────────────────────
@@ -142,6 +185,9 @@ def main():
                          "target_seq[, target_name]). Used by the pipeline's run_esmfold2.")
     ap.add_argument("--device", default="cuda", help="torch device (cuda / cuda:0 / cpu).")
     ap.add_argument("--out", default=str(OUT_BASE / "esmfold2_scores.csv"))
+    ap.add_argument("--cif-dir", default=None,
+                    help="If set, write each predicted complex CIF/PDB here "
+                         "(free — structure is already computed). Path recorded as esm_cif.")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
@@ -177,13 +223,20 @@ def main():
     print(f"Loading ESMFold2 on {args.device} ... (large model; first load is slow)")
     model, builder = load_model(args.device)
 
+    cif_dir = None
+    if args.cif_dir:
+        cif_dir = Path(args.cif_dir)
+        cif_dir.mkdir(parents=True, exist_ok=True)
+
     rows, n_ok = [], 0
     for i, d in enumerate(designs.itertuples(index=False), 1):
         bseq, tseq = d.full_seq, d.target_seq
         if not isinstance(bseq, str) or not isinstance(tseq, str) or not bseq or not tseq:
             continue
         try:
-            metrics = predict_complex(model, builder, bseq, tseq, len(bseq), seed=args.seed)
+            stub = str(cif_dir / str(d.design_id)) if cif_dir else None
+            metrics = predict_complex(model, builder, bseq, tseq, len(bseq),
+                                      seed=args.seed, cif_stub=stub)
             rows.append({"design_id": d.design_id, "target_name": d.target_name,
                          "full_seq": bseq, **metrics})
             n_ok += 1
