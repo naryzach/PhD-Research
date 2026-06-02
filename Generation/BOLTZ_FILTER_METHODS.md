@@ -203,23 +203,25 @@ reliable AF3 surrogate we wanted. This motivates trialing ESMFold2 (§6) on the 
 ESMFold2 (ESMC-6B base, ~25 GB weights, MSA-free) scored the same 24 designs on the
 cluster; compared against AF3 ipTM ground truth via `validate_boltz_filter.py`:
 
-| Predictor | Pearson | Spearman | p | top-6 AF3 hit-rate |
-|-----------|--------:|---------:|--:|-------------------:|
-| Boltz ipTM | +0.148 | +0.109 | 0.61 | 50% (3/6) |
-| ESMFold2 ipTM | +0.250 | +0.283 | 0.18 | 83% (5/6) |
-| **ESMFold2 pLDDT** | **+0.340** | **+0.335** | 0.11 | **100% (6/6)** |
-| ESMFold2 pLDDT×ipTM (rank-prod) | — | +0.346 | 0.10 | — |
+| Predictor | Pearson | Spearman | top-6 AF3 hit-rate |
+|-----------|--------:|---------:|-------------------:|
+| Boltz ipTM | +0.148 | +0.109 | 50% (3/6) |
+| ESMFold2 ipTM | +0.274 | +0.290 | 83% (5/6) |
+| **ESMFold2 pLDDT** | **+0.374** | **+0.413** | **100% (6/6)** |
 
-**ESMFold2 clearly beats Boltz** on both correlation (ρ 0.34 vs 0.11) and precision
+(Values from the full 400-design cluster run re-scoring these 24; an earlier
+reconstruction from rounded console output gave ρ≈+0.335 for pLDDT — same conclusion.)
+
+**ESMFold2 clearly beats Boltz** on both correlation (ρ 0.41 vs 0.11) and precision
 (top-6 100% vs 50%; top-8 88% vs 50%). The best single signal is **ESMFold2 binder
 pLDDT** — consistent with §4.2, where Boltz's own best signal was also pLDDT. The most
 transferable predictor of AF3 success for these de novo binders is *"does the binder fold
 confidently in the complex context,"* not either model's interface ipTM.
 
 **Honest caveats (do not over-trust yet):**
-1. **n=24; nothing is significant.** Critical |ρ|≈0.34 at p<0.05; ESMFold2 pLDDT lands
-   right at the edge (p=0.11). The top-K hit-rates are the trustworthy practical signal,
-   not the p-values.
+1. **n=24.** ESMFold2 pLDDT's ρ=+0.41 now clears the p<0.05 bar (critical |ρ|≈0.34),
+   but the margin is thin and ipTM (ρ=+0.29) does not. The top-K hit-rates are the
+   trustworthy practical signal; the next batch (§5.3) grows n toward confirmation.
 2. **Per-target signal is noisy (n=6 each) and inconsistent across models:**
 
    | Target | Boltz ρ | ESMFold2-pLDDT ρ |
@@ -241,12 +243,64 @@ Spearman and top-K, so **adopt ESMFold2 (rank by binder pLDDT, per-target) as th
 filter** — but confirm on one more batch before fully trusting, since n=24 is
 underpowered and MMP2 is a flag to watch.
 
-**Recommended next step.** Score the full design pool with ESMFold2
-(`score_with_esmfold2.py --all`, hours on the cluster), select the next 30-job AF3 batch
-as per-target top-K by ESMFold2 binder pLDDT, and re-run `validate_boltz_filter.py`. If
-the batch hit-rate is ~80%+ (and MMP2 doesn't crater), the filter is real and confirmed at
-n≈48; then wire ESMFold2 into the pipeline as the ranking stage (subprocess to the
-`esmfold2` env, mirroring Boltz).
+### 5.3 Full-pool scoring + ESMFold2 adopted (2026-06-01)
+
+All 400 designs (5 iterations × 4 targets × 20) scored with ESMFold2
+(`score_with_esmfold2.py --all`). ESMFold2 is now the pipeline's **default pre-AF3
+ranker** (composite = 0.5·ipTM + 0.5·pLDDT, equal weights — both informative, both
+noisy at low n; leaning harder on pLDDT would overfit and bias toward foldability over
+binding). A **single composite is applied across all targets** (no per-target
+special-casing): the per-target rho differences are n=6 noise, and special-casing would
+inject systematic bias. Per-target *selection* handles pLDDT's target-dependent
+magnitude. AF3 is not treated as infallible — ESMFold2 is a legitimate independent signal.
+
+Full pool: ESMFold2 composite mean 0.49, 59/400 with ipTM≥0.55, 11/400 ≥0.70. The pool
+surfaced strong **untested** candidates that never reached AF3, e.g. `ADAM10_it0_d0`
+(ipTM 0.855, pLDDT 86) and `ADAM17_it3_d7` (ipTM 0.900). The next AF3 batch
+(`select_next_af3.py` → `af3_submission_esmfold2.json`, 28 jobs, per-target top-7 by
+composite, excluding the 24 already tested) leads with these. When its results return,
+`validate_boltz_filter.py` auto-joins them to `esmfold2_scores.csv`, growing the
+ESMFold2-vs-AF3 calibration toward n≈52 — watch whether MMP2 holds.
+
+**Integration:** `run_esmfold2` runs as a pipeline stage (subprocess to the `esmfold2`
+conda env; set `ESMFOLD2_PYTHON`). `update_hof` now never trims AF3-validated entries
+(scarce ground truth must not be displaced by an un-validated local score). Boltz remains
+in the code but `BOLTZ_ENABLE=False`.
+
+### 5.4 Second AF3 batch + the selection-bias lesson (n=52, 2026-06-02)
+
+The 28-job ESMFold2-selected batch (folds_2026_06_02) returned **71% hit-rate (20/28),
+mean AF3 ipTM 0.631** — vs 50% / 0.485 for the stratified batch. **ESMFold2 selection
+demonstrably improved AF3 outcomes**, which is the entire objective.
+
+A naive per-batch model comparison on this batch *looked like Boltz beat ESMFold2*
+(Boltz ρ=0.64 vs ESMFold2 pLDDT ρ=0.36). **This is a selection artifact, not a reversal:**
+the batch was selected by the ESMFold2 composite, so ESMFold2's score range was truncated
+(ipTM std 0.099 here vs 0.163 in the stratified batch) and its correlation mechanically
+deflated. Boltz wasn't used for selection, so it saw a wider range. **A batch selected by
+model X is a rigged, pessimistic test of X and a fair test of Y** — the same range-
+restriction trap as the original §4.3 production batch.
+
+The tell is consistency: across the two differently-selected batches, Boltz swung
+0.11 → 0.64 (unstable), while ESMFold2 pLDDT held 0.41 → 0.36 (stable). Pooling both
+batches (n=52, the robust estimate; now baked into `validate_boltz_filter.py` as the
+auto-pooled report):
+
+| Predictor | batch1 | batch2 | **Pooled (n=52)** |
+|-----------|-------:|-------:|------------------:|
+| Boltz ipTM | +0.11 | +0.64 | +0.47 |
+| ESMFold2 ipTM | +0.29 | +0.30 | +0.45 |
+| **ESMFold2 pLDDT** | +0.41 | +0.36 | **+0.54** |
+
+Pooled, all three are significant (n=52 critical |ρ|≈0.27); **ESMFold2 pLDDT is the best
+and most stable.** Boltz pooled (0.47) is a genuine signal too — its batch-to-batch
+instability, not uselessness, is why it's not the default ranker.
+
+**Standing methodology rule:** never judge a filter on a batch selected by that filter.
+Use the pooled cross-batch report, and prefer the predictor that is *consistent* across
+selection axes. The composite weighting stays 0.5·ipTM + 0.5·pLDDT — pLDDT leads pooled,
+but ipTM is the binding-relevant signal and a modest equal blend resists overfitting and
+the foldability bias; the 0.5/0.5 composite is the one that produced the 71% batch.
 
 ---
 
@@ -309,3 +363,10 @@ Modal ESMFold2 example (modal.com/docs/examples/esmfold2); Latent Space intervie
 - `promising` flag now uses Boltz ipTM ≥ 0.55 (was RF3 ipTM, which never crosses ~0.21).
 - Boltz-2 runs via subprocess (`BOLTZ_EXECUTABLE`); 5-min timeout; affinity head omitted
   (protein-ligand only).
+- ESMFold2 adopted as default ranker (§5.3); composite 0.5·ipTM + 0.5·pLDDT, single
+  formula across targets; `update_hof` protects AF3 entries and dedups by design_id.
+- **RF3 OFF by default** (`RF3_ENABLE`, `--enable-rf3`): no longer informs ranking, so it
+  was pure slowdown — kept for curiosity (logs geometric features). **LMPNN CIF writes OFF**
+  by default (`SAVE_LMPNN_STRUCTURES`); the per-design FASTA still records the sequence.
+- Long-run hardening: per-target `try/except` in `run_iteration` (one target's failure no
+  longer aborts the run); `_finalize_record` strips AtomArrays so state JSON never breaks.

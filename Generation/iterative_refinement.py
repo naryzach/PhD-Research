@@ -1,14 +1,16 @@
 """
 iterative_refinement.py
 
-Iterative binder design with a four-stage in-silico funnel before any AF3 call:
+Iterative binder design with an in-silico funnel before any AF3 call:
 
-  RFd3 (backbone) → LigandMPNN (sequence) → RF3 (sanity + geometric features) →
-  ESMFold2 (local AF3-class ranker) → AF3 Server (gold-standard validation, capped at 30/day)
+  RFd3 (backbone) → LigandMPNN (sequence) → ESMFold2 (local AF3-class ranker) →
+  AF3 Server (gold-standard validation, capped at 30/day)
 
 ESMFold2 replaced Boltz-2 as the ranker after AF3 calibration (see
-BOLTZ_FILTER_METHODS.md §5.2): MSA-free, faster, and a better AF3 predictor.
-Boltz-2 support is retained but OFF by default (BOLTZ_ENABLE).
+BOLTZ_FILTER_METHODS.md §5): MSA-free, faster, and a better AF3 predictor.
+RF3 and Boltz-2 remain in the code but are OFF by default (RF3_ENABLE / BOLTZ_ENABLE)
+— RF3's confidence was anti-correlated with AF3, so it only added cost. Enable RF3
+with --enable-rf3 to log its geometric features for curiosity.
 
 TIMP3-scaffold binders for MMP2, MMP9, MMP3, MMP10, ADAM10, ADAM17 are produced by
 redesigning loops AB / C / EF (GH optional).  Temperature anneals 0.5 → 0.1 to shift
@@ -218,6 +220,19 @@ BOLTZ_EXECUTABLE        = os.environ.get("BOLTZ_EXECUTABLE", "boltz")
 BOLTZ_USE_MSA_SERVER    = True
 BOLTZ_DIFFUSION_SAMPLES = 1
 BOLTZ_TIMEOUT_S         = 300
+
+# ── Pipeline stage toggles ───────────────────────────────────────────────────
+# RF3 is OFF by default: ESMFold2 replaced it as the ranker (RF3's own ipTM/pTM/
+# pLDDT were anti-correlated with AF3, §4.1), so running it is a full extra model
+# inference per design that no longer informs selection — pure slowdown. Kept for
+# curiosity: enable with --enable-rf3 (or RF3_ENABLE=True) to log its geometric
+# features (n_contacts, RMSD-to-RFd3, interface PAE) into round_summary.csv.
+RF3_ENABLE = False
+# LMPNN already returns the designed sequence (all we need downstream). Writing a
+# CIF per design is cheap but clutters a long run with thousands of files we never
+# read. Off by default; the RFd3 backbone CIFs and (if enabled) RF3/AF3 structures
+# remain the structural record.
+SAVE_LMPNN_STRUCTURES = False
 
 
 # ── Utility functions ─────────────────────────────────────────────────────────
@@ -720,23 +735,59 @@ class IterativeRefiner:
 
     # ── ESMFold2 (primary local ranker) ──────────────────────────────────────
 
+    def _score_sequences_esmfold2(self, rows: list, out_dir: Path) -> dict:
+        """
+        Core ESMFold2 invocation, reused by run_esmfold2 and by the specificity
+        subclass (which scores each binder against on- AND off-target).
+
+        `rows`: list of {design_id, target_name, full_seq, target_seq}. design_id
+        must be unique per row (the specificity path suffixes _on / _off).
+        Returns {design_id: {esm_iptm, esm_ptm, esm_plddt}} (empty on any failure).
+        Shells out to score_with_esmfold2.py in the separate `esmfold2` env.
+        """
+        if not ESMFOLD2_ENABLE or not rows:
+            return {}
+        out_dir.mkdir(parents=True, exist_ok=True)
+        in_csv, out_csv = out_dir / "esm_input.csv", out_dir / "esm_scores.csv"
+        pd.DataFrame(rows).to_csv(in_csv, index=False)
+
+        cmd = [ESMFOLD2_PYTHON, ESMFOLD2_SCRIPT, "--input", str(in_csv), "--out", str(out_csv)]
+        try:
+            child_env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=ESMFOLD2_TIMEOUT_S, env=child_env)
+            if proc.returncode != 0:
+                logger.warning(f"ESMFold2 failed: {proc.stderr[-400:].strip()}")
+                return {}
+        except FileNotFoundError:
+            logger.error(
+                f"ESMFold2 python not found at: {ESMFOLD2_PYTHON}\n"
+                "  Create the env and set ESMFOLD2_PYTHON (see config block), or set\n"
+                "  ESMFOLD2_ENABLE=False to skip."
+            )
+            return {}
+        except subprocess.TimeoutExpired:
+            logger.warning(f"ESMFold2 timed out (>{ESMFOLD2_TIMEOUT_S}s)")
+            return {}
+
+        if not out_csv.exists():
+            logger.warning("ESMFold2 produced no scores.")
+            return {}
+        df = pd.read_csv(out_csv).set_index("design_id")
+        return {did: {"esm_iptm": float(r.get("esm_iptm", float("nan"))),
+                      "esm_ptm":   float(r.get("esm_ptm", float("nan"))),
+                      "esm_plddt": float(r.get("esm_plddt", float("nan")))}
+                for did, r in df.iterrows()}
+
     def run_esmfold2(self, target_name: str, candidates: list, out_dir: Path) -> list:
         """
-        Score candidates with ESMFold2 by shelling out to score_with_esmfold2.py
-        in the separate `esmfold2` conda env (it can't share the foundry env's
-        torch/CUDA pins).  We write the candidates to an input CSV, run the
-        scorer, and merge esm_iptm / esm_plddt / esm_ptm back in.
-
-        Adds those fields, sets source="ESMFold2", recomputes composite_score,
-        and flags `promising` on esm_iptm.  No-op if ESMFOLD2_ENABLE is False or
-        the env python is missing (pipeline then falls back to RF3 geometric).
+        Score candidates with ESMFold2 against their design target, merge
+        esm_iptm / esm_plddt / esm_ptm, set source="ESMFold2", recompute the
+        composite, and flag `promising` on esm_iptm.  No-op if ESMFOLD2_ENABLE
+        is False or the env is missing (pipeline keeps RF3 geometric composites).
         """
         if not ESMFOLD2_ENABLE or not candidates:
             return candidates
-
-        out_dir.mkdir(parents=True, exist_ok=True)
-        in_csv  = out_dir / "esm_input.csv"
-        out_csv = out_dir / "esm_scores.csv"
 
         rows = []
         for c in candidates:
@@ -744,58 +795,21 @@ class IterativeRefiner:
             if c.get("full_seq") and tseq:
                 rows.append({"design_id": c["design_id"], "target_name": target_name,
                              "full_seq": c["full_seq"], "target_seq": tseq})
-        if not rows:
-            return candidates
-        pd.DataFrame(rows).to_csv(in_csv, index=False)
 
-        cmd = [ESMFOLD2_PYTHON, ESMFOLD2_SCRIPT,
-               "--input", str(in_csv), "--out", str(out_csv)]
         t0 = time.time()
-        try:
-            # Separate env → strip PYTHONPATH so it uses its own site-packages.
-            child_env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
-            proc = subprocess.run(cmd, capture_output=True, text=True,
-                                  timeout=ESMFOLD2_TIMEOUT_S, env=child_env)
-            if proc.returncode != 0:
-                logger.warning(f"[{target_name}] ESMFold2 failed: {proc.stderr[-400:].strip()}")
-                return candidates
-        except FileNotFoundError:
-            logger.error(
-                f"ESMFold2 python not found at: {ESMFOLD2_PYTHON}\n"
-                "  Create the env and set ESMFOLD2_PYTHON (see config block), or set\n"
-                "  ESMFOLD2_ENABLE=False to skip. Falling back to RF3 geometric scoring."
-            )
-            return candidates
-        except subprocess.TimeoutExpired:
-            logger.warning(f"[{target_name}] ESMFold2 timed out (>{ESMFOLD2_TIMEOUT_S}s)")
-            return candidates
-
-        if not out_csv.exists():
-            logger.warning(f"[{target_name}] ESMFold2 produced no scores.")
-            return candidates
-
-        scores = pd.read_csv(out_csv).set_index("design_id")
+        scores = self._score_sequences_esmfold2(rows, out_dir)
         n_done = 0
         for c in candidates:
-            did = c["design_id"]
-            if did not in scores.index:
+            m = scores.get(c["design_id"])
+            if not m:
                 continue
-            row = scores.loc[did]
-            esm_iptm = float(row.get("esm_iptm", float("nan")))
-            c.update({
-                "esm_iptm":   esm_iptm,
-                "esm_ptm":    float(row.get("esm_ptm", float("nan"))),
-                "esm_plddt":  float(row.get("esm_plddt", float("nan"))),
-                "source":     "ESMFold2",
-                "promising":  _safe(esm_iptm) >= IPTM_PROMISING,
-            })
+            c.update({**m, "source": "ESMFold2",
+                      "promising": _safe(m["esm_iptm"]) >= IPTM_PROMISING})
             c["composite_score"] = calc_composite(c)
             n_done += 1
 
-        logger.info(
-            f"[{target_name}] ESMFold2 done in {(time.time()-t0)/60:.1f} min "
-            f"({n_done}/{len(candidates)} scored)"
-        )
+        logger.info(f"[{target_name}] ESMFold2 done in {(time.time()-t0)/60:.1f} min "
+                    f"({n_done}/{len(candidates)} scored)")
         return candidates
 
     # ── RFd3 ─────────────────────────────────────────────────────────────────
@@ -929,11 +943,13 @@ class IterativeRefiner:
                         getattr(mp_out, "output_dict", {}).get("sequence_recovery", 0.0)
                         or getattr(mp_out, "seq_recovery", 0.0)
                     )
-                    to_cif_file(arr, str(out_dir / f"{design_id}_s{si}.cif"), file_type="cif")
+                    if SAVE_LMPNN_STRUCTURES:
+                        to_cif_file(arr, str(out_dir / f"{design_id}_s{si}.cif"), file_type="cif")
                     results.append({
                         "design_id":   f"{design_id}_s{si}",
                         "target_name": target_name,
-                        "array":       arr,
+                        # rfd3_array kept only for RF3 backbone-RMSD; "array" (the
+                        # LMPNN structure) is never read downstream, so not stored.
                         "rfd3_array":  rfd3_array,
                         "full_seq":    bseq,
                         "target_seq":  tseq,
@@ -949,6 +965,26 @@ class IterativeRefiner:
         torch.cuda.empty_cache()
         return results
 
+    # ── Candidate finalization ────────────────────────────────────────────────
+
+    def _finalize_record(self, cand: dict, extra: dict = None) -> dict:
+        """
+        Convert an in-memory candidate (carrying heavy AtomArrays) into a clean,
+        JSON-serializable scored record for the HOF/state. Strips the arrays
+        (otherwise json.dump on the state file would fail), stamps iteration and
+        temperature, and computes the composite. `source`/`promising` default to
+        an unscored placeholder and are overwritten by whichever ranker runs.
+        """
+        rec = {k: v for k, v in cand.items() if k not in ("array", "rfd3_array")}
+        if extra:
+            rec.update(extra)
+        rec["iteration"]   = self.state["iteration"]
+        rec["temperature"] = self.state["temperature"]
+        rec.setdefault("source", "unscored")
+        rec.setdefault("promising", False)
+        rec["composite_score"] = calc_composite(rec)
+        return rec
+
     # ── RF3 complex scoring ───────────────────────────────────────────────────
 
     def run_rf3_complex(self, target_name: str, candidates: list,
@@ -958,9 +994,16 @@ class IterativeRefiner:
         with sequence-only input.  Extracts pLDDT, ptm, ipTM, interface PAE,
         backbone RMSD, and interface contacts.  Saves CIF + metrics JSON.
         Returns list of scored metadata dicts (no atom arrays — too large to cache).
+
+        OFF by default (RF3_ENABLE): RF3 no longer informs ranking (ESMFold2 does),
+        so when disabled we just finalize the candidates (strip arrays, stamp
+        bookkeeping) and let ESMFold2 score them.
         """
         if not candidates:
             return []
+
+        if not RF3_ENABLE:
+            return [self._finalize_record(c) for c in candidates]
 
         # Use the RFd3 OUTPUT chain convention (binder=A, target=B); the source-PDB
         # chain IDs in TARGETS apply only to reading target_seqs and building contigs.
@@ -1077,6 +1120,40 @@ class IterativeRefiner:
 
     # ── Hall of Fame ──────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _consolidate_hof(entries: list, size: int) -> list:
+        """
+        Dedup a HOF by design_id, protect AF3-validated entries, trim to `size`.
+
+        - Dedup (idempotent across resume): per design_id keep the AF3 version if
+          present, else the higher composite. Stops an interrupted-then-resumed
+          iteration from double-counting designs.
+        - AF3 entries are never trimmed (scarce ground truth must not be displaced
+          by an un-validated local score); other slots fill by composite.
+
+        Used for both the per-target HOF and the specificity HOF.
+        """
+        best_by_id: dict = {}
+        for e in entries:
+            did = e.get("design_id")
+            cur = best_by_id.get(did)
+            if cur is None:
+                best_by_id[did] = e
+                continue
+            e_af3, cur_af3 = e.get("source") == "AF3", cur.get("source") == "AF3"
+            if (e_af3 and not cur_af3) or (
+                e_af3 == cur_af3
+                and e.get("composite_score", 0) > cur.get("composite_score", 0)
+            ):
+                best_by_id[did] = e
+        uniq = list(best_by_id.values())
+
+        af3   = [e for e in uniq if e.get("source") == "AF3"]
+        other = [e for e in uniq if e.get("source") != "AF3"]
+        other.sort(key=lambda x: x.get("composite_score", 0), reverse=True)
+        merged = af3 + other[: max(0, size - len(af3))]
+        return sorted(merged, key=lambda x: x.get("composite_score", 0), reverse=True)
+
     def update_hof(self, new_scored: list) -> None:
         """
         Add new scored designs to per-target HOF; keep top HOF_SIZE_PER_TARGET.
@@ -1093,14 +1170,8 @@ class IterativeRefiner:
             self.state["hof"][tname].append(entry)
 
         for tname in self.active_targets:
-            hof = self.state["hof"].get(tname, [])
-            af3   = [e for e in hof if e.get("source") == "AF3"]
-            other = [e for e in hof if e.get("source") != "AF3"]
-            other.sort(key=lambda x: x.get("composite_score", 0), reverse=True)
-            keep_other = max(0, HOF_SIZE_PER_TARGET - len(af3))
-            merged = af3 + other[:keep_other]
-            self.state["hof"][tname] = sorted(
-                merged, key=lambda x: x.get("composite_score", 0), reverse=True
+            self.state["hof"][tname] = self._consolidate_hof(
+                self.state["hof"].get(tname, []), HOF_SIZE_PER_TARGET
             )
 
         # Save best HOF structures for later seeding/inspection
@@ -1512,47 +1583,51 @@ class IterativeRefiner:
         all_scored: list = []
 
         for tname in self.active_targets:
-            tcfg     = TARGETS[tname]
-            pdb_path = str(DATA_DIR / tcfg["pdb"])
-            if not Path(pdb_path).exists():
-                logger.warning(f"Skipping {tname}: PDB not found at {pdb_path}")
+            # Per-target isolation: a failure on one target (OOM, CUDA hiccup,
+            # MSA-server blip) must not abort the whole unattended run. Log it,
+            # keep whatever scored, and move on.
+            try:
+                tcfg     = TARGETS[tname]
+                pdb_path = str(DATA_DIR / tcfg["pdb"])
+                if not Path(pdb_path).exists():
+                    logger.warning(f"Skipping {tname}: PDB not found at {pdb_path}")
+                    continue
+
+                # 1. Backbone generation
+                rfd3_dir = it_dir / "rfd3" / tname
+                rfd3_dir.mkdir(parents=True, exist_ok=True)
+                backbones = self.run_rfd3(tname, pdb_path, BACKBONES_PER_TARGET, adaptive_ranges)
+
+                # Save backbone CIFs (the structural record of each design)
+                for bi, arr in enumerate(backbones):
+                    to_cif_file(arr, str(rfd3_dir / f"bb_{bi}.cif"), file_type="cif")
+
+                if not backbones:
+                    logger.warning(f"[{tname}] No backbones generated; skipping.")
+                    continue
+
+                # 2. Sequence design
+                lmpnn_dir  = it_dir / "lmpnn" / tname
+                candidates = self.run_lmpnn(tname, backbones, lmpnn_dir, temp)
+
+                if not candidates:
+                    logger.warning(f"[{tname}] No LMPNN sequences; skipping.")
+                    continue
+
+                # 3. RF3 (OFF by default; finalizes candidates + optional geometric features)
+                scored = self.run_rf3_complex(tname, candidates, it_dir / "rf3" / tname)
+
+                # 4. ESMFold2 ranker (default). Boltz retained but off by default.
+                # Each is a no-op if disabled or its env is missing.
+                scored = self.run_esmfold2(tname, scored, it_dir / "esmfold2" / tname)
+                scored = self.run_boltz(tname, scored, it_dir / "boltz" / tname)
+                all_scored.extend(scored)
+            except Exception as exc:
+                logger.error(f"[{tname}] iteration {it} failed: {exc}", exc_info=True)
+                torch.cuda.empty_cache()
                 continue
 
-            # 1. Backbone generation
-            rfd3_dir = it_dir / "rfd3" / tname
-            rfd3_dir.mkdir(parents=True, exist_ok=True)
-            backbones = self.run_rfd3(tname, pdb_path, BACKBONES_PER_TARGET, adaptive_ranges)
-
-            # Save backbone CIFs
-            for bi, arr in enumerate(backbones):
-                to_cif_file(arr, str(rfd3_dir / f"bb_{bi}.cif"), file_type="cif")
-
-            if not backbones:
-                logger.warning(f"[{tname}] No backbones generated; skipping.")
-                continue
-
-            # 2. Sequence design
-            lmpnn_dir  = it_dir / "lmpnn" / tname
-            candidates = self.run_lmpnn(tname, backbones, lmpnn_dir, temp)
-
-            if not candidates:
-                logger.warning(f"[{tname}] No LMPNN sequences; skipping RF3.")
-                continue
-
-            # 3. RF3 complex scoring (sanity check + geometric features)
-            rf3_dir = it_dir / "rf3" / tname
-            scored  = self.run_rf3_complex(tname, candidates, rf3_dir)
-
-            # 4. Local AF3-class ranker. ESMFold2 is the default (best in our
-            # AF3 calibration); Boltz is retained but off by default. Each is a
-            # no-op if disabled or its env is missing — the pipeline then keeps
-            # RF3-only geometric composites. (run_rf3_complex already strips
-            # the heavy atom arrays from its output.)
-            scored = self.run_esmfold2(tname, scored, it_dir / "esmfold2" / tname)
-            scored = self.run_boltz(tname, scored, it_dir / "boltz" / tname)
-            all_scored.extend(scored)
-
-        # Update HOF and write summaries
+        # Update HOF and write summaries (even if some targets failed)
         self.update_hof(all_scored)
         self._write_round_summary(all_scored, it_dir)
         self._save_state()
@@ -1632,7 +1707,16 @@ def main():
             "design_id, iptm, plddt, ptm, interface_pae, full_seq, target_name."
         ),
     )
+    parser.add_argument(
+        "--enable-rf3", action="store_true",
+        help="Run RF3 too (OFF by default). Adds its geometric features to "
+             "round_summary.csv; does not change ranking (ESMFold2 ranks). Slower.",
+    )
     args = parser.parse_args()
+
+    if args.enable_rf3:
+        global RF3_ENABLE
+        RF3_ENABLE = True
 
     refiner = IterativeRefiner(
         active_targets=args.targets,
