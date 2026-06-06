@@ -781,31 +781,145 @@ Optimization of Anion Exchange Chromatography (HiTrap Q FF).
 </div>
 
 ---
-layout: default
-transition: fade-out
----
+# SDS-PAGE & Silver Stain Validation (June 2\textsuperscript{nd}, 2026)
+Successful detection and optimization of ADAM10 and ADAM17 expression.
 
-# SDS-PAGE Validation
-FPLC fractions evaluated by SDS-PAGE.
-
-<div class="grid grid-cols-2 gap-6 mt-6 items-start">
-  <div class="space-y-3">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260522.png"
-         alt="SDS-PAGE Gel"
-         class="w-full rounded-lg border border-white/10"
-         style="max-height: 300px; object-fit: contain;">
+<div class="grid grid-cols-3 gap-4 mt-4">
+  <div class="p-2 bg-white/5 rounded border border-white/10 text-center">
+    <b class="text-blue-400 text-[10px] block mb-1">ADAM10 Expression (Coomassie)</b>
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260602.png" class="w-full rounded mt-1 border border-white/10" style="max-height: 140px; object-fit: contain;">
+    <p class="text-[9px] leading-snug opacity-70 mt-1">
+      Expression test part 2. Bands visible at ~60-70 kDa corresponding to catalytic domain.
+    </p>
   </div>
-  <div class="space-y-4">
-    <div class="p-4 bg-red-500/10 rounded border border-red-500/20">
-      <h4 class="text-red-400 font-bold text-[10px] uppercase tracking-widest mb-2">Observation: No Visible Bands</h4>
-      <p class="text-[10px] leading-relaxed opacity-70">
-        After 3.5 hour Coomassie stain and overnight de-stain, no visible bands were detected on the gel other than the ladder for both ADAM10 and ADAM17 FPLC fractions.
+  <div class="p-2 bg-white/5 rounded border border-white/10 text-center">
+    <b class="text-violet-400 text-[10px] block mb-1">ADAM17 Trial (Coomassie)</b>
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/sarmazdehlab_20260602_adam17_coomassie.png" class="w-full rounded mt-1 border border-white/10" style="max-height: 140px; object-fit: contain;">
+    <p class="text-[9px] leading-snug opacity-70 mt-1">
+      Expansion trial. Intracellular/periplasmic expression confirmed in cell pellets. 25 °C reduces aggregation in lysis pellet.
+    </p>
+  </div>
+  <div class="p-2 bg-white/5 rounded border border-white/10 text-center">
+    <b class="text-emerald-400 text-[10px] block mb-1">Low-Abundance (Silver Stain)</b>
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/sarmazdehlab_20260602_silver_stain.png" class="w-full rounded mt-1 border border-white/10" style="max-height: 140px; object-fit: contain;">
+    <p class="text-[9px] leading-snug opacity-70 mt-1">
+      FPLC fractions. Confirmed presence in low-concentration samples. High sensitivity detects F6 leakage in filtrate.
+    </p>
+  </div>
+</div>
+
+---
+# Protein Concentration & Recovery (June 2\textsuperscript{nd}, 2026)
+Evaluation of FPLC fractions following spin concentration with Amicon Ultra-4 (10 kDa MWCO).
+
+<div class="grid grid-cols-2 gap-4 mt-6">
+  <div>
+    <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-2">NanoDrop A280 Protein Concentrations</h4>
+    <table class="w-full text-[9px] text-left border-collapse border border-white/10 rounded overflow-hidden">
+      <thead>
+        <tr class="bg-white/10 text-white font-bold border-b border-white/20">
+          <th class="p-1 border-r border-white/10">Sample Name</th>
+          <th class="p-1 border-r border-white/10">Protein (mg/mL)</th>
+          <th class="p-1 border-r border-white/10">A280</th>
+          <th class="p-1">A260/A280</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="border-b border-white/10 bg-white/5">
+          <td class="p-1 border-r border-white/10 font-medium">A10 FXN 6 Unconcentrated</td>
+          <td class="p-1 border-r border-white/10">0.163</td>
+          <td class="p-1 border-r border-white/10">0.163</td>
+          <td class="p-1">0.963</td>
+        </tr>
+        <tr class="border-b border-white/10 bg-red-500/10 text-red-200">
+          <td class="p-1 border-r border-white/10 font-medium">A10 FXN 6 Filtrate (Leakage)</td>
+          <td class="p-1 border-r border-white/10">0.176</td>
+          <td class="p-1 border-r border-white/10">0.176</td>
+          <td class="p-1">0.981</td>
+        </tr>
+        <tr class="border-b border-white/10 bg-emerald-500/10 text-emerald-200">
+          <td class="p-1 border-r border-white/10 font-medium">A10 FXN 6 Residue (3.2x)</td>
+          <td class="p-1 border-r border-white/10">0.519</td>
+          <td class="p-1 border-r border-white/10">0.519</td>
+          <td class="p-1">0.779</td>
+        </tr>
+        <tr class="border-b border-white/10 bg-white/5">
+          <td class="p-1 border-r border-white/10 font-medium">A10 FXN 9 Unconcentrated</td>
+          <td class="p-1 border-r border-white/10">0.141</td>
+          <td class="p-1 border-r border-white/10">0.141</td>
+          <td class="p-1">1.309</td>
+        </tr>
+        <tr class="border-b border-white/10 bg-white/5">
+          <td class="p-1 border-r border-white/10 font-medium">A10 FXN 9 Filtrate</td>
+          <td class="p-1 border-r border-white/10">0.063</td>
+          <td class="p-1 border-r border-white/10">0.063</td>
+          <td class="p-1">1.358</td>
+        </tr>
+        <tr class="border-b border-white/10 bg-emerald-500/10 text-emerald-200">
+          <td class="p-1 border-r border-white/10 font-medium">A10 FXN 9 Residue (6.1x)</td>
+          <td class="p-1 border-r border-white/10">0.863</td>
+          <td class="p-1 border-r border-white/10">0.863</td>
+          <td class="p-1">0.803</td>
+        </tr>
+        <tr class="bg-white/5">
+          <td class="p-1 border-r border-white/10 font-medium">ADAM 17 FXN 12</td>
+          <td class="p-1 border-r border-white/10">0.141</td>
+          <td class="p-1 border-r border-white/10">0.141</td>
+          <td class="p-1">0.930</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="space-y-2">
+    <div class="p-2.5 bg-emerald-500/10 rounded border border-emerald-500/20 text-[9px]">
+      <h4 class="text-emerald-400 font-bold text-[10px] uppercase tracking-widest mb-1">Key Accomplishments</h4>
+      <p class="leading-relaxed opacity-75">
+        <b>Successful Concentration:</b> Spin concentration is highly effective for concentrating FPLC fractions. ADAM10 FXN 9 yielded a 6.1x increase in concentration (up to 0.863 mg/mL) with minimal loss in filtrate (0.063 mg/mL).
       </p>
     </div>
-    <div class="p-4 bg-amber-500/10 rounded border border-amber-500/20">
-      <h4 class="text-amber-400 font-bold text-[10px] uppercase tracking-widest mb-2">Next Steps</h4>
-      <p class="text-[10px] leading-relaxed opacity-70">
-        Currently optimizing the large-scale induction (500 mL 2xYT + arabinose) and periplasmic extraction buffer protocols to improve initial yield before repeating FPLC.
+    <div class="p-2.5 bg-red-500/10 rounded border border-red-500/20 text-[9px]">
+      <h4 class="text-red-400 font-bold text-[10px] uppercase tracking-widest mb-1">Leakage Alert</h4>
+      <p class="leading-relaxed opacity-75">
+        <b>ADAM10 FXN 6 Membrane Failure:</b> A10 FXN 6 showed significant protein leakage in the filtrate (0.176 mg/mL vs 0.163 mg/mL unconcentrated), indicating a membrane seal failure in that specific centrifugal unit.
+      </p>
+    </div>
+    <div class="p-2.5 bg-white/5 rounded border border-white/10 text-[9px]">
+      <h4 class="text-blue-300 font-bold text-[10px] uppercase tracking-widest mb-1">Future Recommendations</h4>
+      <p class="leading-relaxed opacity-75">
+        Check membrane integrity before run. Check yields of ADAM17 FXN 12 which remains low (0.141 mg/mL) and may require additional optimization.
+      </p>
+    </div>
+  </div>
+</div>
+
+---
+# Coomassie Blue SDS-PAGE Validation (June 3\textsuperscript{rd}, 2026)
+Imaging of spin concentration fractions after overnight de-stain.
+
+<div class="grid grid-cols-2 gap-6 mt-6 items-start">
+  <div class="space-y-2 text-center">
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/sarmazdehlab_20260603_coomassie_spin.png" class="w-full rounded-lg border border-white/10" style="max-height: 280px; object-fit: contain;">
+    <p class="text-[9px] opacity-40 italic mt-1">
+      Coomassie Blue stained 12% Bis-Tris gel imaged via ChemiDoc (15 lanes).
+    </p>
+  </div>
+  <div class="space-y-3">
+    <div class="p-3 bg-white/5 rounded border border-white/10 text-[10px]">
+      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Detection Limits & Sensitivity</h4>
+      <p class="leading-relaxed opacity-75">
+        <b>Residue Enrichment:</b> High-concentration retentate/residue lanes (Lanes 11 and 12) show clearly visible bands around 60–70 kDa, matching the expected size of the catalytic domains and aligning with silver stain results.
+      </p>
+    </div>
+    <div class="p-3 bg-red-500/10 rounded border border-red-500/20 text-[10px]">
+      <h4 class="text-red-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Coomassie vs Silver Stain</h4>
+      <p class="leading-relaxed opacity-75">
+        <b>Poor Leakage Resolution:</b> The membrane leak in ADAM10 FXN 6 (filtrate Lane 13) is barely detectable under Coomassie, highlighting the necessity of silver staining for low-yield quality control and filtrate testing.
+      </p>
+    </div>
+    <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
+      <h4 class="text-amber-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Purification Implication</h4>
+      <p class="leading-relaxed opacity-75">
+        Unconcentrated FPLC fractions (Lanes 8, 9, 10) are extremely faint or below the Coomassie detection threshold, confirming that spin concentration is mandatory for standard Coomassie imaging.
       </p>
     </div>
   </div>
