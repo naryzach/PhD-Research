@@ -1,0 +1,536 @@
+"""
+select_binders_to_order.py
+
+Pick the best TIMP3-scaffold binders from the iterative-refinement pipeline to
+synthesize and test in the lab. Adapts the metric philosophy of
+AlphaFold/AlphaFold_Best_Binder.ipynb to this pipeline's AF3 + ESMFold2 outputs.
+
+Metrics per design (AF3 preferred over ESMFold2 — AF3 is the gold standard):
+  ipTM        interface confidence (binding)                higher better
+  LpLDDT      pLDDT averaged over ONLY the redesigned loops  higher better
+              (the loops are what we engineered — their confidence is what matters)
+  loop_PAE    interface PAE between the loop residues and the target   lower better
+  pTM         global fold confidence                        higher better
+  bb_rmsd     backbone RMSD of the binder FRAMEWORK (non-loop scaffold)
+              vs native TIMP3 — the "did it keep the fold" structural check.
+              If the scaffold backbone moved a lot, the design is suspect.    lower better
+
+Quality gates ("is it even orderable"):  pTM >= PTM_MIN, bb_rmsd <= RMSD_MAX,
+ipTM >= IPTM_MIN. A design failing any gate is never recommended. If NOTHING
+passes, the script says so plainly rather than ordering junk.
+
+Selection categories (each pick carries reason tags, like the reference notebook):
+  best_overall      strongest binders by the composite (across all targets)
+  best_per_target   strongest per protease (MMP2 / MMP9 / ADAM10 / ADAM17)
+  negative_control  passes the fold gate but binds weakly — useful lab negatives
+  best_specificity  most selective for its target over the others
+                    (requires cross-target folds; see --emit-crossfold-input)
+
+Usage:
+  python Generation/select_binders_to_order.py                      # best to order, all categories
+  python Generation/select_binders_to_order.py --criteria best_overall --n 15
+  python Generation/select_binders_to_order.py --emit-crossfold-input   # prep specificity scoring
+  python Generation/select_binders_to_order.py --specificity-scores cross.csv --criteria best_specificity
+
+Output: Local/iterative_refinement/ordering/  (CSV + a human-readable report)
+"""
+
+import re
+import sys
+import json
+import glob
+import hashlib
+import zipfile
+import argparse
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+
+def _seq_to_pipeline_id() -> dict:
+    """Map binder sequence → the pipeline's real design_id (e.g. MMP9_it12_d3_s0)."""
+    mp = {}
+    for c in sorted(OUT_BASE.glob("it_*/round_summary.csv")):
+        try:
+            d = pd.read_csv(c)
+            for _, r in d.iterrows():
+                mp.setdefault(r["full_seq"], r["design_id"])
+        except Exception:
+            continue
+    return mp
+
+
+def _stable_id(target: str, seq: str) -> str:
+    """Reproducible short id (hash randomization makes built-in hash() unstable)."""
+    return f"{target}_{hashlib.md5(seq.encode()).hexdigest()[:6]}"
+
+
+def _target_seqs() -> dict:
+    """{target_name: target protein sequence} from the round summaries."""
+    mp = {}
+    for c in sorted(OUT_BASE.glob("it_*/round_summary.csv")):
+        try:
+            d = pd.read_csv(c)
+            for t, g in d.groupby("target_name"):
+                ts = g["target_seq"].dropna()
+                if t not in mp and len(ts):
+                    mp[t] = ts.iloc[0]
+        except Exception:
+            continue
+    return mp
+
+HERE     = Path(__file__).parent.resolve()
+OUT_BASE = (HERE / ".." / "Local" / "iterative_refinement").resolve()
+DATA_DIR = (HERE / ".." / "Data" / "TIMP_Complexes" / "HADDOCK_Outputs").resolve()
+ORDER_DIR = OUT_BASE / "ordering"
+
+# Redesigned loops — flank tripeptides locate each loop inside any binder/native
+# sequence (same definitions as the design pipeline).
+LOOP_CONFIGS = {
+    "AB": {"left": "LVK", "right": "LVY"},
+    "C":  {"left": "HTE", "right": "GLK"},
+    "EF": {"left": "MYT", "right": "FVE"},
+    "GH": {"left": "KSC", "right": "NEC"},
+}
+ACTIVE_LOOPS = ["AB", "C", "EF"]   # the loops this campaign redesigned
+
+# Quality gates
+PTM_MIN   = 0.70   # global fold confidence floor
+RMSD_MAX  = 4.0    # Å; framework backbone deviation from native TIMP3 above this = suspect
+IPTM_MIN  = 0.50   # minimum interface confidence to be "likely to bind"
+# Negative-control band: passes fold gate but binds weakly
+NEG_IPTM_LO, NEG_IPTM_HI = 0.30, 0.50
+
+# Composite weights for "best" ranking (interface + loop confidence dominate).
+W = {"iptm": 0.45, "lplddt": 0.30, "loop_pae": 0.15, "ptm": 0.10}
+PAE_CLIP = 30.0    # Å; loop_PAE normalized against this
+
+
+# ── Structure / metric helpers ────────────────────────────────────────────────
+
+def _parse_cif_atoms(cif_text: str):
+    """Parse AF3 mmCIF ATOM records → list of dicts (chain, res_id, atom, xyz, plddt)."""
+    cols, rows, in_loop = [], [], False
+    for ln in cif_text.splitlines():
+        s = ln.strip()
+        if s.startswith("_atom_site."):
+            cols.append(s.split(".")[1]); in_loop = True
+        elif in_loop and (s.startswith("ATOM") or s.startswith("HETATM")):
+            p = s.split()
+            if len(p) < len(cols):
+                continue
+            rec = dict(zip(cols, p))
+            try:
+                rows.append({
+                    "chain":  rec.get("auth_asym_id", rec.get("label_asym_id")),
+                    "res_id": int(rec.get("auth_seq_id", rec.get("label_seq_id"))),
+                    "atom":   rec.get("label_atom_id"),
+                    "x": float(rec["Cartn_x"]), "y": float(rec["Cartn_y"]), "z": float(rec["Cartn_z"]),
+                    "plddt": float(rec.get("B_iso_or_equiv", "nan")),
+                })
+            except (ValueError, KeyError):
+                continue
+        elif in_loop and s.startswith("#"):
+            in_loop = False
+    return rows
+
+
+def _parse_pdb_ca(pdb_path: Path, chain: str):
+    """Native PDB → {res_id: (x,y,z)} for CA atoms of `chain`."""
+    out = {}
+    for ln in Path(pdb_path).read_text().splitlines():
+        if ln.startswith("ATOM") and ln[12:16].strip() == "CA" and ln[21] == chain:
+            try:
+                out[int(ln[22:26])] = (float(ln[30:38]), float(ln[38:46]), float(ln[46:54]))
+            except ValueError:
+                continue
+    return out
+
+
+def _seq_from_atoms(atoms, chain):
+    """One-letter sequence for a chain from CA atoms (ordered by res_id)."""
+    three2one = {  # minimal table
+        "ALA":"A","ARG":"R","ASN":"N","ASP":"D","CYS":"C","GLN":"Q","GLU":"E","GLY":"G",
+        "HIS":"H","ILE":"I","LEU":"L","LYS":"K","MET":"M","PHE":"F","PRO":"P","SER":"S",
+        "THR":"T","TRP":"W","TYR":"Y","VAL":"V"}
+    ca = sorted([a for a in atoms if a["chain"] == chain and a["atom"] == "CA"], key=lambda a: a["res_id"])
+    # comp ids aren't in the trimmed dict; rebuild from residue order is not possible here,
+    # so callers pass the sequence separately. This is a fallback only.
+    return ca
+
+
+def loop_residue_positions(binder_seq: str, loops=ACTIVE_LOOPS) -> dict:
+    """
+    1-indexed residue positions of each redesigned loop within `binder_seq`,
+    located by flank tripeptides. Returns {loop: set(positions)} (empty if not found).
+    """
+    out, cursor = {}, 0
+    for name in loops:
+        lc = LOOP_CONFIGS[name]
+        m = re.compile(f"{lc['left']}([A-Z]*?){lc['right']}").search(binder_seq[cursor:])
+        if m:
+            start = cursor + m.start() + len(lc["left"]) + 1     # 1-indexed first loop residue
+            length = len(m.group(1))
+            out[name] = set(range(start, start + length))
+            cursor = cursor + m.end() - len(lc["right"])
+        else:
+            out[name] = set()
+    return out
+
+
+def framework_positions(seq: str, loops=ACTIVE_LOOPS) -> list:
+    """1-indexed residue positions OUTSIDE every redesigned loop (the conserved scaffold)."""
+    loop_pos = set().union(*loop_residue_positions(seq, loops).values()) if seq else set()
+    return [i for i in range(1, len(seq) + 1) if i not in loop_pos]
+
+
+def kabsch_rmsd(P: np.ndarray, Q: np.ndarray) -> float:
+    """RMSD between matched point sets after optimal superposition."""
+    if len(P) != len(Q) or len(P) < 3:
+        return float("nan")
+    Pc, Qc = P - P.mean(0), Q - Q.mean(0)
+    V, _, Wt = np.linalg.svd(Pc.T @ Qc)
+    d = np.sign(np.linalg.det(V @ Wt))
+    R = V @ np.diag([1, 1, d]) @ Wt
+    return float(np.sqrt(((Pc @ R - Qc) ** 2).sum() / len(P)))
+
+
+# ── AF3 parsing ───────────────────────────────────────────────────────────────
+
+def parse_af3_zip(zip_path: str) -> list:
+    """One record per AF3 job: ipTM, pTM, per-residue pLDDT, PAE, token map, CIF atoms."""
+    recs = []
+    with zipfile.ZipFile(zip_path) as zf:
+        names = set(zf.namelist())
+        for jrf in sorted(n for n in names if n.endswith("_job_request.json")):
+            try:
+                jd = json.loads(zf.read(jrf))
+                jd = jd[0] if isinstance(jd, list) else jd
+                seqs = jd.get("sequences", [])
+                if len(seqs) < 2:
+                    continue
+                binder_seq = seqs[0]["proteinChain"]["sequence"]
+                pref = jrf[: -len("_job_request.json")]
+                sc = pref + "_summary_confidences_0.json"
+                fd = pref + "_full_data_0.json"
+                cif = pref + "_model_0.cif"
+                if sc not in names or fd not in names:
+                    continue
+                scd = json.loads(zf.read(sc))
+                fdd = json.loads(zf.read(fd))
+                m = re.search(r"(?:fold_)?refine_it\d+_([A-Za-z0-9]+)_\d+", jd.get("name", ""), re.I)
+                recs.append({
+                    "name": jd.get("name", ""),
+                    "target": (m.group(1).upper() if m else "?"),
+                    "binder_seq": binder_seq,
+                    "iptm": float(scd.get("iptm", 0.0)),
+                    "ptm": float(scd.get("ptm", 0.0)),
+                    "pae": np.array(fdd["pae"]) if "pae" in fdd else None,
+                    "token_chain_ids": fdd.get("token_chain_ids", []),
+                    "token_res_ids": fdd.get("token_res_ids", []),
+                    "atoms": _parse_cif_atoms(zf.read(cif).decode()) if cif in names else [],
+                    "af3_zip": zip_path,
+                    "cif_member": cif if cif in names else None,
+                    "source": "AF3",
+                })
+            except Exception as exc:
+                print(f"  warn: failed to parse {jrf}: {exc}")
+    return recs
+
+
+def per_residue_plddt(atoms, chain="A") -> dict:
+    """{res_id: pLDDT} for a chain — mean over the residue's atoms (B-factor column)."""
+    by_res = {}
+    for a in atoms:
+        if a["chain"] == chain and not np.isnan(a["plddt"]):
+            by_res.setdefault(a["res_id"], []).append(a["plddt"])
+    return {r: float(np.mean(v)) for r, v in by_res.items()}
+
+
+def loop_plddt(atoms, binder_seq) -> float:
+    """LpLDDT: mean per-residue pLDDT over the redesigned-loop residues (chain A)."""
+    pr = per_residue_plddt(atoms, "A")
+    loops = loop_residue_positions(binder_seq)
+    pos = sorted(set().union(*loops.values())) if loops else []
+    vals = [pr[p] for p in pos if p in pr]
+    return float(np.mean(vals)) if vals else float("nan")
+
+
+def loop_interface_pae(rec) -> float:
+    """Mean PAE between binder loop tokens and target-chain tokens (both directions)."""
+    pae, tc, tr = rec["pae"], rec["token_chain_ids"], rec["token_res_ids"]
+    if pae is None or not tc:
+        return float("nan")
+    loops = loop_residue_positions(rec["binder_seq"])
+    lp = set().union(*loops.values()) if loops else set()
+    a_idx = [i for i, (c, r) in enumerate(zip(tc, tr)) if c == "A" and r in lp]
+    b_idx = [i for i, c in enumerate(tc) if c == "B"]
+    if not a_idx or not b_idx:
+        return float("nan")
+    a_idx, b_idx = np.array(a_idx), np.array(b_idx)
+    return float((pae[np.ix_(a_idx, b_idx)].mean() + pae[np.ix_(b_idx, a_idx)].mean()) / 2)
+
+
+def framework_ca_array(atoms, binder_seq) -> np.ndarray:
+    """
+    CA coordinates of the binder FRAMEWORK (non-loop scaffold) residues, in
+    framework order. Every binder shares the identical framework sequence (LMPNN
+    only redesigns loops), so the k-th framework CA is the SAME residue across all
+    binders — giving exact residue correspondence with no indel/alignment issue.
+    """
+    binder_ca = {a["res_id"]: (a["x"], a["y"], a["z"])
+                 for a in atoms if a["chain"] == "A" and a["atom"] == "CA"}
+    fw = framework_positions(binder_seq)
+    pts = [binder_ca[p] for p in fw if p in binder_ca]
+    return np.array(pts) if pts else np.empty((0, 3))
+
+
+def framework_rmsd_to_ref(frame: np.ndarray, ref: np.ndarray) -> float:
+    """
+    Backbone RMSD of a binder framework vs the reference (most-confident) binder
+    framework. Low = scaffold backbone preserved; high = the design's scaffold
+    deviates from the expected fold → suspect (the user's structure-similarity check).
+    """
+    if frame.size == 0 or ref.size == 0:
+        return float("nan")
+    n = min(len(frame), len(ref))
+    if n < 10:
+        return float("nan")
+    return kabsch_rmsd(frame[:n], ref[:n])
+
+
+# ── Build the candidate table ─────────────────────────────────────────────────
+
+def build_table() -> pd.DataFrame:
+    # --- Pass 1: parse all AF3 designs, keep atoms for the backbone reference ---
+    af3, seen = [], set()
+    for z in sorted(OUT_BASE.glob("folds_*.zip")):
+        for rec in parse_af3_zip(str(z)):
+            if rec["binder_seq"] in seen:     # dedupe across overlapping batches
+                continue
+            seen.add(rec["binder_seq"])
+            rec["frame"] = framework_ca_array(rec["atoms"], rec["binder_seq"])
+            af3.append(rec)
+
+    # Reference framework = the most-confident (highest pTM) AF3 design's scaffold.
+    ref_frame = np.empty((0, 3))
+    if af3:
+        ref = max(af3, key=lambda r: r["ptm"] if r["frame"].size else -1)
+        ref_frame = ref["frame"]
+
+    seq2id = _seq_to_pipeline_id()
+    rows = []
+    for rec in af3:
+        rows.append({
+            "binder_seq": rec["binder_seq"], "target": rec["target"], "source": "AF3",
+            "iptm": rec["iptm"], "ptm": rec["ptm"],
+            "lplddt": loop_plddt(rec["atoms"], rec["binder_seq"]),
+            "loop_pae": loop_interface_pae(rec),
+            "bb_rmsd": framework_rmsd_to_ref(rec["frame"], ref_frame),
+            "af3_zip": rec["af3_zip"], "cif_member": rec["cif_member"],
+        })
+
+    # --- ESMFold2-only designs (labeled fallback, NOT AF3-validated) ---
+    rs = []
+    for c in sorted(OUT_BASE.glob("it_*/round_summary.csv")):
+        rs.append(pd.read_csv(c))
+    if rs:
+        rs = pd.concat(rs, ignore_index=True).drop_duplicates("full_seq")
+        for _, r in rs.iterrows():
+            if r["full_seq"] in seen:
+                continue
+            seen.add(r["full_seq"])
+            rows.append({
+                "binder_seq": r["full_seq"], "target": r.get("target_name", "?"), "source": "ESMFold2",
+                "iptm": pd.to_numeric(r.get("esm_iptm"), errors="coerce"),
+                "ptm":  pd.to_numeric(r.get("esm_ptm"),  errors="coerce"),
+                "lplddt": pd.to_numeric(r.get("esm_plddt"), errors="coerce"),  # whole-binder pLDDT (no per-res parse)
+                "loop_pae": float("nan"),
+                "bb_rmsd": float("nan"),
+            })
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    # Prefer the pipeline's real design_id (points to the actual structure/iteration);
+    # fall back to a stable sequence hash.
+    df["design_id"] = [seq2id.get(s, _stable_id(t, s))
+                       for t, s in zip(df["target"], df["binder_seq"])]
+    df["pae_score"] = (1 - df["loop_pae"] / PAE_CLIP).clip(lower=0)
+    df["composite"] = (W["iptm"] * df["iptm"].fillna(0)
+                       + W["lplddt"] * (df["lplddt"].fillna(0) / 100.0)
+                       + W["loop_pae"] * df["pae_score"].fillna(0)
+                       + W["ptm"] * df["ptm"].fillna(0))
+    # Fold gate: pTM ok AND backbone preserved. ESMFold2 (bb_rmsd=NaN) can't pass
+    # the backbone check, so it is gated out of "orderable" by default — AF3 only.
+    df["fold_ok"] = (df["ptm"].fillna(0) >= PTM_MIN) & (df["bb_rmsd"] <= RMSD_MAX)
+    df["orderable"] = df["fold_ok"] & (df["iptm"].fillna(0) >= IPTM_MIN) & (df["source"] == "AF3")
+    return df
+
+
+# ── Selection ─────────────────────────────────────────────────────────────────
+
+def _fmt(r):
+    pae = "n/a" if pd.isna(r["loop_pae"]) else f"{r['loop_pae']:.1f}"
+    rmsd = "n/a" if pd.isna(r["bb_rmsd"]) else f"{r['bb_rmsd']:.2f}"
+    return (f"ipTM={r['iptm']:.2f} LpLDDT={r['lplddt']:.0f} loopPAE={pae} "
+            f"pTM={r['ptm']:.2f} bbRMSD={rmsd}A [{r['source']}]")
+
+
+def select(df: pd.DataFrame, criteria: str, n: int, spec: pd.DataFrame = None) -> list:
+    picks = {}   # design_id -> {row, reasons}
+
+    def add(sub, tag):
+        for _, r in sub.iterrows():
+            picks.setdefault(r["design_id"], {"row": r, "reasons": []})["reasons"].append(tag)
+
+    pool = df[df["orderable"]].copy()
+
+    if criteria in ("best_overall", "all"):
+        add(pool.sort_values("composite", ascending=False).head(n), "best_overall")
+        for tgt, g in pool.groupby("target"):
+            add(g.sort_values("composite", ascending=False).head(max(1, n // 4)), f"best_{tgt}")
+
+    if criteria in ("negative_control", "all"):
+        neg = df[df["fold_ok"] & df["iptm"].between(NEG_IPTM_LO, NEG_IPTM_HI)]
+        add(neg.sort_values("iptm", ascending=False).head(max(2, n // 4)), "negative_control(folds,weak_binding)")
+
+    if criteria in ("best_specificity", "all") and spec is not None and not spec.empty:
+        # spec: per original design_id, selectivity gap = ipTM(on-target) - mean(off-targets)
+        by_id = df.set_index("design_id")
+        for _, r in spec.sort_values("sel_gap", ascending=False).head(n).iterrows():
+            did = r["design_id"]
+            if did in by_id.index and bool(by_id.loc[did, "orderable"]):
+                picks.setdefault(did, {"row": df[df.design_id == did].iloc[0], "reasons": []}
+                                 )["reasons"].append(
+                    f"best_specificity(gap={r['sel_gap']:+.2f} on={r['on_target']})")
+
+    return sorted(picks.values(), key=lambda p: p["row"]["composite"], reverse=True)
+
+
+def parse_crossfold(scores_csv: str, df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Turn score_with_esmfold2 cross-fold output (design_id='<id>__<TARGET>', esm_iptm)
+    into per-design selectivity: gap = ipTM(design's own target) - mean(other targets).
+    """
+    s = pd.read_csv(scores_csv)
+    s["orig"]   = s["design_id"].str.rsplit("__", n=1).str[0]
+    s["target"] = s["design_id"].str.rsplit("__", n=1).str[1]
+    wide = s.pivot_table(index="orig", columns="target", values="esm_iptm", aggfunc="first")
+    own = df.set_index("design_id")["target"].to_dict()
+    rows = []
+    for oid, r in wide.iterrows():
+        on = own.get(oid)
+        if on not in wide.columns:
+            continue
+        others = [c for c in wide.columns if c != on]
+        gap = r[on] - np.nanmean([r[c] for c in others])
+        rows.append({"design_id": oid, "on_target": on, "sel_gap": float(gap)})
+    return pd.DataFrame(rows)
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Select TIMP3 binders to synthesize/order.")
+    ap.add_argument("--criteria", default="all",
+                    choices=["all", "best_overall", "negative_control", "best_specificity"])
+    ap.add_argument("--n", type=int, default=15, help="Target number of designs to recommend.")
+    ap.add_argument("--emit-crossfold-input", action="store_true",
+                    help="Write a CSV of (orderable candidates × all 4 targets) to fold with "
+                         "ESMFold2 for the specificity analysis, then exit.")
+    ap.add_argument("--specificity-scores", default=None,
+                    help="CSV of cross-fold ipTM (design_id, binder_seq, target, <ipTM per target>).")
+    args = ap.parse_args()
+
+    ORDER_DIR.mkdir(parents=True, exist_ok=True)
+    print("Building candidate table (AF3 preferred, ESMFold2 fallback)...")
+    df = build_table()
+    if df.empty:
+        sys.exit("No designs found. Run the pipeline first.")
+
+    n_af3 = (df.source == "AF3").sum()
+    print(f"  {len(df)} unique designs | {n_af3} AF3-folded | "
+          f"{int(df.orderable.sum())} pass quality gates "
+          f"(pTM>={PTM_MIN}, bbRMSD<={RMSD_MAX}A, ipTM>={IPTM_MIN})")
+
+    # Save the full scored table for transparency
+    df.sort_values("composite", ascending=False).to_csv(ORDER_DIR / "all_candidates_scored.csv", index=False)
+
+    if args.emit_crossfold_input:
+        cand = df[df.orderable].sort_values("composite", ascending=False).head(args.n)
+        tseqs = _target_seqs()
+        targets = sorted(tseqs.keys())
+        # One row per (candidate × target), ready for score_with_esmfold2.py --input.
+        # design_id encodes the original id + target as "<id>__<TARGET>" so the
+        # scorer's output can be pivoted back to a binder×target ipTM matrix.
+        rows = []
+        for _, r in cand.iterrows():
+            for t in targets:
+                rows.append({"design_id": f"{r.design_id}__{t}", "target_name": t,
+                             "full_seq": r.binder_seq, "target_seq": tseqs[t]})
+        out = ORDER_DIR / "crossfold_input.csv"
+        pd.DataFrame(rows).to_csv(out, index=False)
+        print(f"\nWrote {len(rows)} (candidate x target) rows for {len(cand)} candidates -> {out}")
+        print("On the cluster:")
+        print(f"  python Generation/score_with_esmfold2.py --input {out} "
+              f"--out {ORDER_DIR/'crossfold_scores.csv'}")
+        print("Then: python Generation/select_binders_to_order.py "
+              "--criteria best_specificity --specificity-scores "
+              f"{ORDER_DIR/'crossfold_scores.csv'}")
+        return
+
+    if not df.orderable.any():
+        print("\n" + "!" * 64)
+        print("  NO designs are good enough to order.")
+        print(f"  Best available: ipTM={df['iptm'].max():.2f}, "
+              f"best pTM={df['ptm'].max():.2f}, lowest bbRMSD={df['bb_rmsd'].min():.2f}A")
+        print("  Recommend more iterations / parameter changes before synthesizing.")
+        print("!" * 64)
+        return
+
+    spec = parse_crossfold(args.specificity_scores, df) if args.specificity_scores else None
+    selections = select(df, args.criteria, args.n, spec)
+
+    # Extract the actual AF3 structures for the recommended designs.
+    struct_dir = ORDER_DIR / "structures"
+    struct_dir.mkdir(exist_ok=True)
+    n_struct = 0
+    for p in selections[: args.n]:
+        r = p["row"]
+        zp, member = r.get("af3_zip"), r.get("cif_member")
+        if isinstance(zp, str) and isinstance(member, str):
+            try:
+                with zipfile.ZipFile(zp) as zf:
+                    (struct_dir / f"{r['design_id']}.cif").write_bytes(zf.read(member))
+                n_struct += 1
+            except Exception:
+                pass
+
+    # ── Report ──
+    report = [f"# Binders to order  (criteria: {args.criteria}, AF3-preferred)\n"]
+    report.append(f"{len(selections)} designs recommended from "
+                  f"{int(df.orderable.sum())} that pass quality gates.\n")
+    for i, p in enumerate(selections[:args.n], 1):
+        r = p["row"]
+        report.append(f"## {i}. {r['design_id']}  (target: {r['target']})")
+        report.append(f"   {_fmt(r)}")
+        report.append(f"   composite={r['composite']:.3f}   reasons: {', '.join(p['reasons'])}")
+        report.append(f"   seq: {r['binder_seq']}\n")
+
+    if spec is None and args.criteria in ("all", "best_specificity"):
+        report.append("\n_Specificity not computed (no cross-target folds). Run "
+                      "`--emit-crossfold-input`, fold with ESMFold2, then `--specificity-scores`._")
+
+    text = "\n".join(report)
+    (ORDER_DIR / "order_report.md").write_text(text)
+    pd.DataFrame([{k: v for k, v in {**p["row"].to_dict(),
+                                     "reasons": ", ".join(p["reasons"])}.items()
+                   if k not in ("af3_zip", "cif_member")}
+                  for p in selections]).to_csv(ORDER_DIR / "order_list.csv", index=False)
+    print("\n" + text)
+    print(f"\nExtracted {n_struct} AF3 structures -> {struct_dir}/")
+    print(f"Saved: {ORDER_DIR}/order_report.md, order_list.csv, all_candidates_scored.csv")
+
+
+if __name__ == "__main__":
+    main()
