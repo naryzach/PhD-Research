@@ -1814,6 +1814,18 @@ def main():
              "uses up to N *free* GPUs; 'auto' uses all free GPUs (cap "
              f"{ESMFOLD2_MAX_GPUS}). Skips GPUs busy with other jobs.",
     )
+    # ── Diversity / exploration controls ──
+    parser.add_argument("--init-temperature", type=float, default=None,
+                        help=f"Starting LMPNN temperature for a fresh run (default {INIT_TEMPERATURE}).")
+    parser.add_argument("--min-temperature", type=float, default=None,
+                        help=f"Temperature floor (default {MIN_TEMPERATURE}). Raise to ~0.30 to keep "
+                             "exploring (sustained sequence diversity) instead of converging.")
+    parser.add_argument("--temp-decay", type=float, default=None,
+                        help=f"Per-iteration temperature multiplier (default {TEMP_DECAY}). Raise "
+                             "toward ~0.95 to stay explorative for more iterations.")
+    parser.add_argument("--no-adaptive-bias", action="store_true",
+                        help="Disable adaptive loop-length narrowing — keeps the full loop-length "
+                             "range every iteration (more structural diversity).")
     args = parser.parse_args()
 
     if args.enable_rf3:
@@ -1822,6 +1834,18 @@ def main():
     if args.esmfold2_gpus is not None:
         global ESMFOLD2_GPUS
         ESMFOLD2_GPUS = args.esmfold2_gpus  # int-like string or "auto"; resolved at call time
+    if args.init_temperature is not None:
+        global INIT_TEMPERATURE
+        INIT_TEMPERATURE = args.init_temperature
+    if args.min_temperature is not None:
+        global MIN_TEMPERATURE
+        MIN_TEMPERATURE = args.min_temperature
+    if args.temp_decay is not None:
+        global TEMP_DECAY
+        TEMP_DECAY = args.temp_decay
+    if args.no_adaptive_bias:
+        global ADAPTIVE_BIAS_START
+        ADAPTIVE_BIAS_START = 10**9   # effectively never
 
     refiner = IterativeRefiner(
         active_targets=args.targets,
