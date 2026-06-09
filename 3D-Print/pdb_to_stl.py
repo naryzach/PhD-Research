@@ -47,6 +47,7 @@ Usage
     # Backbone tube
     python pdb_to_stl.py MMP2_Xray.pdb --style backbone --tube-radius 1.2
 
+<<<<<<< HEAD
     # Cartoon ribbon (uses DSSP if available)
     python pdb_to_stl.py MMP2_Xray.pdb --style ribbon
 
@@ -54,6 +55,15 @@ Usage
     python pdb_to_stl.py "Data/**/*.pdb" -o STL_Output --style ribbon
 
     # Finer surface mesh
+=======
+    # Extract specific chains (default is A)
+    python pdb_to_stl.py "Data/**/*.pdb" --chains A B
+
+    # Process all chains together
+    python pdb_to_stl.py "Data/**/*.pdb" --chains all
+
+    # Finer mesh (--resolution 0.6) or faster/coarser (--resolution 1.5)
+>>>>>>> 7c17cd2bd01a322a75b067c31f4ce478bfaa0a4e
     python pdb_to_stl.py Data/TIMP_Complexes/HADDOCK_PDB/*.pdb --resolution 0.8
 """
 
@@ -89,8 +99,13 @@ def _element_from_atom(atom):
     return atom.get_name().strip().lstrip("0123456789")[0].upper()
 
 
+<<<<<<< HEAD
 def load_structure(path: str):
     """Return (coords, radii) for all non-water heavy atoms."""
+=======
+def load_structure(path: str, chain_id: str = None):
+    """Return (coords, radii) arrays for all non-water heavy atoms."""
+>>>>>>> 7c17cd2bd01a322a75b067c31f4ce478bfaa0a4e
     from Bio import PDB
 
     suffix = Path(path).suffix.lower()
@@ -99,6 +114,11 @@ def load_structure(path: str):
 
     coords, radii = [], []
     for atom in structure.get_atoms():
+        if chain_id is not None:
+            chain = atom.get_parent().get_parent()
+            if chain.id != chain_id:
+                continue
+
         resname = atom.get_parent().get_resname().strip()
         if resname in ("HOH", "WAT"):
             continue
@@ -109,6 +129,8 @@ def load_structure(path: str):
         radii.append(VDW_RADII.get(element, DEFAULT_RADIUS))
 
     if not coords:
+        if chain_id is not None:
+            raise ValueError(f"No heavy atoms found for chain {chain_id}.")
         raise ValueError("No heavy atoms found in structure.")
     return np.array(coords, dtype=np.float32), np.array(radii, dtype=np.float32)
 
@@ -190,6 +212,7 @@ def write_stl(path, verts, faces):
 # Backbone / Ribbon — shared geometry utilities
 # --------------------------------------------------------------------------
 
+<<<<<<< HEAD
 def _load_backbone(path: str):
     """
     Return per-chain residue data.
@@ -566,6 +589,34 @@ def convert_surface(input_path: str, output_dir: str, probe: float, res: float):
     except Exception as exc:
         print(f"    ERROR: {exc}")
         return False
+=======
+def convert(input_path: str, output_dir: str, probe: float, res: float, chains: list):
+    p = Path(input_path)
+
+    overall_success = True
+    for chain_id in chains:
+        is_all = (chain_id.lower() == "all")
+        if is_all:
+            out = Path(output_dir) / (p.stem + ".stl")
+            print(f"\n[{p.name}] - All Chains")
+        else:
+            out = Path(output_dir) / f"{p.stem}_{chain_id}.stl"
+            print(f"\n[{p.name}] - Chain {chain_id}")
+
+        try:
+            coords, radii = load_structure(input_path, chain_id=None if is_all else chain_id)
+            print(f"    Atoms: {len(coords):,}")
+            sdf, origin = build_sdf(coords, radii, probe, res, margin=5.0)
+            verts, faces = extract_surface(sdf, origin, res)
+            write_stl(str(out), verts, faces)
+            size_mb = out.stat().st_size / 1_048_576
+            print(f"    → {out.name}  ({len(verts):,} verts, {len(faces):,} tris, {size_mb:.1f} MB)")
+        except Exception as exc:
+            print(f"    ERROR: {exc}")
+            overall_success = False
+
+    return overall_success
+>>>>>>> 7c17cd2bd01a322a75b067c31f4ce478bfaa0a4e
 
 
 # --------------------------------------------------------------------------
@@ -686,6 +737,7 @@ def main():
         help="Directory to write STL files into"
     )
     ap.add_argument(
+<<<<<<< HEAD
         "--style", choices=["surface", "backbone", "ribbon"], default="surface",
         help=(
             "surface: solvent-accessible surface (default); "
@@ -697,6 +749,12 @@ def main():
     # ── Surface options ────────────────────────────────────────────────────
     surf = ap.add_argument_group("surface options")
     surf.add_argument(
+=======
+        "-c", "--chains", nargs="+", default=["A"],
+        help="Chain(s) to extract, e.g. A B (default: A). Pass 'all' to process all chains as a single structure."
+    )
+    ap.add_argument(
+>>>>>>> 7c17cd2bd01a322a75b067c31f4ce478bfaa0a4e
         "--resolution", type=float, default=1.0,
         help="Grid spacing in Å (0.6–0.8 = finer, 1.5 = faster/coarser)"
     )
@@ -742,6 +800,7 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
     print(f"Converting {len(files)} structure(s)  →  {args.output_dir}/")
+<<<<<<< HEAD
     print(f"Style: {args.style}")
 
     if args.style == "surface":
@@ -770,6 +829,13 @@ def main():
         )
 
     print(f"\nDone: {ok}/{len(files)} converted.")
+=======
+    print(f"Resolution: {args.resolution} Å    Probe: {args.probe} Å")
+    print(f"Chains: {', '.join(args.chains)}")
+
+    ok = sum(convert(f, args.output_dir, args.probe, args.resolution, args.chains) for f in files)
+    print(f"\nDone: {ok}/{len(files)} files fully converted (some chains may have failed).")
+>>>>>>> 7c17cd2bd01a322a75b067c31f4ce478bfaa0a4e
 
 
 if __name__ == "__main__":
