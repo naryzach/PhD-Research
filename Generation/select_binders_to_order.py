@@ -366,6 +366,25 @@ def build_table() -> pd.DataFrame:
     # the backbone check, so it is gated out of "orderable" by default — AF3 only.
     df["fold_ok"] = (df["ptm"].fillna(0) >= PTM_MIN) & (df["bb_rmsd"] <= RMSD_MAX)
     df["orderable"] = df["fold_ok"] & (df["iptm"].fillna(0) >= IPTM_MIN) & (df["source"] == "AF3")
+
+    # --- optional: the calibrated multi-term recipe score (binding_recipe.py).
+    # Carried ALONGSIDE `composite`, never replacing it. Off-target metrics come from
+    # any same-sequence rows present; designs here are usually folded vs one target,
+    # so the recipe's selectivity term only fires when cross-target folds are in `df`
+    # (e.g. a crossfold/specificity run) — otherwise it is auto-dropped & renormalized.
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).parent))   # binding_recipe.py lives in Generation/
+        from binding_recipe import score_design as _score_design
+        def _rmap(r):
+            return {"LpLDDT": r["lplddt"], "PAE": r["loop_pae"], "ipTM": r["iptm"], "pTM": r["ptm"]}
+        _by_seq = {s: grp for s, grp in df.groupby("binder_seq")}
+        def _recipe(r):
+            offs = [_rmap(o) for _, o in _by_seq[r["binder_seq"]].iterrows() if o["target"] != r["target"]]
+            return _score_design(_rmap(r), offs)
+        df["recipe_score"] = df.apply(_recipe, axis=1)
+    except Exception as _exc:
+        df["recipe_score"] = float("nan")
     return df
 
 
