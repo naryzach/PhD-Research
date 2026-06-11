@@ -782,28 +782,23 @@ Optimization of Anion Exchange Chromatography (HiTrap Q FF).
 
 ---
 # SDS-PAGE & Silver Stain Validation (June 2\textsuperscript{nd}, 2026)
-Successful detection and optimization of ADAM10 and ADAM17 expression.
+Successful detection and optimization of ADAM10 expression and FPLC fractions.
 
-<div class="grid grid-cols-3 gap-4 mt-4">
-  <div class="p-2 bg-white/5 rounded border border-white/10 text-center">
-    <b class="text-blue-400 text-[10px] block mb-1">ADAM10 Expression (Coomassie)</b>
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260602.png" class="w-full rounded mt-1 border border-white/10" style="max-height: 140px; object-fit: contain;">
-    <p class="text-[9px] leading-snug opacity-70 mt-1">
+<div class="grid grid-cols-2 gap-6 mt-4">
+  <div class="p-4 bg-white/5 rounded border border-white/10 text-center">
+    <b class="text-blue-400 text-xs block mb-1">ADAM10 Expression (Coomassie)</b>
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260602.png" class="w-full rounded mt-2 border border-white/10" style="max-height: 220px; object-fit: contain;">
+    <p class="text-[10px] leading-snug opacity-70 mt-2">
       Expression test part 2. Bands visible at ~60-70 kDa corresponding to catalytic domain.
+      Comparison with Jake's samples provides an independent expression benchmark.
     </p>
   </div>
-  <div class="p-2 bg-white/5 rounded border border-white/10 text-center">
-    <b class="text-violet-400 text-[10px] block mb-1">ADAM17 Trial (Coomassie)</b>
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/sarmazdehlab_20260602_adam17_coomassie.png" class="w-full rounded mt-1 border border-white/10" style="max-height: 140px; object-fit: contain;">
-    <p class="text-[9px] leading-snug opacity-70 mt-1">
-      Expansion trial. Intracellular/periplasmic expression confirmed in cell pellets. 25 °C reduces aggregation in lysis pellet.
-    </p>
-  </div>
-  <div class="p-2 bg-white/5 rounded border border-white/10 text-center">
-    <b class="text-emerald-400 text-[10px] block mb-1">Low-Abundance (Silver Stain)</b>
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/sarmazdehlab_20260602_silver_stain.png" class="w-full rounded mt-1 border border-white/10" style="max-height: 140px; object-fit: contain;">
-    <p class="text-[9px] leading-snug opacity-70 mt-1">
-      FPLC fractions. Confirmed presence in low-concentration samples. High sensitivity detects F6 leakage in filtrate.
+  <div class="p-4 bg-white/5 rounded border border-white/10 text-center">
+    <b class="text-emerald-400 text-xs block mb-1">Low-Abundance (Silver Stain)</b>
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260602_Silver.png" class="w-full rounded mt-2 border border-white/10" style="max-height: 220px; object-fit: contain;">
+    <p class="text-[10px] leading-snug opacity-70 mt-2">
+      Pierce Silver Stain of FPLC fractions. Confirmed presence in low-concentration samples.
+      Detects F6 leakage in filtrate. Ladder compromised, so band identity is approximate.
     </p>
   </div>
 </div>
@@ -893,33 +888,33 @@ Evaluation of FPLC fractions following spin concentration with Amicon Ultra-4 (1
 </div>
 
 ---
-# Coomassie Blue SDS-PAGE Validation (June 3\textsuperscript{rd}, 2026)
-Imaging of spin concentration fractions after overnight de-stain.
+# ADAM17 Temperature Expansion Trial (June 3\textsuperscript{rd}, 2026)
+Coomassie Blue SDS-PAGE of expression across induction temperatures and timepoints.
 
 <div class="grid grid-cols-2 gap-6 mt-6 items-start">
   <div class="space-y-2 text-center">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/sarmazdehlab_20260603_coomassie_spin.png" class="w-full rounded-lg border border-white/10" style="max-height: 280px; object-fit: contain;">
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260603.png" class="w-full rounded-lg border border-white/10" style="max-height: 280px; object-fit: contain;">
     <p class="text-[9px] opacity-40 italic mt-1">
-      Coomassie Blue stained 12% Bis-Tris gel imaged via ChemiDoc (15 lanes).
+      Coomassie Blue stained 12% Tris-glycine gel of ADAM17 expression (15 lanes).
     </p>
   </div>
   <div class="space-y-3">
     <div class="p-3 bg-white/5 rounded border border-white/10 text-[10px]">
-      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Detection Limits & Sensitivity</h4>
+      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Overnight Expression Requirement</h4>
       <p class="leading-relaxed opacity-75">
-        <b>Residue Enrichment:</b> High-concentration retentate/residue lanes (Lanes 11 and 12) show clearly visible bands around 60–70 kDa, matching the expected size of the catalytic domains and aligning with silver stain results.
+        <b>Strong Overnight Expression:</b> The overnight lysate pellet (Lane 13) shows strong expression with a prominent band at $\approx$30 kDa, indicating that overnight expression is required to obtain detectable levels.
       </p>
     </div>
-    <div class="p-3 bg-red-500/10 rounded border border-red-500/20 text-[10px]">
-      <h4 class="text-red-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Coomassie vs Silver Stain</h4>
+    <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px]">
+      <h4 class="text-emerald-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Localization & Leakage QC</h4>
       <p class="leading-relaxed opacity-75">
-        <b>Poor Leakage Resolution:</b> The membrane leak in ADAM10 FXN 6 (filtrate Lane 13) is barely detectable under Coomassie, highlighting the necessity of silver staining for low-yield quality control and filtrate testing.
+        <b>No Periplasmic Leakage:</b> Target protein is absent in the growth supernatants (Lanes 7, 8, 9). The overnight growth pellet (Lane 12) shows expression, while early growth pellets (Lanes 10, 11) show none.
       </p>
     </div>
     <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
-      <h4 class="text-amber-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Purification Implication</h4>
+      <h4 class="text-amber-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Temperature Optimization</h4>
       <p class="leading-relaxed opacity-75">
-        Unconcentrated FPLC fractions (Lanes 8, 9, 10) are extremely faint or below the Coomassie detection threshold, confirming that spin concentration is mandatory for standard Coomassie imaging.
+        <b>25°C Standardization:</b> Early induction points (Lanes 14 and 15) show no bands. 25°C overnight induction is recommended to minimize inclusion body formation in the cell pellet, aligning with ADAM10 observations.
       </p>
     </div>
   </div>

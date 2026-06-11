@@ -175,6 +175,21 @@ Every research thread is listed below. Each thread MUST have a corresponding fol
 
 ---
 
+### Thread 8: `ADAM_Target_Production`
+
+| Property | Value |
+|----------|-------|
+| **Title** | Recombinant Production of ADAM10, ADAM17, and MMP7 Target Metalloproteinases for Yeast-Display Selectivity Screening |
+| **Type** | Technical Paper / Working Record |
+| **Paper Status** | 🟢 Advanced Draft (figures, tables, updated with June 10th results) |
+| **Presentation Status** | 🟢 Draft |
+| **Description** | A working record for the expression, purification, and validation of target metalloproteinases (ADAM10, ADAM17, MMP7) used for yeast-display selectivity screening. Tracks SDS-PAGE runs, silver stain enrichment QC, spin concentration yields, step-wise refolding, and binding performance in target flow cytometry trials. |
+| **Codebase Sources** | `Protein-Analysis/` (gel_annotator.py, analyze_fcs_target_trial.py) |
+| **Key Data Paths** | `Local/20260610_170522_Analysis/` (June 10 flow trial), `SharedAssets/figures/De_Novo_Binder_Generation/` (gel images) |
+| **Key Figures** | `ADAM1017_SDS-Page_Gel_20260610_ADAM10.png`, `ADAM1017_SDS-Page_Gel_20260610_ADAM17.png` |
+
+---
+
 ## Directory Architecture
 
 ```
