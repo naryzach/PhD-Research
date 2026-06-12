@@ -293,11 +293,17 @@ def main():
         # Parse target and date from directory name
         match = re.match(r'^([^_]+)_(\d{8})', dir_name)
         if not match:
-            print(f"  Skipping {dir_name}: Could not parse target and date.", flush=True)
-            continue
-            
-        target = match.group(1).upper()
-        date = match.group(2)
+            # Check if it matches YYYYMMDD_HHMMSS_Analysis format
+            match_dt = re.match(r'^(\d{8})_(\d{6})_Analysis$', dir_name)
+            if match_dt:
+                date = match_dt.group(1)
+                target = None
+            else:
+                print(f"  Skipping {dir_name}: Could not parse target and date.", flush=True)
+                continue
+        else:
+            target = match.group(1).upper()
+            date = match.group(2)
         
         if date in exclude_dates:
             print(f"  Skipping {dir_name}: Date {date} is in exclude list.", flush=True)
@@ -358,6 +364,13 @@ def main():
                             num_match = re.search(r'(\d+)', standard_name)
                             construct_num = num_match.group(1) if num_match else None
                             
+                            # Determine target for this row
+                            row_target = row.get('Target', '').strip().upper()
+                            if not row_target and target:
+                                row_target = target
+                            elif not row_target:
+                                row_target = "UNKNOWN"
+
                             # Extract required metrics
                             pos_med_ratio = float(row.get('Pos Med Ratio', 0))
                             norm_med_ratio = float(row.get('Norm Pos Med Ratio', 0))
@@ -390,7 +403,7 @@ def main():
 
                             
                             all_data.append({
-                                'Target': target,
+                                'Target': row_target,
                                 'Date': date,
                                 'Construct': standard_name,
                                 'Construct Num': construct_num,

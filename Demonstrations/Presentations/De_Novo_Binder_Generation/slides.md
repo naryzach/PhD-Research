@@ -744,6 +744,85 @@ Flow Cytometry assessment of TwistBio constructs against a multi-MMP panel.
 </div>
 
 ---
+layout: default
+transition: fade-out
+---
+
+# Yeast Display Target Trial — ADAM10 & MMP9 (June 10\textsuperscript{th}, 2026)
+Flow Cytometry assessment of TwistBio constructs against commercial and in-house targets.
+
+<div class="grid grid-cols-2 gap-6 mt-6 items-start">
+  <div class="space-y-3">
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260610_YeastDisplayTargetTrial/All_Targets_DoublePos_Bar.png"
+         alt="Double Positive % across targets"
+         class="w-full rounded-lg border border-white/10"
+         style="max-height: 280px; object-fit: contain;">
+    <p class="text-[9px] opacity-40 italic text-center">
+      Double Positive % by Display Variant, Target Source, and Tag Type.
+    </p>
+  </div>
+  <div class="space-y-4">
+    <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px]">
+      <h4 class="text-emerald-400 font-bold text-[10px] uppercase tracking-widest mb-1">MMP9 Positives Validated</h4>
+      <p class="leading-relaxed opacity-75">
+        <b>Sino MMP9 binding</b> was strong: positive control <b>TIMP3</b> achieved 38.2% Double+ (491 MFI), and Twist variants <b>AB 7</b> and <b>AB 3</b> achieved 33.5% and 32.9% Double+ respectively, validating the display system.
+      </p>
+    </div>
+    <div class="p-3 bg-red-500/10 rounded border border-red-500/20 text-[10px]">
+      <h4 class="text-red-400 font-bold text-[10px] uppercase tracking-widest mb-1">ADAM10 Binding Issues</h4>
+      <p class="leading-relaxed opacity-75">
+        <b>ADAM10 binding</b> was extremely low across both commercial (AbCam) and in-house FPLC retentates (F6 and F9), yielding &lt;1.0% Double+ for all constructs.
+      </p>
+    </div>
+    <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
+      <h4 class="text-amber-400 font-bold text-[10px] uppercase tracking-widest mb-1">Masoud's MMP9 Benchmark</h4>
+      <p class="leading-relaxed opacity-75">
+        <b>In-house MMP9</b> (Masoud) showed moderate binding (AB 7: 12.8%, C 11: 10.9%), indicating possible differences in fold quality or active target concentration compared to Sino MMP9.
+      </p>
+    </div>
+  </div>
+</div>
+
+---
+layout: default
+transition: fade-out
+---
+
+# Target Trial Analysis & Troubleshooting
+Addressing low ADAM10 binding and validating spillover correction performance.
+
+<div class="grid grid-cols-2 gap-6 mt-6 items-start">
+  <div class="space-y-3">
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260610_YeastDisplayTargetTrial/Spillover_Correction_Reference.png"
+         alt="Spillover Correction Reference"
+         class="w-full rounded-lg border border-white/10"
+         style="max-height: 220px; object-fit: contain;">
+    <div class="p-3 bg-blue-500/10 rounded border border-blue-500/20 text-[9px]">
+      <h4 class="text-blue-400 font-bold text-[9px] uppercase tracking-widest mb-1">Bleed-through Spillover QC</h4>
+      <p class="leading-relaxed opacity-75">
+        <b>Alpha = 0.1638:</b> Spillover coefficient (FITC &rarr; PE) was accurately calculated from His-tagged samples (high FITC, no PE) to correct FLAG-tagged target PE binding signals.
+      </p>
+    </div>
+  </div>
+  <div class="space-y-4">
+    <div class="p-4 bg-white/5 rounded border border-white/10 text-[10px]">
+      <h4 class="text-blue-300 font-bold text-[10px] uppercase tracking-widest mb-2">ADAM10 Inactivity Root Causes</h4>
+      <ul class="list-disc pl-4 space-y-2 opacity-80 leading-relaxed">
+        <li><b>Target Degradation/Inactivation:</b> Commercial AbCam and in-house purified ADAM10 both failed to bind, suggesting that the target protein may have lost activity.</li>
+        <li><b>Improper Fold Quality:</b> Lack of conformational binding across all display variants points toward misfolding or aggregation of target catalytic domains.</li>
+        <li><b>Assay Cofactors:</b> ADAM catalytic domain activity is dependent on zinc/calcium cofactors; buffer conditions in this run may have been suboptimal.</li>
+      </ul>
+    </div>
+    <div class="p-3 bg-red-500/10 rounded border border-red-500/20 text-[10px]">
+      <h4 class="text-red-400 font-bold text-[10px] uppercase tracking-widest mb-1">Gating & MFI Artifact Alert</h4>
+      <p class="leading-relaxed opacity-75">
+        Because target binding was very low, subtracting bleed-through (Alpha &times; FITC) resulted in many negative values for corrected PE. The analysis pipeline filters out &le; 0 events, leaving a small, noise-dominated subset that inflates median MFI calculations.
+      </p>
+    </div>
+  </div>
+</div>
+
+---
 layout: section
 transition: slide-up
 ---
@@ -916,6 +995,58 @@ Coomassie Blue SDS-PAGE of expression across induction temperatures and timepoin
       <p class="leading-relaxed opacity-75">
         <b>25°C Standardization:</b> Early induction points (Lanes 14 and 15) show no bands. 25°C overnight induction is recommended to minimize inclusion body formation in the cell pellet, aligning with ADAM10 observations.
       </p>
+    </div>
+  </div>
+</div>
+
+---
+# SDS-PAGE & Silver Stain Rerun (June 10\textsuperscript{th}, 2026)
+Resolving migration issues with updated running gel chemistry and fresh buffers.
+
+<div class="grid grid-cols-2 gap-4 mt-6">
+  <div class="p-3 bg-white/5 rounded border border-white/10 text-center text-[9px]">
+    <b class="text-blue-400 text-xs block mb-1">ADAM10 Gel Rerun</b>
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260610_ADAM10.png" class="w-full rounded mt-2 border border-white/10" style="max-height: 220px; object-fit: contain;">
+    <p class="opacity-70 mt-2">
+      Successful resolution of FPLC Fraction 9 Retentate (Lane 14) showing a band in the 30-40 kDa range (expected catalytic domain size).
+    </p>
+  </div>
+  <div class="p-3 bg-white/5 rounded border border-white/10 text-center text-[9px]">
+    <b class="text-emerald-400 text-xs block mb-1">ADAM17 Gel Rerun</b>
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260610_ADAM17.png" class="w-full rounded mt-2 border border-white/10" style="max-height: 220px; object-fit: contain;">
+    <p class="opacity-70 mt-2">
+      Successful resolution of FPLC Fraction 6 Retentate (Lane 14) resolving candidate target bands at 30-40 kDa with clean migration.
+    </p>
+  </div>
+</div>
+
+---
+# Western Blot & Spin Concentration (June 11\textsuperscript{th}-12\textsuperscript{th}, 2026)
+Validating expression, secretion, and concentration of ADAM10/17-pMopac target preparations.
+
+<div class="grid grid-cols-2 gap-6 mt-6 items-start">
+  <div class="space-y-3">
+    <div class="p-3.5 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px]">
+      <h4 class="text-emerald-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Centrifugal Spin Concentration</h4>
+      <p class="leading-relaxed opacity-75">
+        <b>20-40x Concentration:</b> Culture supernatants from expression trials (25°C, 30°C, and overnight) were concentrated using Amicon Ultra-4 (10 kDa MWCO) with no membrane failures or seal leakage.
+      </p>
+    </div>
+    <div class="p-3.5 bg-blue-500/10 rounded border border-blue-500/20 text-[10px]">
+      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Western Blot Protocol QC</h4>
+      <p class="leading-relaxed opacity-75">
+        <b>Trans-Blot Turbo:</b> Blotted onto PVDF membrane using a custom 1.3A 24V 10Min protocol. Blocked in 5% milk / TBST-Brij, then incubated with mouse anti-FLAG (1:1000) primary antibody.
+      </p>
+    </div>
+  </div>
+  <div class="space-y-3">
+    <div class="p-4 bg-white/5 rounded border border-white/10 text-[10px]">
+      <h4 class="text-blue-300 font-bold text-[10px] uppercase tracking-widest mb-2">Western Blot Status (June 12, 2026)</h4>
+      <ul class="list-disc pl-4 space-y-2 opacity-80 leading-relaxed">
+        <li><b>Lanes Loaded:</b> Ladder, A10 lysis pellet, A10 25°C/30°C/ON supernatants, A10 FXN 6, A17 25°C/30°C/ON supernatants, MMP2-FLAG (positive control).</li>
+        <li><b>Status:</b> Overnight primary antibody incubation completed.</li>
+        <li><b>Next Steps:</b> Secondary antibody incubation (HRP-conjugated anti-mouse), chemiluminescent ECL imaging, and Ponceau S total-protein transfer staining are in progress.</li>
+      </ul>
     </div>
   </div>
 </div>
