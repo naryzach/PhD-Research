@@ -171,7 +171,8 @@ def apply_polygon_gate(df, path, fsc_col, ssc_col, plot_ax=None, title="Polygon 
     return df[mask]
 
 def classify_sample(filename):
-    if any(s in filename for s in SKIP_PATTERNS):
+    fn_lower = filename.lower()
+    if any(s.lower() in fn_lower for s in SKIP_PATTERNS):
         return "skip", None, None, None
     if any(n in filename for n in NEG_CONTROL_PATTERNS):
         return "nc", "NC", None, None
@@ -179,7 +180,7 @@ def classify_sample(filename):
     tag = "unknown"
     if "ADAM10" in filename or "Arly" in filename:
         tag = "flag"
-    elif "ADAM17" in filename or "Sino" in filename or "Enzo" in filename:
+    elif "ADAM17" in filename or "Sino" in filename or "Enzo" in filename or "MMP9" in filename or "Mas" in filename:
         tag = "his"
         
     # Extract metadata: TIMP 3-TARGET(CONC-SOURCE)
