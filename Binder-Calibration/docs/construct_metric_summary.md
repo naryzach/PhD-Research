@@ -11,7 +11,7 @@ per-experiment `*_Renamed_Analysis/summary_stats.csv` files). Only **valid trial
 are included — rows with `Trial Failed == True` (failed positive control, low
 expression, too few events) are dropped before aggregating.
 
-Regenerate with `../Prediction_vs_Result_Analysis/analyze.py`.
+Regenerate with `python Binder-Calibration/analyze.py` (outputs to `Local/Construct_Metric_Summary/`).
 
 ## Files
 | file | shape | description |

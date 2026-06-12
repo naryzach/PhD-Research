@@ -3,7 +3,8 @@
 Every AlphaFold metric (ipTM, LpLDDT, PAE, ApTM, BpTM, pTM, pLDDT) regressed against
 every experimental FCS readout (20 metrics: binding raw / binding normalized / binding
 quality / expression / count), per target (ADAM17, MMP2, MMP9) and pooled
-within-target-standardized. Built by `../regression_sweep.py`. Correlations are oriented
+within-target-standardized. Built by `Binder-Calibration/regression_sweep.py` (paths
+below are relative to the `Local/` output tree). Correlations are oriented
 so **+ρ = predicts in the expected direction** (PAE is sign-flipped since lower = better).
 
 n ≈ 12 constructs per target (36 pooled). This is **hypothesis-generating to inform the

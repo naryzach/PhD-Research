@@ -1,5 +1,8 @@
 # Ground-truth calibration & the multi-term prediction recipe (v1)
 
+> Scripts live in `Binder-Calibration/` (run `python Binder-Calibration/calibration.py`).
+> Paths below are relative to the `Local/` output tree.
+
 Calibrates AlphaFold metrics against experimental FCS binding (the Dec-2025 batch:
 12 constructs × 3 usable targets ADAM17/MMP2/MMP9) and turns the result into an
 importable, multi-factor scoring recipe for the generation pipeline.
@@ -9,7 +12,7 @@ importable, multi-factor scoring recipe for the generation pipeline.
 - `../../Generation/binding_recipe.py` — the recipe (config weights + `score_design()`),
   in the tracked `Generation/` dir so the pipeline can import it (`Local/` is gitignored).
 - `make_esmfold2_manifest.py` — builds the cluster input manifest for the ESMFold2 run.
-- Re-run with `python calibration.py` whenever a new ordered batch's FCS results land
+- Re-run with `python Binder-Calibration/calibration.py` whenever a new ordered batch's FCS results land
   (add the constructs to `CONSTRUCTS`, point `AGGF` at the updated aggregate).
 
 > **This is v1 on n=12.** It is unsolved-problem territory: no metric is close to
@@ -115,7 +118,7 @@ trusting it there.
 ESMFold2 is what will rank designs en masse, so it needs its own calibration against the
 same FCS data. **It can't be run in this WSL env (no conda) — run it on the cluster.**
 
-1. `python make_esmfold2_manifest.py` → `esmfold2_inputs/esmfold2_manifest.csv`
+1. `python Binder-Calibration/make_esmfold2_manifest.py` → `Local/Calibration/esmfold2_inputs/esmfold2_manifest.csv`
    (13 constructs × 6 targets: `design_id, target_name, binder_seq, target_seq`). Binder
    = the expressed twist construct; `design_id` is the construct name so the join is by
    name, not sequence.
@@ -126,7 +129,7 @@ same FCS data. **It can't be run in this WSL env (no conda) — run it on the cl
    from `select_binders_to_order.py`. Without those two, the recipe's affinity backbone
    runs in reduced (pLDDT-only) form.
 3. Produce a scores CSV `Construct,Target,esm_iptm,esm_ptm,esm_plddt[,esm_lplddt,esm_pae]`
-   and run `python calibration.py --esm-scores <csv>`. This re-runs Stages 2–3 on ESMFold2
+   and run `python Binder-Calibration/calibration.py --esm-scores <csv>`. This re-runs Stages 2–3 on ESMFold2
    metrics and writes the same outputs suffixed `_esmfold2`, so the AF3 and ESMFold2
    calibrations sit side by side and can be compared directly.
 
@@ -142,7 +145,7 @@ same FCS data. **It can't be run in this WSL env (no conda) — run it on the cl
 
 ## Re-fit checklist when new results arrive
 1. Add new constructs+sequences to `CONSTRUCTS` (and `AGGF` if the aggregate moved).
-2. `python calibration.py` → re-check the decomposition, Stage-2 table, and whether the
+2. `python Binder-Calibration/calibration.py` → re-check the decomposition, Stage-2 table, and whether the
    recipe still beats baselines and the data-fitted blend.
 3. Only once n is comfortably larger (≳30–40 constructs) consider letting the LOO
    data-fitted weights replace the reasoned ones, and revisit per-target weighting.

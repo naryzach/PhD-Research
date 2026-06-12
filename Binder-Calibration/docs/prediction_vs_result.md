@@ -1,10 +1,12 @@
 # Prediction vs Result Analysis — Dec-2025 Twist order
 
-Compares the AlphaFold-driven predictions that selected the December 2025 Twist
-library (`../Twist_Order_Dec2025`, with metrics in `../AlphaFoldMetrics`) against the
-experimental FCS binding results (`../Aggregate_FCS_Analysis`).
+> Script lives in `Binder-Calibration/`; paths below are relative to the `Local/` output tree.
 
-Regenerate everything with `python3 analyze.py`.
+Compares the AlphaFold-driven predictions that selected the December 2025 Twist
+library (`Local/Twist_Order_Dec2025`, with metrics in `Local/AlphaFoldMetrics`) against
+the experimental FCS binding results (`Local/Aggregate_FCS_Analysis`).
+
+Regenerate everything with `python3 Binder-Calibration/analyze.py`.
 
 ## What was predicted vs what is testable
 The AlphaFold pipeline scored each loop variant against **adam10, adam17, mmp2, mmp9**
