@@ -103,10 +103,24 @@ agg = pd.read_csv(AGGF)
 valid = agg[agg["Trial Failed"] != True].copy()
 # enrich with % of Pos Ctrl from per-folder summary_stats (disambiguate by Gated Events)
 ss_rows = []
-for p in glob.glob(os.path.join(ROOT, "*_Renamed_Analysis", "summary_stats.csv")):
-    folder = os.path.basename(os.path.dirname(p)); m = re.match(r"([A-Za-z0-9]+)_(\d{8})", folder)
-    if not m: continue
-    df = pd.read_csv(p); df["Target"] = m.group(1); df["Date"] = int(m.group(2)); ss_rows.append(df)
+for p in glob.glob(os.path.join(ROOT, "*_Analysis", "summary_stats.csv")):
+    folder = os.path.basename(os.path.dirname(p))
+    m = re.match(r"([A-Za-z0-9]+)_(\d{8})", folder)
+    if m:
+        df = pd.read_csv(p)
+        df["Target"] = m.group(1)
+        df["Date"] = int(m.group(2))
+        if "% of Pos Ctrl" not in df.columns:
+            df["% of Pos Ctrl"] = np.nan
+        ss_rows.append(df)
+    else:
+        m2 = re.match(r"(\d{8})_(\d{6})_Analysis", folder)
+        if m2:
+            df = pd.read_csv(p)
+            df["Date"] = int(m2.group(1))
+            if "% of Pos Ctrl" not in df.columns:
+                df["% of Pos Ctrl"] = np.nan
+            ss_rows.append(df)
 ss = pd.concat(ss_rows, ignore_index=True).rename(columns={"Filename": "Raw Name"})
 valid = valid.reset_index(drop=True); valid["_id"] = valid.index
 mg = valid.merge(ss[["Target", "Date", "Raw Name", "Gated Events", "% of Pos Ctrl"]],
