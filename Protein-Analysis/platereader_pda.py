@@ -1,33 +1,37 @@
 #!/usr/bin/env python3
 """
-platereader_pda.py - Read SoftMax Pro .pda plate-reader files (SPECTRAmax / M5).
+platereader_pda.py - Read SoftMax Pro plate-reader files (SPECTRAmax / SpectraMax).
 
-The .pda format is a proprietary binary serialization. This reader extracts the
-two things you actually want:
+Handles both SoftMax Pro document formats:
 
-  1. Per-well readings - stored as "CSSite" records:
+  .pda  (SoftMax Pro 5 and earlier; e.g. SPECTRAmax M5) - a custom binary:
+     Per-well readings are "CSSite" records:
          "CSSite" | 12 bytes | site_index (uint32 BE) | len=16 | reading (float64 BE) | 0.0
-     The 1-based site index maps to a 96-well plate in row-major order
-         row = (index - 1) // 12 ,  col = (index - 1) % 12      (A1, A2, ... H12)
+     and the template is "CSTmplGroup"/"CSTmplSample"/"CSWell" records.
 
-  2. The plate template - "CSTmplGroup" / "CSTmplSample" / "CSWell" records giving
-     each well's group, sample name, and standard concentration (or dilution).
+  .sda  (SoftMax Pro 6/7; e.g. SpectraMax i3x) - a .NET-serialized container
+     ("SoftMaxPro.DataPersistence.Serializable*SectionData"):
+     readings are a flat float64 array (little-endian), plate geometry and the
+     group/sample/well template are length-prefixed records, and each sample's
+     wells are RowIndex/ColumnIndex int pairs.
 
-Outputs a tidy long-format table (one row per well), an 8x12 plate grid, and
-optional plate-heatmap / BSA-standard-curve plots.
+In both, the site/well index maps to the plate in row-major order
+(row = idx // ncols, col = idx % ncols; A1, A2, ... H12). The reader auto-detects
+the format and returns a tidy long-format table, a plate grid, and optional
+plate-heatmap / standard-curve plots.
 
 Usage:
     python platereader_pda.py "BCA template.pda" --info
-    python platereader_pda.py "BCA template.pda" --csv readings.csv
+    python platereader_pda.py "20260612_2.sda"   --csv readings.csv
     python platereader_pda.py "BCA template.pda" --heatmap plate.png
-    python platereader_pda.py "BCA template.pda" --curve standard_curve.png
+    python platereader_pda.py "20260612_2.sda"   --curve standard_curve.png
 
 As a library:
     from platereader_pda import read_pda
-    res = read_pda("BCA template.pda")
+    res = read_pda("20260612_2.sda")      # works for .pda and .sda
     res["table"]      # pandas DataFrame: well,row,col,reading,group,sample,value,units
-    res["grid"]       # 8x12 numpy array of readings (NaN where not read)
-    res["meta"]       # instrument string, version, well count
+    res["grid"]       # plate-shaped numpy array of readings (NaN where not read)
+    res["meta"]       # instrument string, format, well count, wavelength, temperature
 """
 
 import argparse
@@ -41,6 +45,11 @@ import numpy as np
 
 ROWS = "ABCDEFGH"
 NCOLS = 12
+
+
+def _row_letter(r: int) -> str:
+    """0-based row index -> plate row letter (A..H, then I.. for 384-well)."""
+    return chr(ord("A") + r)
 
 
 # ── Low-level record parsing ──────────────────────────────────────────────────
@@ -135,32 +144,191 @@ def _instrument(data: bytes):
     return m.group(1).decode("ascii", "replace").strip() if m else None
 
 
+# ── SoftMax Pro 7 .sda (.NET-serialized) parsing ──────────────────────────────
+
+def _lp_str(data: bytes, p: int):
+    """Read a 1-byte-length-prefixed string at p. Returns (text, next_offset)."""
+    n = data[p]
+    return data[p + 1:p + 1 + n].decode("latin-1", "replace"), p + 1 + n
+
+
+def _i32(data: bytes, p: int) -> int:
+    return struct.unpack("<i", data[p:p + 4])[0]
+
+
+def _sda_int_key(data: bytes, key: bytes, default=None):
+    """Value of a `<key><int32>` record (geometry fields)."""
+    i = data.find(key)
+    return _i32(data, i + len(key)) if i != -1 else default
+
+
+def _sda_readings(data: bytes, nwells: int, hi=6.0):
+    """The readings are a contiguous little-endian float64 array (any byte
+    alignment), preceded by structural 0.0 doubles. A valid reading is exactly
+    0.0 or a normal magnitude in (1e-4, hi) - this rejects the denormal junk
+    that random byte regions decode to. Find the run with the most genuine OD
+    values, drop the leading zeros, and take `nwells` values."""
+    def valid(v):
+        return v == v and (v == 0.0 or 1e-4 <= abs(v) < hi)
+
+    runs, i, N = [], 0, len(data)
+    while i < N - 8:
+        j, cnt = i, 0
+        while j + 8 <= N and valid(struct.unpack("<d", data[j:j + 8])[0]):
+            cnt += 1
+            j += 8
+        if cnt >= nwells:
+            runs.append((i, cnt))
+            i = j
+        else:
+            i += 1
+    if not runs:
+        return None
+
+    def window(run):
+        s, c = run
+        return [struct.unpack("<d", data[s + 8 * k:s + 8 * k + 8])[0] for k in range(c)]
+
+    # the real plate-data run is the one with the most OD-plausible values
+    runs.sort(key=lambda r: sum(0.005 <= v < 4.0 for v in window(r)), reverse=True)
+    w = window(runs[0])
+    k = 0
+    while k < len(w) and w[k] == 0.0:
+        k += 1
+    vals = w[k:k + nwells]
+    return vals if len(vals) == nwells else w[-nwells:]
+
+
+def _sda_concentrations(data: bytes):
+    """Map sample name -> Description1Value (concentration / dilution factor)."""
+    concs = {}
+    for m in re.finditer(b"Description1Value", data):
+        val, _ = _lp_str(data, m.end())
+        np_ = data.rfind(b"\x04Name", max(0, m.start() - 90), m.start())
+        if np_ != -1:
+            name, _ = _lp_str(data, np_ + 5)
+            if name and val:
+                concs[name] = val
+    return concs
+
+
+def _sda_assignments(data: bytes, ncols: int):
+    """Walk the well-assignment blocks: each is a group name immediately followed
+    by a sample name and that sample's RowIndex/ColumnIndex pairs. Returns
+    {well: (group, sample)} and the ordered list of (group, sample, [wells])."""
+    groups = (b"Standards", b"Unk_Dilution", b"Unknowns", b"Custom",
+              b"Controls", b"Blanks")
+    # an assignment block is a group token with a RowIndex close after it
+    blocks = []
+    for g in groups:
+        for m in re.finditer(re.escape(g), data):
+            s = m.start()
+            ri = data.find(b"RowIndex", s, s + 200)
+            if ri != -1:
+                blocks.append((s, g.decode()))
+    blocks.sort()
+    assign = {}
+    ordered = []
+    for bi, (s, group) in enumerate(blocks):
+        end = blocks[bi + 1][0] if bi + 1 < len(blocks) else len(data)
+        q = data.find(b"\x00\x04\x00\x00\x00", s, s + len(group) + 8)
+        sample = ""
+        if q != -1:
+            sample, _ = _lp_str(data, q + 5)
+        wells = []
+        cur = (q + 6) if q != -1 else s
+        while True:
+            r = data.find(b"RowIndex", cur, end)
+            if r == -1:
+                break
+            c = data.find(b"ColumnIndex", r, end)
+            if c == -1:
+                break
+            rv, cv = _i32(data, r + 8), _i32(data, c + 11)
+            cur = c + 11
+            if 0 <= rv < 16 and 0 <= cv < ncols:
+                well = f"{_row_letter(rv)}{cv + 1}"
+                wells.append(well)
+                assign[well] = (group, sample)
+        ordered.append((group, sample, wells))
+    return assign, ordered
+
+
+def _parse_sda(data: bytes):
+    """Parse a SoftMax Pro 7 .sda file -> (sites, template, meta, shape)."""
+    nwells = _sda_int_key(data, b"NumberOfWells", 96)
+    ncols = _sda_int_key(data, b"NumberOfColumns", 12)
+    nrows = _sda_int_key(data, b"NumberOfRows", max(1, nwells // ncols))
+
+    vals = _sda_readings(data, nwells) or [float("nan")] * nwells
+    sites = []
+    for idx, reading in enumerate(vals):
+        r, c = idx // ncols, idx % ncols
+        sites.append((f"{_row_letter(r)}{c + 1}", r, c, reading))
+
+    concs = _sda_concentrations(data)
+    assign, _ = _sda_assignments(data, ncols)
+    template = {}
+    for well, (group, sample) in assign.items():
+        raw = concs.get(sample)
+        try:
+            value = float(raw) if raw not in (None, "") else float("nan")
+        except ValueError:
+            value = float("nan")
+        units = "ug/ml" if group == "Standards" else None
+        template[well] = (group, sample, value, units)
+
+    inst = re.search(rb"SpectraMax[ -~]{0,30}", data)
+    rom = re.search(rb"ROM v[ -~]{0,30}", data)
+    temp = re.search(rb"Mean Temperature[ -~:\xc2\xb0C]{0,20}", data)
+    wl = None
+    wi = data.find(b"\nWavelength\x00")
+    if wi != -1:
+        wl = struct.unpack("<d", data[wi + 11:wi + 19])[0]
+    meta = {
+        "format": "SoftMax Pro 6/7 (.sda)",
+        "instrument": inst.group(0).decode().strip() if inst else None,
+        "rom": rom.group(0).decode().strip() if rom else None,
+        "wavelength_nm": round(wl) if wl else None,
+        "temperature": temp.group(0).decode("latin-1").split(":", 1)[-1].strip() if temp else None,
+        "wells_read": sum(1 for _, _, _, v in sites if v == v),
+    }
+    return sites, template, meta, (nrows, ncols)
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def read_pda(path):
+    """Read a SoftMax Pro .pda or .sda file (format auto-detected)."""
     import pandas as pd
     data = Path(path).read_bytes()
 
-    sites = _read_sites(data)
-    template = _read_template(data)
+    if b"SoftMaxPro.DataPersistence" in data:
+        sites, template, meta, shape = _parse_sda(data)
+    else:
+        sites = _read_sites(data)
+        template = _read_template(data)
+        vm = re.search(rb"(\d+\.\d+\.\d+\.\d+)", data[:64])
+        meta = {
+            "format": "SoftMax Pro 5 (.pda)",
+            "instrument": _instrument(data),
+            "softmax_version": vm.group(1).decode() if vm else None,
+            "wells_read": len(sites),
+        }
+        shape = (len(ROWS), NCOLS)
 
     rows = []
     for well, r, c, reading in sites:
         grp, samp, val, units = template.get(well, (None, None, float("nan"), None))
-        rows.append(dict(well=well, row=ROWS[r], col=c + 1, reading=reading,
+        rows.append(dict(well=well, row=_row_letter(r), col=c + 1, reading=reading,
                          group=grp, sample=samp, value=val, units=units))
     table = pd.DataFrame(rows).sort_values(["row", "col"]).reset_index(drop=True)
 
-    grid = np.full((len(ROWS), NCOLS), np.nan)
+    grid = np.full(shape, np.nan)
     for well, r, c, reading in sites:
-        grid[r, c] = reading
+        if 0 <= r < shape[0] and 0 <= c < shape[1]:
+            grid[r, c] = reading
 
-    vm = re.search(rb"(\d+\.\d+\.\d+\.\d+)", data[:64])
-    meta = {
-        "instrument": _instrument(data),
-        "softmax_version": vm.group(1).decode() if vm else None,
-        "wells_read": len(sites),
-    }
     return {"table": table, "grid": grid, "meta": meta, "template": template}
 
 
@@ -170,12 +338,13 @@ def plot_heatmap(grid, out, title="Plate readings"):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    nrows, ncols = grid.shape
     fig, ax = plt.subplots(figsize=(9, 5.5))
     im = ax.imshow(grid, cmap="viridis", aspect="auto")
-    ax.set_xticks(range(NCOLS), [str(i + 1) for i in range(NCOLS)])
-    ax.set_yticks(range(len(ROWS)), list(ROWS))
-    for r in range(len(ROWS)):
-        for c in range(NCOLS):
+    ax.set_xticks(range(ncols), [str(i + 1) for i in range(ncols)])
+    ax.set_yticks(range(nrows), [_row_letter(r) for r in range(nrows)])
+    for r in range(nrows):
+        for c in range(ncols):
             if not np.isnan(grid[r, c]):
                 ax.text(c, r, f"{grid[r, c]:.2f}", ha="center", va="center",
                         color="white", fontsize=7)
@@ -194,9 +363,11 @@ def plot_standard_curve(table, out):
     import matplotlib.pyplot as plt
     import numpy as np
 
-    std = table[table["units"].notna()
-                & table["units"].str.contains("g/ml", case=False, na=False)
-                & table["value"].notna()]
+    # Standards = numeric, positive concentrations in a group that reads as
+    # standards (unit contains g/ml, or the group is literally named "Standard*").
+    units_ok = table["units"].str.contains("g/ml", case=False, na=False)
+    group_ok = table["group"].str.contains("standard", case=False, na=False)
+    std = table[(units_ok | group_ok) & table["value"].notna() & (table["value"] > 0)]
     if std.empty:
         return False
     agg = std.groupby("value")["reading"].mean().reset_index()
@@ -217,11 +388,12 @@ def plot_standard_curve(table, out):
 
 
 def _print_grid(grid):
-    print("        " + "".join(f"{c+1:>7}" for c in range(NCOLS)))
-    for r, name in enumerate(ROWS):
+    nrows, ncols = grid.shape
+    print("        " + "".join(f"{c+1:>7}" for c in range(ncols)))
+    for r in range(nrows):
         cells = "".join("      ." if np.isnan(grid[r, c]) else f"{grid[r, c]:7.3f}"
-                        for c in range(NCOLS))
-        print(f"   {name}  {cells}")
+                        for c in range(ncols))
+        print(f"   {_row_letter(r)}  {cells}")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -243,8 +415,12 @@ def main(argv=None):
     meta, table, grid = res["meta"], res["table"], res["grid"]
 
     print(f"{args.file.name}")
+    print(f"  format     : {meta.get('format')}")
     print(f"  instrument : {meta.get('instrument')}")
-    print(f"  version    : {meta.get('softmax_version')}")
+    for k, label in (("softmax_version", "version"), ("rom", "ROM"),
+                     ("wavelength_nm", "wavelength"), ("temperature", "temperature")):
+        if meta.get(k) is not None:
+            print(f"  {label:10} : {meta[k]}")
     print(f"  wells read : {meta['wells_read']}")
     print("\nPlate (OD):")
     _print_grid(grid)
