@@ -298,10 +298,12 @@ def _parse_sda(data: bytes):
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def read_pda(path):
-    """Read a SoftMax Pro .pda or .sda file (format auto-detected)."""
+def read_pda(src):
+    """Read a SoftMax Pro .pda or .sda file (format auto-detected).
+
+    `src` may be a path or the raw file bytes (handy for web uploads)."""
     import pandas as pd
-    data = Path(path).read_bytes()
+    data = bytes(src) if isinstance(src, (bytes, bytearray)) else Path(src).read_bytes()
 
     if b"SoftMaxPro.DataPersistence" in data:
         sites, template, meta, shape = _parse_sda(data)
@@ -355,36 +357,137 @@ def plot_heatmap(grid, out, title="Plate readings"):
     plt.close(fig)
 
 
-def plot_standard_curve(table, out):
-    """Fit a curve to any group whose wells carry real concentrations and plot it.
-    Best-effort: looks for a group with a unit like ug/ml and numeric `value`s."""
+def plot_standard_curve(table, out, model="linear"):
+    """Plot the fitted standard curve (model = linear|quadratic|4pl) with R^2.
+    Returns False if the plate has no usable standards."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    import numpy as np
 
-    # Standards = numeric, positive concentrations in a group that reads as
-    # standards (unit contains g/ml, or the group is literally named "Standard*").
-    units_ok = table["units"].str.contains("g/ml", case=False, na=False)
-    group_ok = table["group"].str.contains("standard", case=False, na=False)
-    std = table[(units_ok | group_ok) & table["value"].notna() & (table["value"] > 0)]
-    if std.empty:
+    fit = fit_standard_curve(table, model=model)
+    if fit is None:
         return False
-    agg = std.groupby("value")["reading"].mean().reset_index()
-    x, y = agg["value"].to_numpy(float), agg["reading"].to_numpy(float)
-    if len(x) < 3:
-        return False
-    coef = np.polyfit(x, y, 1)
-    xs = np.linspace(0, x.max() * 1.05, 100)
+    x, y = fit["x"], fit["y"]
+    xs = np.linspace(0, x.max() * 1.05, 200)
     fig, ax = plt.subplots(figsize=(6, 4.5))
     ax.scatter(x, y, color="#1f77b4", zorder=3, label="standards")
-    ax.plot(xs, np.polyval(coef, xs), "--", color="#888",
-            label=f"y = {coef[0]:.2e}x + {coef[1]:.3f}")
+    ax.plot(xs, fit["predict"](xs), "--", color="#888",
+            label=f"{fit['params']}\nR$^2$ = {fit['r2']:.4f}")
     ax.set_xlabel("Concentration"); ax.set_ylabel("Mean OD")
-    ax.set_title("Standard curve"); ax.legend(); fig.tight_layout()
+    ax.set_title(f"Standard curve ({model})"); ax.legend(fontsize=8)
+    fig.tight_layout()
     fig.savefig(out, dpi=150)
     plt.close(fig)
     return True
+
+
+# ── Standard-curve fitting & back-calculation ────────────────────────────────
+
+def _standards_table(table):
+    """Rows that represent standards: numeric positive concentration in a group
+    that reads as standards (unit contains g/ml, or group named 'standard*')."""
+    units_ok = table["units"].str.contains("g/ml", case=False, na=False)
+    group_ok = table["group"].str.contains("standard", case=False, na=False)
+    return table[(units_ok | group_ok) & table["value"].notna() & (table["value"] > 0)]
+
+
+def fit_standard_curve(table, model="linear"):
+    """Fit a standard curve to the standards in `table`.
+
+    model: 'linear' | 'quadratic' | '4pl'. Returns a dict with predict(conc)->OD,
+    inverse(OD)->conc, the parameter string, R^2, the OD validity range, and the
+    aggregated standard points - or None if there aren't enough standards."""
+    std = _standards_table(table)
+    if std.empty:
+        return None
+    agg = std.groupby("value")["reading"].mean().reset_index()
+    x, y = agg["value"].to_numpy(float), agg["reading"].to_numpy(float)
+    if len(x) < 3:
+        return None
+
+    if model == "quadratic":
+        a, b, c = np.polyfit(x, y, 2)
+        predict = lambda xx: a * np.asarray(xx) ** 2 + b * np.asarray(xx) + c
+
+        def inverse(od):
+            disc = b * b - 4 * a * (c - od)
+            if disc < 0:
+                return np.nan
+            roots = [(-b + np.sqrt(disc)) / (2 * a), (-b - np.sqrt(disc)) / (2 * a)]
+            roots = [r for r in roots if r >= 0]
+            return min(roots) if roots else np.nan
+        params = f"y = {a:.3e}x^2 + {b:.3e}x + {c:.4f}"
+
+    elif model == "4pl" and len(x) >= 4:
+        from scipy.optimize import curve_fit
+
+        def f4(xx, a, b, c, d):
+            return d + (a - d) / (1.0 + (xx / c) ** b)
+        p0 = [float(y.min()), 1.0, float(np.median(x[x > 0])), float(y.max())]
+        popt, _ = curve_fit(f4, x, y, p0=p0, maxfev=20000)
+        a, b, c, d = popt
+        predict = lambda xx: f4(np.asarray(xx, float), *popt)
+
+        def inverse(od):
+            try:
+                base = (a - d) / (od - d) - 1.0
+                return c * base ** (1.0 / b) if base > 0 else np.nan
+            except (ValueError, ZeroDivisionError):
+                return np.nan
+        params = f"4PL: a={a:.3f} b={b:.3f} c={c:.1f} d={d:.3f}"
+
+    else:                                          # linear (default / fallback)
+        m, b = np.polyfit(x, y, 1)
+        predict = lambda xx: m * np.asarray(xx) + b
+        inverse = lambda od: (od - b) / m
+        params = f"y = {m:.3e}x + {b:.4f}"
+
+    yhat = predict(x)
+    ss_res = float(np.sum((y - yhat) ** 2))
+    ss_tot = float(np.sum((y - y.mean()) ** 2))
+    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else float("nan")
+    return {"model": model, "predict": predict, "inverse": inverse,
+            "params": params, "r2": r2,
+            "od_min": float(std["reading"].min()), "od_max": float(std["reading"].max()),
+            "x": x, "y": y, "n_standards": len(x)}
+
+
+def back_calculate(table, model="linear"):
+    """Interpolate unknown-sample concentrations off the standard curve.
+
+    Returns (summary_df, fit_dict). For each non-standard sample: mean OD,
+    per-replicate concentration (mean / SD / %CV), the dilution factor, the
+    dilution-adjusted concentration, and an out-of-range flag. (None, None) if
+    the plate has no usable standards."""
+    import pandas as pd
+    fit = fit_standard_curve(table, model=model)
+    if fit is None:
+        return None, None
+    inv = fit["inverse"]
+    std_mask = table.index.isin(_standards_table(table).index)
+    unk = table[~std_mask & table["sample"].notna() & table["reading"].notna()]
+
+    rows = []
+    for (group, sample), g in unk.groupby(["group", "sample"], dropna=False):
+        ods = g["reading"].to_numpy(float)
+        concs = np.array([inv(o) for o in ods], float)
+        dil_vals = g["value"].dropna().unique()
+        dil = float(dil_vals[0]) if len(dil_vals) else 1.0
+        mean_c = float(np.nanmean(concs)) if np.isfinite(concs).any() else np.nan
+        sd_c = float(np.nanstd(concs, ddof=1)) if np.isfinite(concs).sum() > 1 else np.nan
+        cv = 100 * sd_c / mean_c if mean_c else np.nan
+        mean_od = float(np.nanmean(ods))
+        flag = "" if fit["od_min"] <= mean_od <= fit["od_max"] else "OUT OF RANGE"
+        rows.append(dict(group=group, sample=sample, n=len(g),
+                         mean_OD=round(mean_od, 4),
+                         conc=round(mean_c, 2) if mean_c == mean_c else np.nan,
+                         SD=round(sd_c, 2) if sd_c == sd_c else np.nan,
+                         CV_pct=round(cv, 1) if cv == cv else np.nan,
+                         dilution=dil,
+                         adj_conc=round(mean_c * dil, 2) if mean_c == mean_c else np.nan,
+                         flag=flag))
+    summary = pd.DataFrame(rows).sort_values(["group", "sample"]).reset_index(drop=True)
+    return summary, fit
 
 
 def _print_grid(grid):
@@ -405,6 +508,9 @@ def main(argv=None):
     ap.add_argument("--csv", type=Path, help="write long-format readings table")
     ap.add_argument("--heatmap", type=Path, help="write plate-heatmap PNG")
     ap.add_argument("--curve", type=Path, help="write standard-curve PNG (if standards)")
+    ap.add_argument("--backcalc", type=Path, help="write back-calculated unknowns CSV")
+    ap.add_argument("--fit", choices=("linear", "quadratic", "4pl"), default="linear",
+                    help="standard-curve model for --curve/--backcalc (default linear)")
     ap.add_argument("--info", action="store_true", help="print summary (default)")
     args = ap.parse_args(argv)
 
@@ -431,6 +537,12 @@ def main(argv=None):
         with_pd = samples[["well", "group", "sample", "value", "units", "reading"]]
         print(with_pd.to_string(index=False))
 
+    summary, fit = back_calculate(table, model=args.fit)
+    if summary is not None:
+        print(f"\nBack-calculated unknowns ({fit['model']} fit, "
+              f"R^2={fit['r2']:.4f}, valid OD {fit['od_min']:.3f}-{fit['od_max']:.3f}):")
+        print(summary.to_string(index=False))
+
     if args.csv:
         table.to_csv(args.csv, index=False)
         print(f"\nwrote {args.csv}")
@@ -438,8 +550,14 @@ def main(argv=None):
         plot_heatmap(grid, args.heatmap, title=args.file.stem)
         print(f"wrote {args.heatmap}")
     if args.curve:
-        ok = plot_standard_curve(table, args.curve)
+        ok = plot_standard_curve(table, args.curve, model=args.fit)
         print(f"wrote {args.curve}" if ok else "no standards found for a curve")
+    if args.backcalc:
+        if summary is not None:
+            summary.to_csv(args.backcalc, index=False)
+            print(f"wrote {args.backcalc}")
+        else:
+            print("no standards found for back-calculation")
 
 
 if __name__ == "__main__":

@@ -126,14 +126,15 @@ def detect_dimensions(arr: np.ndarray, aspect_max: float = 8.0, max_rows: int = 
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def read_chemidoc(path, width=None, height=None):
+def read_chemidoc(src, width=None, height=None):
     """Read a ChemiDoc .scn/.sscn file.
 
-    Returns (image, meta). `image` is a uint16 ndarray shaped (H, W) for a single
-    channel or (C, H, W) for multi-channel files. `meta` includes the recovered
+    `src` may be a path or the raw file bytes (handy for web uploads). Returns
+    (image, meta). `image` is a uint16 ndarray shaped (H, W) for a single channel
+    or (C, H, W) for multi-channel files. `meta` includes the recovered
     dimensions and the candidate list under meta['dim_candidates'].
     """
-    data = Path(path).read_bytes()
+    data = bytes(src) if isinstance(src, (bytes, bytearray)) else Path(src).read_bytes()
     images, xmls = _parse_parts(data)
     if not images:
         raise ValueError(f"no ImageData part found in {path}; is this an Image Lab file?")
