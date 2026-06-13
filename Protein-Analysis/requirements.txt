@@ -6,6 +6,7 @@ streamlit
 pandas
 numpy
 matplotlib
+Pillow
 statsmodels
 s3fs
 boto3
