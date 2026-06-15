@@ -753,12 +753,12 @@ Flow Cytometry assessment of TwistBio constructs against commercial and in-house
 
 <div class="grid grid-cols-2 gap-6 mt-6 items-start">
   <div class="space-y-3">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260610_YeastDisplayTargetTrial/All_Targets_DoublePos_Bar.png"
-         alt="Double Positive % across targets"
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260610_YeastDisplayTargetTrial/ADAM10_F6_R_Ridgeline_Binding.png"
+         alt="ADAM10 Fraction 6 Ridgeline Binding"
          class="w-full rounded-lg border border-white/10"
-         style="max-height: 280px; object-fit: contain;">
+         style="max-height: 250px; object-fit: contain;">
     <p class="text-[9px] opacity-40 italic text-center">
-      Double Positive % by Display Variant, Target Source, and Tag Type.
+      ADAM10 Fraction 6 (Ryan's run _R, FITC-A Binding, APC-A Expression).
     </p>
   </div>
   <div class="space-y-4">
@@ -768,16 +768,16 @@ Flow Cytometry assessment of TwistBio constructs against commercial and in-house
         <b>Sino MMP9 binding</b> was strong: positive control <b>TIMP3</b> achieved 38.2% Double+ (491 MFI), and Twist variants <b>AB 7</b> and <b>AB 3</b> achieved 33.5% and 32.9% Double+ respectively, validating the display system.
       </p>
     </div>
-    <div class="p-3 bg-red-500/10 rounded border border-red-500/20 text-[10px]">
-      <h4 class="text-red-400 font-bold text-[10px] uppercase tracking-widest mb-1">ADAM10 Binding Issues</h4>
+    <div class="p-3 bg-blue-500/10 rounded border border-blue-500/20 text-[10px]">
+      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-1">ADAM10 Binding Confirmed</h4>
       <p class="leading-relaxed opacity-75">
-        <b>ADAM10 binding</b> was extremely low across both commercial (AbCam) and in-house FPLC retentates (F6 and F9), yielding &lt;1.0% Double+ for all constructs.
+        Re-analysis with the correct channel configuration (FITC-A binding) revealed robust binding for <b>ADAM10</b> F6 and F9. <b>AB 7</b> achieved 13.29% Double+ (1.56x MFI vs TIMP 3 positive control), and <b>AB 1</b> reached 11.71% Double+.
       </p>
     </div>
-    <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
-      <h4 class="text-amber-400 font-bold text-[10px] uppercase tracking-widest mb-1">Masoud's MMP9 Benchmark</h4>
+    <div class="p-3 bg-violet-500/10 rounded border border-violet-500/20 text-[10px]">
+      <h4 class="text-violet-400 font-bold text-[10px] uppercase tracking-widest mb-1">Commercial AbCam Validation</h4>
       <p class="leading-relaxed opacity-75">
-        <b>In-house MMP9</b> (Masoud) showed moderate binding (AB 7: 12.8%, C 11: 10.9%), indicating possible differences in fold quality or active target concentration compared to Sino MMP9.
+        Commercial <b>AbCam ADAM10</b> confirmed target activity: <b>TIMP 3</b> positive control achieved 12.65% Double+, and Twist variants <b>AB 5</b> and <b>AB 3</b> showed strong binding (MFI 1708 and 1665.5).
       </p>
     </div>
   </div>
@@ -788,35 +788,35 @@ layout: default
 transition: fade-out
 ---
 
-# Target Trial Analysis & Troubleshooting
-Addressing low ADAM10 binding and validating spillover correction performance.
+# Target Trial Analysis & Channel Correction
+Resolving analysis channel mismatch and explaining detection reagent failures.
 
 <div class="grid grid-cols-2 gap-6 mt-6 items-start">
   <div class="space-y-3">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260610_YeastDisplayTargetTrial/Spillover_Correction_Reference.png"
-         alt="Spillover Correction Reference"
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260610_YeastDisplayTargetTrial/ADAM10_F6_R_FoldChange_Binding.png"
+         alt="ADAM10 Fold Change Binding"
          class="w-full rounded-lg border border-white/10"
          style="max-height: 220px; object-fit: contain;">
     <div class="p-3 bg-blue-500/10 rounded border border-blue-500/20 text-[9px]">
-      <h4 class="text-blue-400 font-bold text-[9px] uppercase tracking-widest mb-1">Bleed-through Spillover QC</h4>
+      <h4 class="text-blue-400 font-bold text-[9px] uppercase tracking-widest mb-1">Channel Mismatch Resolved</h4>
       <p class="leading-relaxed opacity-75">
-        <b>Alpha = 0.1638:</b> Spillover coefficient (FITC &rarr; PE) was accurately calculated from His-tagged samples (high FITC, no PE) to correct FLAG-tagged target PE binding signals.
+        The default pipeline assumed a PE-A binding channel (Gavin's protocol). Re-running the pipeline with the correct <b>FITC-A</b> channel configuration for Ryan's run (<code>_R</code>) corrected the false-negative results.
       </p>
     </div>
   </div>
   <div class="space-y-4">
     <div class="p-4 bg-white/5 rounded border border-white/10 text-[10px]">
-      <h4 class="text-blue-300 font-bold text-[10px] uppercase tracking-widest mb-2">ADAM10 Inactivity Root Causes</h4>
+      <h4 class="text-blue-300 font-bold text-[10px] uppercase tracking-widest mb-2">Detection Reagent Troubleshooting</h4>
       <ul class="list-disc pl-4 space-y-2 opacity-80 leading-relaxed">
-        <li><b>Target Degradation/Inactivation:</b> Commercial AbCam and in-house purified ADAM10 both failed to bind, suggesting that the target protein may have lost activity.</li>
-        <li><b>Improper Fold Quality:</b> Lack of conformational binding across all display variants points toward misfolding or aggregation of target catalytic domains.</li>
-        <li><b>Assay Cofactors:</b> ADAM catalytic domain activity is dependent on zinc/calcium cofactors; buffer conditions in this run may have been suboptimal.</li>
+        <li><b>PE-A Reagent Failure:</b> Gavin's run (<code>_G</code>) used 555-conjugated anti-FLAG and showed low signal (&lt;1% Double+) across all samples. This points to a failure in his PE detection reagents or sample preparation.</li>
+        <li><b>FITC-A Validation:</b> Using AF488 anti-mouse (FITC) for anti-FLAG binding and AF647 anti-rabbit (APC) for anti-c-myc expression confirmed high target activity.</li>
+        <li><b>Spillover QC:</b> Gating and spillover correction worked as expected (Alpha = 0.1638), eliminating false-positive bleed-through between channels.</li>
       </ul>
     </div>
-    <div class="p-3 bg-red-500/10 rounded border border-red-500/20 text-[10px]">
-      <h4 class="text-red-400 font-bold text-[10px] uppercase tracking-widest mb-1">Gating & MFI Artifact Alert</h4>
+    <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px]">
+      <h4 class="text-emerald-400 font-bold text-[10px] uppercase tracking-widest mb-1">Active Target Conclusion</h4>
       <p class="leading-relaxed opacity-75">
-        Because target binding was very low, subtracting bleed-through (Alpha &times; FITC) resulted in many negative values for corrected PE. The analysis pipeline filters out &le; 0 events, leaving a small, noise-dominated subset that inflates median MFI calculations.
+        Both in-house purified ADAM10 FPLC fractions (F6 and F9) are folded and active, showing clear target binding and making them suitable for sorting and selectivity validations.
       </p>
     </div>
   </div>
@@ -1041,14 +1041,78 @@ Validating expression, secretion, and concentration of ADAM10/17-pMopac target p
   </div>
   <div class="space-y-3">
     <div class="p-4 bg-white/5 rounded border border-white/10 text-[10px]">
-      <h4 class="text-blue-300 font-bold text-[10px] uppercase tracking-widest mb-2">Western Blot Status (June 12, 2026)</h4>
+      <h4 class="text-blue-300 font-bold text-[10px] uppercase tracking-widest mb-2">Western Blot Parameters</h4>
       <ul class="list-disc pl-4 space-y-2 opacity-80 leading-relaxed">
         <li><b>Lanes Loaded:</b> Ladder, A10 lysis pellet, A10 25°C/30°C/ON supernatants, A10 FXN 6, A17 25°C/30°C/ON supernatants, MMP2-FLAG (positive control).</li>
-        <li><b>Status:</b> Overnight primary antibody incubation completed.</li>
-        <li><b>Next Steps:</b> Secondary antibody incubation (HRP-conjugated anti-mouse), chemiluminescent ECL imaging, and Ponceau S total-protein transfer staining are in progress.</li>
+        <li><b>Blocking/Wash:</b> Blocked in 5% milk / TBST-Brij, primary anti-FLAG incubation overnight, secondary HRP-conjugated anti-mouse.</li>
+        <li><b>Imaging:</b> Chemiluminescent ECL imaging and Ponceau S membrane total protein transfer staining completed on June 12th.</li>
       </ul>
     </div>
   </div>
+</div>
+
+---
+layout: default
+transition: fade-out
+---
+
+# Western Blot Results & Analysis (June 12\textsuperscript{th}, 2026)
+Validating soluble target expression and membrane transfer quality.
+
+<div class="grid grid-cols-2 gap-4 mt-6">
+  <div class="p-3 bg-white/5 rounded border border-white/10 text-center text-[9px]">
+    <b class="text-blue-400 text-xs block mb-1">Ponceau S Membrane Stain</b>
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ponceau_labeled.png" class="w-full rounded mt-2 border border-white/10" style="max-height: 200px; object-fit: contain;">
+    <p class="opacity-70 mt-2">
+      Uniform total protein transfer showing high-fidelity transfer of ladder and major bands (20260612).
+    </p>
+  </div>
+  <div class="p-3 bg-white/5 rounded border border-white/10 text-center text-[9px]">
+    <b class="text-emerald-400 text-xs block mb-1">Western Blot (Anti-FLAG)</b>
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/western_blot_labeled.png" class="w-full rounded mt-2 border border-white/10" style="max-height: 200px; object-fit: contain;">
+    <p class="opacity-70 mt-2">
+      Lane 3 (ADAM10 25°C supernatant) shows a single soluble band near 60 kDa; lanes 7-9 (ADAM17) show no signal.
+    </p>
+  </div>
+</div>
+
+---
+layout: default
+transition: fade-out
+---
+
+# BCA Assay — ADAM10 Concentration Standardization (June 12\textsuperscript{th}, 2026)
+Quantifying purified ADAM10 FPLC Fraction 6 for downstream binding trials.
+
+<div class="grid grid-cols-2 gap-4 mt-4">
+  <div class="space-y-3">
+    <div class="p-3 bg-blue-500/10 rounded border border-blue-500/20 text-[10px]">
+      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">SpectraMax i3x Run</h4>
+      <p class="leading-relaxed opacity-75">
+        <b>Quadratic Fit ($R^2 = 0.9895$):</b> Back-calculated neat, 1:2, and 1:5 dilutions yield a mean concentration of <b>205.46 μg/mL</b> (~0.21 mg/mL).
+      </p>
+      <div class="flex gap-2 mt-2">
+        <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260612_2_standard_curve.png" class="w-1/2 rounded border border-white/5" style="max-height: 80px; object-fit: contain;">
+        <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260612_2_heatmap.png" class="w-1/2 rounded border border-white/5" style="max-height: 80px; object-fit: contain;">
+      </div>
+    </div>
+  </div>
+  <div class="space-y-3">
+    <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px]">
+      <h4 class="text-emerald-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">SPECTRAmax M5 Run</h4>
+      <p class="leading-relaxed opacity-75">
+        <b>Linear Fit ($R^2 = 0.9930$):</b> Dilution adjusted values show a mean concentration of <b>193.89 μg/mL</b> (~0.19 mg/mL).
+      </p>
+      <div class="flex gap-2 mt-2">
+        <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/BCA_template_2_standard_curve.png" class="w-1/2 rounded border border-white/5" style="max-height: 80px; object-fit: contain;">
+        <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/BCA_template_2_heatmap.png" class="w-1/2 rounded border border-white/5" style="max-height: 80px; object-fit: contain;">
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mt-4 p-3 bg-white/5 rounded border border-white/10 text-[10px] text-center">
+  <span class="text-emerald-400 font-bold">Standardized Concentration:</span> Purified ADAM10 FPLC Fraction 6 concentration is standardized to <b>0.20 mg/mL</b> for downstream display trials.
 </div>
 
 ---

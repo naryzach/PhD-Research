@@ -5,7 +5,7 @@ from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN
 
 def markdown_to_pptx(input_file="slides.md", output_file="De_Novo_Binder_Skeleton.pptx"):
-    print(f"📄 Parsing {input_file}...")
+    print(f"Parsing {input_file}...")
     
     if not os.path.exists(input_file):
         print(f"Error: {input_file} not found.")
@@ -86,7 +86,7 @@ def markdown_to_pptx(input_file="slides.md", output_file="De_Novo_Binder_Skeleto
                 p.level = 0
 
     prs.save(output_file)
-    print(f"✅ Exported text skeleton to: {output_file}")
+    print(f"Exported text skeleton to: {output_file}")
 
 if __name__ == "__main__":
     markdown_to_pptx()

@@ -29,9 +29,20 @@ else:
     
     # 1. Run analyze_fcs.py on each isolated folder
     for folder in renamed_folders:
-        print(f"\n{'='*60}\n[PROCESSING] {os.path.basename(folder)}\n{'='*60}")
+        folder_name = os.path.basename(folder)
+        print(f"\n{'='*60}\n[PROCESSING] {folder_name}\n{'='*60}")
+        
+        cmd = ["python", analyze_script, "-i", folder]
+        if "20260610" in folder_name and "ADAM10" in folder_name:
+            if "_G_Renamed" in folder_name:
+                cmd.extend(["--expr_channel", "APC-A", "--bind_channel", "PE-A"])
+                print("Using channel configuration: Expr = APC-A, Bind = PE-A (Gavin's FLAG-tag)")
+            elif "_R_Renamed" in folder_name:
+                cmd.extend(["--expr_channel", "APC-A", "--bind_channel", "FITC-A"])
+                print("Using channel configuration: Expr = APC-A, Bind = FITC-A (Ryan's FLAG-tag)")
+                
         try:
-            subprocess.run(["python", analyze_script, "-i", folder], check=True, cwd=script_dir)
+            subprocess.run(cmd, check=True, cwd=script_dir)
         except subprocess.CalledProcessError:
             print(f"Warning: Script failed on {folder}. Proceeding to next...")
             
@@ -40,7 +51,7 @@ else:
     if os.path.exists(aggregate_script):
         try:
             subprocess.run(["python", aggregate_script], check=True, cwd=script_dir)
-            print("\n✔️ PIPELINE COMPLETE ✔️")
+            print("\n=== PIPELINE COMPLETE ===")
         except subprocess.CalledProcessError:
             print("Error: Aggregate analysis failed.")
     else:
