@@ -526,15 +526,49 @@ def main():
                 pass
 
     # ── Report ──
+    PREFIX = 'CTCSPHPQDAFCNSDIVIRAKVGKKLVK'
+    REGION2 = 'LVYTIKQMKMYRGFTKMPHVQYIHTE'
+    REGION3 = 'CGLKLEVNKYQYLLTGRVYDGKMYT'
+    SUFFIX = 'FVERWDQLTLSQRKGLNYRYHLGCN'
+
+    def extract_loops(seq: str):
+        if not isinstance(seq, str) or not seq.startswith(PREFIX):
+            return "", "", ""
+        s = seq[len(PREFIX):]
+        idx2 = s.find(REGION2)
+        ab = s[:idx2] if idx2 != -1 else ""
+        s = s[idx2+len(REGION2):] if idx2 != -1 else ""
+        idx3 = s.find(REGION3)
+        c = s[:idx3] if idx3 != -1 else ""
+        s = s[idx3+len(REGION3):] if idx3 != -1 else ""
+        idx4 = s.find(SUFFIX)
+        ef = s[:idx4] if idx4 != -1 else ""
+        return ab, c, ef
+
     report = [f"# Binders to order  (criteria: {args.criteria}, AF3-preferred)\n"]
     report.append(f"{len(selections)} designs recommended from "
                   f"{int(df.orderable.sum())} that pass quality gates.\n")
+    
+    out_rows = []
     for i, p in enumerate(selections[:args.n], 1):
         r = p["row"]
+        ab, c, ef = extract_loops(r['binder_seq'])
         report.append(f"## {i}. {r['design_id']}  (target: {r['target']})")
         report.append(f"   {_fmt(r)}")
         report.append(f"   composite={r['composite']:.3f}   reasons: {', '.join(p['reasons'])}")
-        report.append(f"   seq: {r['binder_seq']}\n")
+        report.append(f"   seq: {r['binder_seq']}")
+        report.append(f"   loops: AB={ab}, C={c}, EF={ef}\n")
+
+        row_dict = {**r.to_dict(), "reasons": ", ".join(p["reasons"])}
+        new_row = {}
+        for k, v in row_dict.items():
+            if k not in ("af3_zip", "cif_member"):
+                new_row[k] = v
+            if k == "binder_seq":
+                new_row["loop_ab"] = ab
+                new_row["loop_c"] = c
+                new_row["loop_ef"] = ef
+        out_rows.append(new_row)
 
     if spec is None and args.criteria in ("all", "best_specificity"):
         report.append("\n_Specificity not computed (no cross-target folds). Run "
@@ -542,10 +576,7 @@ def main():
 
     text = "\n".join(report)
     (ORDER_DIR / "order_report.md").write_text(text)
-    pd.DataFrame([{k: v for k, v in {**p["row"].to_dict(),
-                                     "reasons": ", ".join(p["reasons"])}.items()
-                   if k not in ("af3_zip", "cif_member")}
-                  for p in selections]).to_csv(ORDER_DIR / "order_list.csv", index=False)
+    pd.DataFrame(out_rows).to_csv(ORDER_DIR / "order_list.csv", index=False)
     print("\n" + text)
     print(f"\nExtracted {n_struct} AF3 structures -> {struct_dir}/")
     print(f"Saved: {ORDER_DIR}/order_report.md, order_list.csv, all_candidates_scored.csv")
