@@ -1030,14 +1030,14 @@ with tab8:
         with col_r:
             st.subheader("3D Preview")
             if is_remote_mode:
-                cif_file = f"{base_path}/{design_info['metal_ion']}/rf3/{selected_design}_refolded.cif"
+                cif_file = f"{base_path}/chai1_structures/{selected_design}/pred.model_idx_0.cif"
             else:
-                cif_file = os.path.join(base_path, design_info['metal_ion'], "rf3", f"{selected_design}_refolded.cif")
-            
+                cif_file = os.path.join(base_path, "chai1_structures", selected_design, "pred.model_idx_0.cif")
+
             cif_data = get_cif_data(cif_file)
-            
+
             if cif_data:
-                st.info(f"Structure: `{selected_design}_refolded.cif`")
+                st.info(f"Chai-1 predicted structure: `{selected_design}`")
                 st.download_button(
                     label="Download Structure (.cif)",
                     data=cif_data,

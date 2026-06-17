@@ -53,7 +53,7 @@ if not check_password():
     st.stop()
 
 st.title("🧬 TIMP3 Protein-Protein Interaction Dashboard")
-st.markdown("Explore generated TIMP3 variants and their RF3 prediction metrics against various MMP/ADAM targets.")
+st.markdown("Explore generated TIMP3 variants and their ESMFold2 prediction metrics against various MMP/ADAM targets.")
 
 @st.cache_resource
 def get_fs():
@@ -575,15 +575,34 @@ with tab_viewer:
     else:
         selected_design = st.selectbox("Select Variant to Inspect", options=filtered_df["design_id"].tolist())
         target_row = filtered_df[filtered_df["design_id"] == selected_design].iloc[0]
-        
-        cif_path = os.path.join(
-            data_dir, 
-            target_row.get("target_path", target_row["target"]), target_row["loop_combo"], "rf3", f"{selected_design}_refolded.cif"
+
+        target_dir = os.path.join(
+            data_dir,
+            target_row.get("target_path", target_row["target"]),
+            target_row["loop_combo"],
         )
-        conf_path = os.path.join(
-            data_dir, 
-            target_row.get("target_path", target_row["target"]), target_row["loop_combo"], "rf3", f"{selected_design}_confidences.json"
-        )
+
+        def _path_exists(p):
+            return fs.exists(p) if is_remote_data else os.path.exists(p)
+
+        # ESMFold2 (current) writes <design_id>.cif (or .pdb) under esmfold2/.
+        # RF3 (legacy) wrote <design_id>_refolded.cif under rf3/. Try new first,
+        # fall back to legacy so old runs still render.
+        struct_candidates = [
+            os.path.join(target_dir, "esmfold2", f"{selected_design}.cif"),
+            os.path.join(target_dir, "esmfold2", f"{selected_design}.pdb"),
+            os.path.join(target_dir, "rf3", f"{selected_design}_refolded.cif"),
+        ]
+        cif_path = next((p for p in struct_candidates if _path_exists(p)), struct_candidates[0])
+
+        # PAE / per-residue confidences JSON: ESMFold2 (current) writes it under
+        # esmfold2/, RF3 (legacy) under rf3/. Prefer the new location. PAE may be
+        # absent for ESMFold2 builds that don't expose it (panel degrades gracefully).
+        conf_candidates = [
+            os.path.join(target_dir, "esmfold2", f"{selected_design}_confidences.json"),
+            os.path.join(target_dir, "rf3", f"{selected_design}_confidences.json"),
+        ]
+        conf_path = next((p for p in conf_candidates if _path_exists(p)), conf_candidates[0])
         
         def get_file_content(path_or_url):
             if is_remote_data:
@@ -670,8 +689,9 @@ with tab_viewer:
                     view.addStyle({'within':{'distance': 5.0, 'sel':{'chain':'B'}}, 'sel':{'chain':'A'}}, 
                                   {'stick':{'colorscheme':'blueCarbon'}})
                 else:
-                    # Confidence Flow (pLDDT)
-                    # pLDDT on a 0.0 to 1.0 logic scale, or 0 to 100. RF3 uses 0-1.
+                    # Confidence Flow (pLDDT) — colors chain A by the b-factor column,
+                    # which is set above from the confidences JSON pLDDT (0-1 scale;
+                    # both ESMFold2 and legacy RF3 write 0-1), else the CIF b-factor.
                     view.setStyle({'chain': 'A'}, {'cartoon': {'colorscheme': {'prop': 'b', 'gradient': 'roygb', 'min': 0.5, 'max': 0.9}}})
                     view.setStyle({'chain': 'B'}, {'sphere': {'color': '#CCCCCC', 'opacity': 0.8}})
                 

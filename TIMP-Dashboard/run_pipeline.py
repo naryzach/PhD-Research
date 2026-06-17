@@ -14,6 +14,7 @@ except Exception:
     pass
 
 import sys
+import json
 import numpy as np
 import pandas as pd
 import argparse
@@ -90,13 +91,43 @@ def _esm_save_structure(res, stub: str):
     return None
 
 
+def _write_esm_confidences(path, plddt_full, pae_mat, ptm=None, iptm=None):
+    """
+    Persist ESMFold2 per-residue pLDDT (0–1) and PAE (Å) to a confidences JSON in
+    the shape analyze_results.py / the dashboard read (keys: plddt, pae, ptm, iptm).
+    Written only when pLDDT or PAE is available; PAE is omitted when the model does
+    not expose it (downstream degrades gracefully).
+    """
+    if plddt_full is None and pae_mat is None:
+        return
+    conf = {}
+    if ptm is not None and not (isinstance(ptm, float) and np.isnan(ptm)):
+        conf["ptm"] = float(ptm)
+    if iptm is not None and not (isinstance(iptm, float) and np.isnan(iptm)):
+        conf["iptm"] = float(iptm)
+    if plddt_full is not None:
+        conf["plddt"] = [round(float(x), 4) for x in np.asarray(plddt_full).flatten()]
+    if pae_mat is not None:
+        conf["pae"] = np.round(np.asarray(pae_mat, dtype=float), 2).tolist()
+    try:
+        with open(path, "w") as fh:
+            json.dump(conf, fh)
+    except Exception as e:
+        print(f"  Could not write confidences JSON {path}: {e}", flush=True)
+
+
 def _esm_predict_complex(model, builder, binder_seq: str, target_seq: str,
                           binder_len: int, seed: int = 0,
                           cif_stub: str = None) -> dict:
     """
-    Fold a two-chain complex and return {esm_iptm, esm_ptm, esm_plddt[, esm_cif]}.
-    pLDDT is the binder-chain mean (0–100 scale).  If cif_stub is given the
-    predicted structure is written to {cif_stub}.cif/.pdb at no extra GPU cost.
+    Fold a two-chain complex and return scalar scores plus the raw per-residue
+    arrays for the confidences dump:
+      {esm_iptm, esm_ptm, esm_plddt, _plddt_full, _pae[, esm_cif]}
+    esm_plddt is the binder-chain mean on the 0–1 scale this dashboard pipeline
+    uses (matching the legacy RF3 convention).  _plddt_full is the full-complex
+    per-residue pLDDT (0–1); _pae is the NxN PAE matrix (Å) or None if the model
+    does not expose it.  If cif_stub is given the structure is written to
+    {cif_stub}.cif/.pdb at no extra GPU cost.
     """
     from esm.models.esmfold2 import ProteinInput, StructurePredictionInput
 
@@ -114,18 +145,38 @@ def _esm_predict_complex(model, builder, binder_seq: str, target_seq: str,
                 return v
         return None
 
-    iptm     = _get(res, "iptm", "interface_ptm")
-    ptm      = _get(res, "ptm")
+    iptm = _get(res, "iptm", "interface_ptm")
+    ptm  = _get(res, "ptm")
+
+    # Full per-residue pLDDT (both chains), normalized to the 0–1 scale the TIMP
+    # dashboard / analyze_results pipeline uses.
+    plddt_full = None
     plddt_arr = _get(res, "plddt", "plddts")
-    plddt = np.nan
     if plddt_arr is not None:
-        arr = np.asarray(plddt_arr, dtype=float).flatten()
-        if arr.size >= binder_len:
-            arr = arr[:binder_len]
-        if arr.size:
-            plddt = float(arr.mean())
-            if 0.0 < plddt <= 1.0:
-                plddt *= 100.0
+        a = np.asarray(plddt_arr, dtype=float).flatten()
+        if a.size:
+            if np.nanmax(a) > 1.0:           # model emitted a 0–100 scale
+                a = a / 100.0
+            plddt_full = a
+
+    # Scalar pLDDT = binder-chain (first binder_len residues) mean, 0–1.
+    plddt = np.nan
+    if plddt_full is not None and plddt_full.size:
+        binder_part = plddt_full[:binder_len] if plddt_full.size >= binder_len else plddt_full
+        plddt = float(np.mean(binder_part))
+
+    # PAE matrix (Å), if this build of ESMFold2 exposes one.
+    pae_mat = None
+    pae_raw = _get(res, "pae", "predicted_aligned_error", "pae_matrix", "aligned_error")
+    if pae_raw is not None:
+        try:
+            pm = np.asarray(pae_raw, dtype=float)
+            if pm.ndim == 3:
+                pm = pm[0]
+            if pm.ndim == 2:
+                pae_mat = pm
+        except Exception:
+            pae_mat = None
 
     def _f(x):
         try:
@@ -133,7 +184,8 @@ def _esm_predict_complex(model, builder, binder_seq: str, target_seq: str,
         except (TypeError, ValueError):
             return np.nan
 
-    out = {"esm_iptm": _f(iptm), "esm_ptm": _f(ptm), "esm_plddt": plddt}
+    out = {"esm_iptm": _f(iptm), "esm_ptm": _f(ptm), "esm_plddt": plddt,
+           "_plddt_full": plddt_full, "_pae": pae_mat}
     if cif_stub:
         saved = _esm_save_structure(res, cif_stub)
         if saved:
@@ -508,6 +560,11 @@ def main():
             print(f"--- Running ESMFold2 Validations on {len(lmpnn_jobs)} sequences ---")
 
             # ── 3a. Score sequences directly via ESMFold2 (in-process) ──────────
+            #   esm_scores[design_id] keeps the scalar metrics (for esm_scores.csv
+            #   and Stage 3b).  The per-residue pLDDT + PAE arrays are detached and
+            #   written to <design_id>_confidences.json so analyze_results.py and
+            #   the dashboard can recover loop pLDDT / PAE / chain-split confidence
+            #   the way they did for RF3.
             esm_scores = {}
             _esm_model = _esm_builder = None
             try:
@@ -527,9 +584,18 @@ def main():
                             _esm_model, _esm_builder, binder_seq, target_seq,
                             len(binder_seq), cif_stub=stub,
                         )
+                        # Detach the heavy per-residue arrays and persist them as a
+                        # confidences JSON; keep only scalars in esm_scores.
+                        plddt_full = metrics.pop("_plddt_full", None)
+                        pae_mat    = metrics.pop("_pae", None)
+                        _write_esm_confidences(
+                            os.path.join(combo_esm_out_dir, f"{design_id}_confidences.json"),
+                            plddt_full, pae_mat,
+                            ptm=metrics.get("esm_ptm"), iptm=metrics.get("esm_iptm"),
+                        )
                         esm_scores[design_id] = metrics
                         print(f"  {design_id}: ipTM={metrics['esm_iptm']:.3f}  "
-                              f"pLDDT={metrics['esm_plddt']:.1f}", flush=True)
+                              f"pLDDT={metrics['esm_plddt']:.3f}", flush=True)
                     except Exception as e:
                         print(f"  ESMFold2 failed on {design_id}: {e}", flush=True)
 

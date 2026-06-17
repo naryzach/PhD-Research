@@ -88,11 +88,21 @@ def analyze_all_results():
         target_name = row['target']
         combo_name = row['loop_combo']
         
-        base_dir = os.path.join(OUT_BASE_DIR, target_name, combo_name, "rf3")
-        cif_path = os.path.join(base_dir, f"{design_id}_refolded.cif")
-        confidences_path = os.path.join(base_dir, f"{design_id}_confidences.json")
-        summary_path = os.path.join(base_dir, f"{design_id}_summary_confidences.json")
-        
+        # ESMFold2 (current) writes <design_id>.cif (or .pdb) + <design_id>_confidences.json
+        # under esmfold2/. RF3 (legacy) wrote <design_id>_refolded.cif + _confidences.json
+        # under rf3/. Prefer the new layout, fall back to the old so prior runs still parse.
+        esm_dir = os.path.join(OUT_BASE_DIR, target_name, combo_name, "esmfold2")
+        rf3_dir = os.path.join(OUT_BASE_DIR, target_name, combo_name, "rf3")
+        if os.path.exists(os.path.join(esm_dir, f"{design_id}.cif")):
+            cif_path = os.path.join(esm_dir, f"{design_id}.cif")
+            confidences_path = os.path.join(esm_dir, f"{design_id}_confidences.json")
+        elif os.path.exists(os.path.join(esm_dir, f"{design_id}.pdb")):
+            cif_path = os.path.join(esm_dir, f"{design_id}.pdb")
+            confidences_path = os.path.join(esm_dir, f"{design_id}_confidences.json")
+        else:
+            cif_path = os.path.join(rf3_dir, f"{design_id}_refolded.cif")
+            confidences_path = os.path.join(rf3_dir, f"{design_id}_confidences.json")
+
         # Base record with existing info
         rec = row.to_dict()
         # Initialize all advanced metrics for consistent CSV columns
@@ -115,10 +125,13 @@ def analyze_all_results():
             continue
             
         try:
-            # Biochemical features
-            import biotite.structure.io.pdbx as pdbx
-            # Use get_structure which handles the file reading internally or via a generic file
-            atom_array = pdbx.get_structure(pdbx.CIFFile.read(cif_path), model=1)
+            # Biochemical features (load CIF, or PDB if ESMFold2 fell back to .pdb)
+            if cif_path.endswith(".pdb"):
+                from biotite.structure.io.pdb import PDBFile
+                atom_array = PDBFile.read(cif_path).get_structure()[0]
+            else:
+                import biotite.structure.io.pdbx as pdbx
+                atom_array = pdbx.get_structure(pdbx.CIFFile.read(cif_path), model=1)
             inter_metrics = compute_biotite_interactions(atom_array, "A", "B")
             rec.update(inter_metrics)
             
@@ -145,60 +158,58 @@ def analyze_all_results():
                     loop_indices = set(range(chain_A_len))
                 
                 loop_indices = list(loop_indices)
-                # Handle RF3 specific keys: atom_plddts instead of plddt
+                # Handle RF3 legacy key: atom_plddts instead of plddt
                 if "plddt" not in conf and "atom_plddts" in conf:
                     conf["plddt"] = conf["atom_plddts"]
-                
-                if loop_indices and "pae" in conf and "plddt" in conf:
-                    pae = np.array(conf["pae"])
+
+                # --- pLDDT metrics (computed whenever pLDDT is present) ---
+                # ESMFold2 always provides per-residue pLDDT; PAE may be absent, so
+                # these are decoupled from the PAE block below (which used to gate
+                # everything on both keys existing).
+                if loop_indices and "plddt" in conf:
                     plddt = np.array(conf["plddt"])
-                    
-                    # If plddt is per-atom, we might need to map it back to residues
-                    # or just take the first N (if it's already residue-level but named differently)
-                    if len(plddt.shape) == 2: plddt = plddt[0] # Handle batch dim
-                    if len(pae.shape) == 3: pae = pae[0] # Handle batch dim
-                    
-                    # If it's still weirdly shaped (e.g. per-atom), we'll do our best
-                    # Usually token_res_ids implies plddt per residue.
-                    
+                    if plddt.ndim == 2:
+                        plddt = plddt[0]  # Handle batch dim
+
                     loop_plddts = [plddt[i] for i in loop_indices if i < len(plddt)]
-                    rec["mean_loop_plddt"] = np.mean(loop_plddts) if loop_plddts else rec["mean_loop_plddt"]
-                    
-                    # Chain-specific pLDDT and pTM
+                    rec["mean_loop_plddt"] = float(np.mean(loop_plddts)) if loop_plddts else rec["mean_loop_plddt"]
+
+                    # Chain-specific pLDDT
                     if len(plddt) >= chain_A_len:
                         rec["TIMP_pLDDT"] = float(np.mean(plddt[:chain_A_len]))
                         if len(plddt) > chain_A_len:
                             rec["Target_pLDDT"] = float(np.mean(plddt[chain_A_len:]))
-                        else:
-                            # DEBUG: If they match, why?
-                            print(f"[DEBUG] {design_id}: plddt_len={len(plddt)}, chain_A_len={chain_A_len}")
-                    
-                    # Approximate per-chain pTM from PAE if available
-                    if "ptm" in conf:
-                        rec["ptm"] = conf["ptm"]
-                        if isinstance(conf["ptm"], list) and len(conf["ptm"]) >= 2:
-                            rec["TIMP_pTM"] = conf["ptm"][0]
-                            rec["Target_pTM"] = conf["ptm"][1]
-                    
-                    # Fallback chain pTM from PAE diagonal blocks
-                    if rec["TIMP_pTM"] == 0.0 and "pae" in conf:
-                        # Convert mean PAE to a pTM-like score (0-1, higher is better)
-                        # Approximation: exp(-PAE/10)
+
+                # --- Complex pTM (scalar for ESMFold2; list for some RF3 builds) ---
+                if "ptm" in conf:
+                    if isinstance(conf["ptm"], list) and len(conf["ptm"]) >= 2:
+                        rec["TIMP_pTM"] = conf["ptm"][0]
+                        rec["Target_pTM"] = conf["ptm"][1]
+                    else:
+                        try:
+                            rec["ptm"] = float(conf["ptm"])
+                        except (TypeError, ValueError):
+                            pass
+
+                # --- PAE metrics (only when a PAE matrix is available) ---
+                if "pae" in conf:
+                    pae = np.array(conf["pae"])
+                    if pae.ndim == 3:
+                        pae = pae[0]  # Handle batch dim
+
+                    # Fallback per-chain pTM from PAE diagonal blocks (exp(-PAE/10))
+                    if rec["TIMP_pTM"] == 0.0 and pae.shape[0] >= chain_A_len:
                         timp_pae = float(np.mean(pae[:chain_A_len, :chain_A_len]))
                         rec["TIMP_pTM"] = round(float(np.exp(-timp_pae / 10.0)), 3)
-                        
                         if pae.shape[0] > chain_A_len:
                             tgt_pae = float(np.mean(pae[chain_A_len:, chain_A_len:]))
                             rec["Target_pTM"] = round(float(np.exp(-tgt_pae / 10.0)), 3)
-                    
-                    # Loop PAE vs Target (Chain B)
-                    # Loop indices x Target Indices (chain A len to end)
-                    if pae.shape[0] > chain_A_len and pae.shape[1] > chain_A_len:
-                        loop_target_paes = []
-                        for i in loop_indices:
-                            if i < pae.shape[0]:
-                                loop_target_paes.extend(pae[i, chain_A_len:])
-                        rec["mean_loop_pae"] = float(np.mean(pae[loop_indices, chain_A_len:])) if len(loop_indices) > 0 else 30.0
+
+                    # Mean PAE between loop residues and the target chain (B)
+                    if loop_indices and pae.shape[0] > chain_A_len and pae.shape[1] > chain_A_len:
+                        valid_loop = [i for i in loop_indices if i < pae.shape[0]]
+                        if valid_loop:
+                            rec["mean_loop_pae"] = float(np.mean(pae[valid_loop, chain_A_len:]))
         except Exception as e:
             print(f"Error processing {design_id}: {e}")
         
