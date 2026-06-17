@@ -1769,6 +1769,10 @@ class IterativeRefiner:
 
 def main():
     import argparse
+    # CLI flags can override these module-level settings — declare up front so the
+    # argparse help strings (which read the defaults) don't trip Python's
+    # "name used prior to global declaration" rule.
+    global RF3_ENABLE, ESMFOLD2_GPUS, INIT_TEMPERATURE, MIN_TEMPERATURE, TEMP_DECAY, ADAPTIVE_BIAS_START
 
     parser = argparse.ArgumentParser(description="Iterative TIMP3 binder design.")
     parser.add_argument(
@@ -1829,22 +1833,16 @@ def main():
     args = parser.parse_args()
 
     if args.enable_rf3:
-        global RF3_ENABLE
         RF3_ENABLE = True
     if args.esmfold2_gpus is not None:
-        global ESMFOLD2_GPUS
         ESMFOLD2_GPUS = args.esmfold2_gpus  # int-like string or "auto"; resolved at call time
     if args.init_temperature is not None:
-        global INIT_TEMPERATURE
         INIT_TEMPERATURE = args.init_temperature
     if args.min_temperature is not None:
-        global MIN_TEMPERATURE
         MIN_TEMPERATURE = args.min_temperature
     if args.temp_decay is not None:
-        global TEMP_DECAY
         TEMP_DECAY = args.temp_decay
     if args.no_adaptive_bias:
-        global ADAPTIVE_BIAS_START
         ADAPTIVE_BIAS_START = 10**9   # effectively never
 
     refiner = IterativeRefiner(
