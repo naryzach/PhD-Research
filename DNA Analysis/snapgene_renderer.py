@@ -68,34 +68,45 @@ def _dedupe_features(features):
 
 
 def find_orfs(seq, min_aa):
-    """Return ORFs (start, end, strand, n_aa) found in all six reading frames.
+    """Return ORFs (start, end, strand, n_aa) over all six frames of the
+    *circular* sequence.
 
-    An ORF is an ATG ... stop stretch with at least ``min_aa`` codons. Search
-    is linear (ORFs that wrap the origin of the circular plasmid are not
-    reported)."""
+    An ORF is an ATG ... stop stretch with at least ``min_aa`` codons. The
+    search reads across the origin (using a doubled sequence), so genes that
+    span position 0 are found. A wrapping ORF is reported with coordinates that
+    extend beyond ``[0, length)`` (``end > length`` on the + strand, or
+    ``start < 0`` on the - strand) so it can be drawn as a single arc across
+    the origin. Reading-frame continuity at the origin is handled correctly
+    even when ``length`` is not a multiple of three."""
     seq = str(seq).upper()
     length = len(seq)
     orfs = []
     for strand, strand_seq in ((1, seq), (-1, str(Seq(seq).reverse_complement()))):
+        search = strand_seq * 2          # doubled, to read past the origin
         for frame in range(3):
             i = frame
-            while i < length - 2:
-                if strand_seq[i:i + 3] != "ATG":
+            while i < length:            # the start codon lies within one turn
+                if search[i:i + 3] != "ATG":
                     i += 3
                     continue
+                stop = None
                 j = i
-                while j < length - 2:
-                    if strand_seq[j:j + 3] in STOP_CODONS:
-                        n_aa = (j - i) // 3
-                        if n_aa >= min_aa:
-                            if strand == 1:
-                                start, end = i, j + 3
-                            else:
-                                start, end = length - (j + 3), length - i
-                            orfs.append((start, end, strand, n_aa))
+                while j < i + length:     # walk at most one full turn for a stop
+                    if search[j:j + 3] in STOP_CODONS:
+                        stop = j
                         break
                     j += 3
-                i = j + 3
+                if stop is None:
+                    i += 3                # frame stays open all the way round
+                    continue
+                n_aa = (stop - i) // 3
+                if n_aa >= min_aa:
+                    if strand == 1:
+                        start, end = i, stop + 3
+                    else:
+                        start, end = length - (stop + 3), length - i
+                    orfs.append((start, end, strand, n_aa))
+                i = stop + 3
     return orfs
 
 
@@ -339,6 +350,14 @@ def render_plasmid(dna_path, output_path, figure_width=10, inline_fontsize=9,
         draw_curved_label(ax, circular, f, features_levels[f], inline_font, color)
 
     place_outside_labels(ax, circular, features_levels, outside, label_font)
+
+    # Plasmid name (and size) in the middle of the circle.
+    name = os.path.splitext(os.path.basename(dna_path))[0]
+    cx, cy = 0.0, -circular.radius
+    ax.text(cx, cy + 0.07, name, ha="center", va="center",
+            fontsize=15, fontweight="bold", zorder=4)
+    ax.text(cx, cy - 0.07, f"{len(record):,} bp", ha="center", va="center",
+            fontsize=11, color="0.35", zorder=4)
 
     ax.figure.savefig(output_path, bbox_inches="tight", dpi=dpi)
     plt.close(ax.figure)
