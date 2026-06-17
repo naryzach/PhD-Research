@@ -1116,6 +1116,112 @@ Quantifying purified ADAM10 FPLC Fraction 6 for downstream binding trials.
 </div>
 
 ---
+layout: default
+transition: fade-out
+---
+
+# Final Candidate Selection & Loop Extraction (June 15\textsuperscript{th}, 2026)
+Isolating TIMP3 variable loop regions for synthesis ordering.
+
+<div class="grid grid-cols-2 gap-4 mt-4">
+  <div class="space-y-3">
+    <div class="p-3 bg-blue-500/10 rounded border border-blue-500/20 text-[10px]">
+      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Loop Extraction Logic</h4>
+      <p class="leading-relaxed opacity-75">
+        To prepare candidates for synthesis, native framework boundaries were defined in <code>select_binders_to_order.py</code> to automatically extract the variable regions:
+      </p>
+      <ul class="list-disc pl-4 space-y-1 opacity-80 leading-relaxed text-[9px] mt-1">
+        <li><b>AB Loop:</b> Between <code>PREFIX</code> and <code>REGION2</code></li>
+        <li><b>C Loop:</b> Between <code>REGION2</code> and <code>REGION3</code></li>
+        <li><b>EF Loop:</b> Between <code>REGION3</code> and <code>SUFFIX</code></li>
+      </ul>
+      <p class="leading-relaxed opacity-75 mt-1.5 text-[9px]">
+        Eliminates manual splicing errors and ensures precise boundary isolation.
+      </p>
+    </div>
+    <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px]">
+      <h4 class="text-emerald-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Priority Selection Summary</h4>
+      <p class="leading-relaxed opacity-75">
+        Filtered the candidate pool of <b>39 designs</b> down to <b>10 prioritized binders</b>:
+      </p>
+      <ul class="list-disc pl-4 space-y-1 opacity-80 leading-relaxed text-[9px] mt-1">
+        <li><b>MMP9:</b> 4 candidates (top composite: 0.816)</li>
+        <li><b>ADAM17:</b> 5 candidates (top composite: 0.792)</li>
+        <li><b>MMP2:</b> 1 candidate (composite: 0.785)</li>
+      </ul>
+      <p class="leading-relaxed opacity-75 mt-1.5 text-[9px]">
+        Gates: pTM &ge; 0.70, framework RMSD &le; 4.0 Å, target ipTM &ge; 0.50.
+      </p>
+    </div>
+  </div>
+  
+  <div class="space-y-2">
+    <div class="p-3 bg-white/5 rounded border border-white/10 text-[9px]">
+      <h4 class="text-blue-300 font-bold text-[10px] uppercase tracking-widest mb-1.5 text-center">Top prioritized designs for synthesis</h4>
+      <div class="overflow-x-auto mt-1">
+        <table class="w-full text-left text-[8px] opacity-90 border-collapse">
+          <thead>
+            <tr class="border-b border-white/20 text-blue-400 font-bold">
+              <th class="py-1">Design ID</th>
+              <th class="py-1">Target</th>
+              <th class="py-1">AB Loop</th>
+              <th class="py-1">C Loop</th>
+              <th class="py-1">EF Loop</th>
+              <th class="py-1">Comp</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="border-b border-white/10">
+              <td class="py-1 font-mono">MMP9_it15_d13_s0</td>
+              <td class="py-1">MMP9</td>
+              <td class="py-1 font-mono text-[7.5px]">HTNPDPRRGGE</td>
+              <td class="py-1 font-mono text-[7.5px]">ELTAM</td>
+              <td class="py-1 font-mono text-[7.5px]">RACD</td>
+              <td class="py-1 font-bold">0.816</td>
+            </tr>
+            <tr class="border-b border-white/10">
+              <td class="py-1 font-mono">MMP9_it15_d19_s0</td>
+              <td class="py-1">MMP9</td>
+              <td class="py-1 font-mono text-[7.5px]">DSVTGGTPSKS</td>
+              <td class="py-1 font-mono text-[7.5px]">ASSAL</td>
+              <td class="py-1 font-mono text-[7.5px]">RACD</td>
+              <td class="py-1 font-bold">0.798</td>
+            </tr>
+            <tr class="border-b border-white/10">
+              <td class="py-1 font-mono">ADAM17_it33_d11_s0</td>
+              <td class="py-1">ADAM17</td>
+              <td class="py-1 font-mono text-[7.5px]">EATIDGSPAKE</td>
+              <td class="py-1 font-mono text-[7.5px]">ESGVYHGMPIG</td>
+              <td class="py-1 font-mono text-[7.5px]">LGPCS</td>
+              <td class="py-1 font-bold">0.792</td>
+            </tr>
+            <tr class="border-b border-white/10">
+              <td class="py-1 font-mono">ADAM17_it31_d15_s0</td>
+              <td class="py-1">ADAM17</td>
+              <td class="py-1 font-mono text-[7.5px]">DSPIPNTKD</td>
+              <td class="py-1 font-mono text-[7.5px]">ESDYGSIA</td>
+              <td class="py-1 font-mono text-[7.5px]">DACS</td>
+              <td class="py-1 font-bold">0.786</td>
+            </tr>
+            <tr class="border-b border-white/10">
+              <td class="py-1 font-mono">MMP2_it24_d15_s0</td>
+              <td class="py-1">MMP2</td>
+              <td class="py-1 font-mono text-[7.5px]">KNVKDFFTGSMGDE</td>
+              <td class="py-1 font-mono text-[7.5px]">ADSKFENGKSIG</td>
+              <td class="py-1 font-mono text-[7.5px]">DLCS</td>
+              <td class="py-1 font-bold">0.785</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="opacity-60 text-[7.5px] mt-1.5 italic text-center">
+        Full list exported to order_list.csv (Local/iterative_refinement/ordering/).
+      </p>
+    </div>
+  </div>
+</div>
+
+---
 layout: center
 class: text-center
 ---
