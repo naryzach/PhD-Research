@@ -77,10 +77,18 @@ def find_orfs(seq, min_aa):
     extend beyond ``[0, length)`` (``end > length`` on the + strand, or
     ``start < 0`` on the - strand) so it can be drawn as a single arc across
     the origin. Reading-frame continuity at the origin is handled correctly
-    even when ``length`` is not a multiple of three."""
+    even when ``length`` is not a multiple of three.
+
+    ORFs sharing the same stop codon (e.g. the full read across the origin and
+    a nested fragment starting at a downstream ATG -- which arise because the
+    frame shifts at the origin when ``length`` is not a multiple of three) are
+    collapsed to the single longest read."""
     seq = str(seq).upper()
     length = len(seq)
-    orfs = []
+    # Keep only the longest ORF per (strand, stop-codon position). All ORFs
+    # ending at a given stop are nested ATG variants of the same gene, so the
+    # longest one is the full read; distinct genes have distinct stops.
+    best = {}
     for strand, strand_seq in ((1, seq), (-1, str(Seq(seq).reverse_complement()))):
         search = strand_seq * 2          # doubled, to read past the origin
         for frame in range(3):
@@ -105,9 +113,13 @@ def find_orfs(seq, min_aa):
                         start, end = i, stop + 3
                     else:
                         start, end = length - (stop + 3), length - i
-                    orfs.append((start, end, strand, n_aa))
+                    # The stop codon's genomic location identifies the gene:
+                    # 3' end of the read (end for +, start for -).
+                    stop_key = (strand, (end if strand == 1 else start) % length)
+                    if stop_key not in best or n_aa > best[stop_key][3]:
+                        best[stop_key] = (start, end, strand, n_aa)
                 i = stop + 3
-    return orfs
+    return list(best.values())
 
 
 def orf_features(record, min_aa):
