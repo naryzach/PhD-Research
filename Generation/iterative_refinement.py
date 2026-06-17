@@ -135,7 +135,14 @@ LOOP_CONFIGS = {
 }
 
 # ── Hyperparameters ───────────────────────────────────────────────────────────
-BACKBONES_PER_TARGET   = 20    # RFd3 designs per target per iteration
+# Throughput per iteration = BACKBONES_PER_TARGET × LMPNN_SEQS_PER_BACKBONE × n_targets.
+# RFd3 (backbones) is the slow stage; LMPNN sequences-per-backbone is nearly free
+# and each one is one more (cheap) ESMFold2 prediction. Both are CLI-overridable
+# (--backbones-per-target / --seqs-per-backbone).
+BACKBONES_PER_TARGET   = 40    # RFd3 backbones per target per iteration (structural diversity; was 20)
+LMPNN_SEQS_PER_BACKBONE = 1    # LMPNN sequences sampled per backbone. Raise (e.g. 2-3) via
+                               # --seqs-per-backbone for cheap sequence diversity + more ESMFold2
+                               # predictions without extra RFd3 cost.
 INIT_TEMPERATURE       = 0.50  # LMPNN sampling temperature (exploration)
 MIN_TEMPERATURE        = 0.10  # LMPNN temperature floor (exploitation)
 TEMP_DECAY             = 0.85  # Temperature multiplier applied each iteration
@@ -1020,7 +1027,7 @@ class IterativeRefiner:
                 fixed_res = get_fixed_residues(rfd3_array, self.selected_loops, bc, fc)
                 mpnn_in = {
                     "name":           design_id,
-                    "batch_size":     1,
+                    "batch_size":     LMPNN_SEQS_PER_BACKBONE,  # sequences sampled per backbone
                     "remove_waters":  True,
                     "seed":           42 + idx,
                     "fixed_residues": fixed_res,
@@ -1773,6 +1780,7 @@ def main():
     # argparse help strings (which read the defaults) don't trip Python's
     # "name used prior to global declaration" rule.
     global RF3_ENABLE, ESMFOLD2_GPUS, INIT_TEMPERATURE, MIN_TEMPERATURE, TEMP_DECAY, ADAPTIVE_BIAS_START
+    global BACKBONES_PER_TARGET, LMPNN_SEQS_PER_BACKBONE
 
     parser = argparse.ArgumentParser(description="Iterative TIMP3 binder design.")
     parser.add_argument(
@@ -1830,6 +1838,13 @@ def main():
     parser.add_argument("--no-adaptive-bias", action="store_true",
                         help="Disable adaptive loop-length narrowing — keeps the full loop-length "
                              "range every iteration (more structural diversity).")
+    # ── Throughput controls ──
+    parser.add_argument("--backbones-per-target", type=int, default=None,
+                        help=f"RFd3 backbones per target per iteration (default {BACKBONES_PER_TARGET}). "
+                             "The slow stage — scales RFd3 time.")
+    parser.add_argument("--seqs-per-backbone", type=int, default=None,
+                        help=f"LMPNN sequences per backbone (default {LMPNN_SEQS_PER_BACKBONE}). Cheap "
+                             "way to add sequence diversity + ESMFold2 predictions without more RFd3.")
     args = parser.parse_args()
 
     if args.enable_rf3:
@@ -1844,6 +1859,10 @@ def main():
         TEMP_DECAY = args.temp_decay
     if args.no_adaptive_bias:
         ADAPTIVE_BIAS_START = 10**9   # effectively never
+    if args.backbones_per_target is not None:
+        BACKBONES_PER_TARGET = args.backbones_per_target
+    if args.seqs_per_backbone is not None:
+        LMPNN_SEQS_PER_BACKBONE = args.seqs_per_backbone
 
     refiner = IterativeRefiner(
         active_targets=args.targets,
