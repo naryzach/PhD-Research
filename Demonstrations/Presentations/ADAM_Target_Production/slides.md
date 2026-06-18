@@ -259,6 +259,137 @@ layout: default
   </div>
 </div>
 
+# Western Blot Validation (June 11-12)
+
+<div class="grid grid-cols-2 gap-6 mt-6 items-center">
+  <div class="space-y-3">
+    <h2 class="text-teal-600 font-semibold mb-2">Soluble ADAM10 Expression Verified</h2>
+    <p class="text-xs text-gray-700 leading-relaxed mb-3">
+      Anti-FLAG Western blotting of concentrated culture supernatants confirmed <strong>soluble ADAM10 expression</strong>. A single, distinct soluble band was detected near <strong>60 kDa</strong> in the 25°C supernatant, indicating successful target production and folding.
+    </p>
+    <div class="p-2 bg-emerald-50 border border-emerald-200 rounded text-2xs text-emerald-800">
+      <strong>Transfer Quality Check:</strong> Ponceau S staining of the PVDF membrane confirmed uniform total protein transfer across all lanes, validating blotting efficiency.
+    </div>
+  </div>
+  <div class="flex flex-col items-center">
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/western_blot_labeled.png" class="h-56 object-contain rounded border shadow-sm" alt="ADAM10 Western Blot"/>
+    <span class="text-2xs text-gray-500 mt-2">Anti-FLAG Western Blot: Soluble band near 60 kDa in Lane 3.</span>
+  </div>
+</div>
+
+---
+
+# BCA Assay Target Standardization (June 12)
+
+<div class="grid grid-cols-2 gap-6 mt-6 items-center">
+  <div class="space-y-3">
+    <h2 class="text-teal-600 font-semibold mb-2">Target Concentration Calibration</h2>
+    <p class="text-xs text-gray-700 leading-relaxed mb-3">
+      BCA assays were executed on the concentrated FPLC Fraction 6 of ADAM10 to standardize target inputs for downstream display and binding trials, resolving NanoDrop buffer interference.
+    </p>
+    <div class="p-3 bg-gray-50 rounded border border-gray-200 text-2xs">
+      <ul class="space-y-1.5 text-gray-600">
+        <li><strong>SpectraMax i3x:</strong> Quadratic fit ($R^2 = 0.9895$) yielded a dilution-adjusted mean of <strong>205.46 μg/mL</strong>.</li>
+        <li><strong>SPECTRAmax M5:</strong> Linear fit ($R^2 = 0.9930$) yielded a dilution-adjusted mean of <strong>193.89 μg/mL</strong>.</li>
+        <li><strong>Standardization Outcome:</strong> Purified target concentration was standardized to <strong>0.20 mg/mL</strong>.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="flex items-center gap-2 border p-2 rounded bg-gray-50">
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260612_2_standard_curve.png" class="h-52 object-contain" alt="BCA Standard Curve"/>
+    <div class="text-2xs text-gray-600"><strong>i3x Calibration:</strong> Standard curve fitting for precise concentration calculations.</div>
+  </div>
+</div>
+
+---
+
+# Retry ADAM10 Expression Trials (June 16)
+
+<div class="grid grid-cols-12 gap-6 mt-4 items-center">
+  <div class="col-span-5">
+    <h2 class="text-teal-600 font-semibold mb-2">Optimizing Soluble Yields</h2>
+    <p class="text-xs text-gray-700 leading-relaxed mb-3">
+      To address low binding levels and optimize soluble periplasmic yields, a secondary expression trial was initiated to evaluate helper plasmid variants and lysis methods.
+    </p>
+    <h2 class="text-teal-600 font-semibold mb-2">Trial Conditions & Status</h2>
+    <p class="text-xs text-gray-700 leading-relaxed">
+      Four conditions were set up evaluating combinations of <strong>BL21(DE3)</strong> host strains, <strong>pMopac-ADAM-10cd-Flg</strong>, and <strong>pBAD-helper</strong> vectors. Samples were collected at 1hr and 3hr post-induction. SDS-PAGE and Western blot validation runs are currently pending.
+    </p>
+  </div>
+  <div class="col-span-7 bg-white p-4 rounded border shadow-sm">
+    <div class="text-xs font-bold text-gray-800 mb-2">Expression Trial Design Matrix</div>
+    <table class="w-full text-left text-2xs border-collapse">
+      <thead>
+        <tr class="border-b text-teal-600 font-bold">
+          <th class="py-1">Condition</th>
+          <th class="py-1">Strain / Plasmids</th>
+          <th class="py-1">Induction Temp</th>
+          <th class="py-1">Lysis / Prep</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="border-b">
+          <td class="py-1">1</td>
+          <td class="py-1">BL21(DE3) + pMopac-ADAM10</td>
+          <td class="py-1">25°C, 3.5 hr</td>
+          <td class="py-1">Osmotic Shock</td>
+        </tr>
+        <tr class="border-b">
+          <td class="py-1">2</td>
+          <td class="py-1">BL21(DE3) + pMopac-ADAM10 + pBAD-helper</td>
+          <td class="py-1">25°C, 3.5 hr</td>
+          <td class="py-1">Osmotic Shock + DsbC</td>
+        </tr>
+        <tr class="border-b">
+          <td class="py-1">3</td>
+          <td class="py-1">BL21(DE3) + pMopac-ADAM10</td>
+          <td class="py-1">25°C, 3.5 hr</td>
+          <td class="py-1">Total Lysate (Sonicated)</td>
+        </tr>
+        <tr>
+          <td class="py-1">4</td>
+          <td class="py-1">BL21(DE3) + pMopac-ADAM10 + pBAD-helper</td>
+          <td class="py-1">25°C, 3.5 hr</td>
+          <td class="py-1">Total Lysate + DsbC</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+---
+
+# pMopac DNA Plasmid Audit (June 17)
+
+<div class="grid grid-cols-12 gap-6 mt-4 items-center">
+  <div class="col-span-5">
+    <h2 class="text-teal-600 font-semibold mb-2">Vector Topology Verification</h2>
+    <p class="text-xs text-gray-700 leading-relaxed mb-3">
+      Audited DNA sequence files to resolve physical property discrepancies and verify cloning sites (SfiI restriction sites) and tag configurations.
+    </p>
+    <div class="p-2.5 bg-blue-50 border border-blue-200 rounded text-2xs text-blue-800">
+      <strong>Purification Insights:</strong> Theoretical isoelectric points (pI 5.95 for ADAM17, pI 6.44 for ADAM10) suggest negative charges at pH 8.0, confirming suitability of HiTrap Q FF Anion Exchange chromatography.
+    </div>
+  </div>
+  <div class="col-span-7 bg-white p-4 rounded border shadow-sm">
+    <div class="text-xs font-bold text-gray-800 mb-2">Verified DNA Annotation Metadata</div>
+    <div class="space-y-2 text-2xs">
+      <div class="flex justify-between border-b pb-1">
+        <span class="font-medium text-gray-700"><strong>(pET-)ADAM-17cd-HT</strong> (T7 / KanR / 6xHis)</span>
+        <span class="text-teal-600 font-semibold">30.3 kDa / pI 5.95</span>
+      </div>
+      <div class="flex justify-between border-b pb-1">
+        <span class="font-medium text-gray-700"><strong>pCHA-ADAM17cd</strong> (GAL1,10 / AmpR / Myc)</span>
+        <span class="text-teal-600 font-semibold">42.4 kDa / pI 5.56</span>
+      </div>
+      <div class="flex justify-between border-b pb-1">
+        <span class="font-medium text-gray-700"><strong>pMopac-ADAM-10cd-Flg</strong> (lac / CmR / FLAG)</span>
+        <span class="text-teal-600 font-semibold">29.6 kDa / pI 6.44</span>
+      </div>
+    </div>
+  </div>
+</div>
+
 ---
 
 # Summary & Next Steps
@@ -269,9 +400,9 @@ layout: default
       <span class="p-1 bg-teal-100 text-teal-800 rounded-full text-2xs">✓</span> Achieved Milestones
     </h2>
     <ul class="space-y-3 text-xs text-gray-700">
-      <li><strong>Gel Rerun:</strong> Resolved running gel buffer issues, confirming in-house target bands around 30-40 kDa with working ladder.</li>
-      <li><strong>Data Pipeline:</strong> Setup robust batch script to classify targets and apply donor-spillover corrections.</li>
-      <li><strong>MMP7 Dialysis:</strong> Completed 3-step dialysis refolding.</li>
+      <li><strong>Western Blot & BCA:</strong> Verified 60 kDa soluble ADAM10 expression and standardized inputs to 0.20 mg/mL.</li>
+      <li><strong>DNA Audit:</strong> Audited sequence properties (MW, pI, promoters, tags) of primary ADAM plasmids.</li>
+      <li><strong>Retry Setup:</strong> Initiated four-condition optimization trial for E. coli expression of ADAM10.</li>
     </ul>
   </div>
   <div>
@@ -279,9 +410,9 @@ layout: default
       <span class="p-1 bg-teal-100 text-teal-800 rounded-full text-2xs">→</span> Future Directions
     </h2>
     <ul class="space-y-3 text-xs text-gray-700">
-      <li><strong>Western Blotting:</strong> Run anti-FLAG Western blots on concentrated ADAM10/17 fractions to verify target identities.</li>
-      <li><strong>Binding Optimization:</strong> Troubleshoot the low binding observed with ADAM10 (verify display detection, folding cofactors).</li>
-      <li><strong>AEC FPLC Column:</strong> Modify buffer pH/ionic strength or switch to IMAC to improve column retention.</li>
+      <li><strong>Process Retry Trials:</strong> Run SDS-PAGE and Western blots on harvesting timepoint aliquots.</li>
+      <li><strong>Buffer Optimization:</strong> Calibrate FPLC buffer pH using verified pIs to enhance target column retention.</li>
+      <li><strong>ADAM17 Recovery:</strong> Optimize helper plasmid schemes to rescue low-concentration ADAM17 preparations.</li>
     </ul>
   </div>
 </div>

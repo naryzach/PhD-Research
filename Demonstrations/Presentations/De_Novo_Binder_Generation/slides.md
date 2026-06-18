@@ -1222,6 +1222,101 @@ Isolating TIMP3 variable loop regions for synthesis ordering.
 </div>
 
 ---
+layout: default
+transition: fade-out
+---
+
+# Retry ADAM10 Expression Trials (June 16)
+
+<div class="grid grid-cols-12 gap-6 mt-6 items-center">
+  <div class="col-span-5">
+    <h2 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-2">Optimizing Soluble Yields</h2>
+    <p class="text-[10px] leading-relaxed opacity-70 mb-3">
+      To address low binding levels and optimize soluble periplasmic yields, a secondary expression trial was initiated to evaluate helper plasmid variants and lysis methods.
+    </p>
+    <h2 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-2">Trial Conditions & Status</h2>
+    <p class="text-[10px] leading-relaxed opacity-70">
+      Four conditions were set up evaluating combinations of <strong>BL21(DE3)</strong> host strains, <strong>pMopac-ADAM-10cd-Flg</strong>, and <strong>pBAD-helper</strong> vectors. Samples were collected at 1hr and 3hr post-induction. SDS-PAGE and Western blot validation runs are currently pending.
+    </p>
+  </div>
+  <div class="col-span-7 bg-white/5 p-4 rounded border border-white/10">
+    <div class="text-xs font-bold text-blue-300 mb-2">Expression Trial Design Matrix</div>
+    <table class="w-full text-left text-[9px] border-collapse">
+      <thead>
+        <tr class="border-b border-white/20 text-blue-400 font-bold">
+          <th class="py-1">Condition</th>
+          <th class="py-1">Strain / Plasmids</th>
+          <th class="py-1">Induction Temp</th>
+          <th class="py-1">Lysis / Prep</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="border-b border-white/10">
+          <td class="py-1">1</td>
+          <td class="py-1">BL21(DE3) + pMopac-ADAM10</td>
+          <td class="py-1">25°C, 3.5 hr</td>
+          <td class="py-1">Osmotic Shock</td>
+        </tr>
+        <tr class="border-b border-white/10">
+          <td class="py-1">2</td>
+          <td class="py-1">BL21(DE3) + pMopac-ADAM10 + pBAD-helper</td>
+          <td class="py-1">25°C, 3.5 hr</td>
+          <td class="py-1">Osmotic Shock + DsbC</td>
+        </tr>
+        <tr class="border-b border-white/10">
+          <td class="py-1">3</td>
+          <td class="py-1">BL21(DE3) + pMopac-ADAM10</td>
+          <td class="py-1">25°C, 3.5 hr</td>
+          <td class="py-1">Total Lysate (Sonicated)</td>
+        </tr>
+        <tr>
+          <td class="py-1">4</td>
+          <td class="py-1">BL21(DE3) + pMopac-ADAM10 + pBAD-helper</td>
+          <td class="py-1">25°C, 3.5 hr</td>
+          <td class="py-1">Total Lysate + DsbC</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+---
+layout: default
+transition: fade-out
+---
+
+# pMopac DNA Plasmid Audit (June 17)
+
+<div class="grid grid-cols-12 gap-6 mt-6 items-center">
+  <div class="col-span-5">
+    <h2 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-2">Vector Topology Verification</h2>
+    <p class="text-[10px] leading-relaxed opacity-70 mb-3">
+      Audited DNA sequence files to resolve physical property discrepancies and verify cloning sites (SfiI restriction sites) and tag configurations.
+    </p>
+    <div class="p-2.5 bg-blue-500/10 border border-blue-500/20 rounded text-[9px]">
+      <strong class="text-blue-400">Purification Insights:</strong> Theoretical isoelectric points (pI 5.95 for ADAM17, pI 6.44 for ADAM10) suggest negative charges at pH 8.0, confirming suitability of HiTrap Q FF Anion Exchange chromatography.
+    </div>
+  </div>
+  <div class="col-span-7 bg-white/5 p-4 rounded border border-white/10">
+    <div class="text-xs font-bold text-blue-300 mb-2">Verified DNA Annotation Metadata</div>
+    <div class="space-y-2 text-[10px] opacity-90">
+      <div class="flex justify-between border-b border-white/10 pb-1">
+        <span class="font-medium"><strong>(pET-)ADAM-17cd-HT</strong> (T7 / KanR / 6xHis)</span>
+        <span class="text-teal-400 font-semibold">30.3 kDa / pI 5.95</span>
+      </div>
+      <div class="flex justify-between border-b border-white/10 pb-1">
+        <span class="font-medium"><strong>pCHA-ADAM17cd</strong> (GAL1,10 / AmpR / Myc)</span>
+        <span class="text-teal-400 font-semibold">42.4 kDa / pI 5.56</span>
+      </div>
+      <div class="flex justify-between pb-1">
+        <span class="font-medium"><strong>pMopac-ADAM-10cd-Flg</strong> (lac / CmR / FLAG)</span>
+        <span class="text-teal-400 font-semibold">29.6 kDa / pI 6.44</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+---
 layout: center
 class: text-center
 ---
