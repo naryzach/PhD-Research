@@ -28,9 +28,10 @@ input metric is absent is dropped and the remaining weights are renormalized, so
 the same function works on AF3 (no BpTM) and on ESMFold2 (ipTM/pTM/pLDDT only).
 
 CAVEAT — predictor scale. Calibrated on AF-server metrics (== AF3, same model, so
-this recipe is valid for AF3 directly). ESMFold2's ipTM/pLDDT are a DIFFERENT scale
-and it does not natively emit loop-pLDDT or interface PAE; re-derive NORM_RANGES
-(and ideally re-run the calibration) before trusting it as the ESMFold2 ranker.
+this recipe is valid for AF3 directly). ESMFold2's metrics are a DIFFERENT scale;
+score_with_esmfold2.py now derives esm_lplddt / esm_pae over the redesigned loops
+(so all four terms can run on ESMFold2), but re-derive NORM_RANGES — and ideally
+re-run the calibration — before trusting this recipe as the ESMFold2 ranker.
 """
 from __future__ import annotations
 import numpy as np

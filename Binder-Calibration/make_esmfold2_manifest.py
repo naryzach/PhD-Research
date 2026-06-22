@@ -18,12 +18,15 @@ After running ESMFold2 on the cluster, produce a scores CSV with columns
   python calibration.py --esm-scores <that_csv>
 to get the ESMFold2 versions of every calibration output (suffixed _esmfold2).
 
-NOTE: ESMFold2's default scorer (Generation/score_with_esmfold2.py) emits only
-esm_iptm/esm_ptm/esm_plddt (whole-binder pLDDT). The recipe's backbone is loop
-pLDDT (LpLDDT) + interface PAE. SAVE_ESMFOLD2_STRUCTURES=True already saves the
-predicted complex CIF, so derive esm_lplddt / esm_pae from those structures using
-the loop_plddt() / loop_interface_pae() helpers in select_binders_to_order.py.
-Without those two, the recipe runs in reduced form (affinity from pLDDT only).
+NOTE: Generation/score_with_esmfold2.py now emits esm_lplddt (loop pLDDT) and
+esm_pae (loop-interface PAE) directly, alongside esm_iptm/esm_ptm/esm_plddt, by
+reducing ESMFold2's per-residue pLDDT array and PAE matrix over the redesigned
+loops (same flank-tripeptide loop definitions as the pipeline). The design_loops
+column in this manifest tells it which loop to measure. Pass --cif-dir to also save
+each predicted complex CIF and PAE matrix. So the FULL multi-term recipe (not just
+per-metric) calibrates on ESMFold2. If the installed ESMFold2 build emits no PAE
+matrix, esm_pae is NaN and the recipe falls back to reduced form (affinity from
+loop pLDDT only) -- still better than whole-binder pLDDT.
 """
 import os, re
 import pandas as pd

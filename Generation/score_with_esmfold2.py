@@ -24,7 +24,15 @@ Then, from the repo root (so it can find Local/iterative_refinement/):
     python Generation/score_with_esmfold2.py --all       # scores every design in round summaries
 
 Output: Local/iterative_refinement/esmfold2_scores.csv
-        columns: design_id, target_name, full_seq, esm_iptm, esm_ptm, esm_plddt
+        columns: design_id, target_name, full_seq, esm_iptm, esm_ptm, esm_plddt,
+                 esm_lplddt, esm_pae
+        esm_lplddt = pLDDT over ONLY the redesigned-loop residues; esm_pae = mean
+        interface PAE between those loops and the target (NaN if the model emits no
+        PAE matrix). These are the real-dynamic-range inputs the binding recipe
+        ranks on, so the SAME multi-term recipe runs on ESMFold2 as on AF3 (not
+        just per-metric). Loops are located by flank tripeptides; pass a
+        `design_loops` input column (e.g. "AB" or "AB,C,EF") to restrict which
+        loops (default: all active loops).
 To validate against AF3: parse an AF3 results zip, join its jobs to this CSV by
 binder sequence, and correlate each local metric (esm_iptm, esm_plddt) with AF3
 ipTM (Spearman + top-K hit-rate, pooled across batches). See filter_methods.md
@@ -36,6 +44,7 @@ paths differ, only `load_model()` and `predict_complex()` need editing — they 
 isolated for exactly this reason.
 """
 
+import re
 import sys
 import json
 import argparse
@@ -49,6 +58,120 @@ OUT_BASE = (Path(__file__).parent / ".." / "Local" / "iterative_refinement").res
 # Designs are submitted binder-first, so chain A = binder, chain B = target.
 BINDER_CHAIN = "A"
 TARGET_CHAIN = "B"
+
+
+# ── Loop-focused metrics: LpLDDT + interface PAE ──────────────────────────────
+# The binding recipe (Generation/binding_recipe.py) ranks on loop pLDDT and
+# interface PAE — the only AF metrics with real dynamic range. ESMFold2 gives a
+# per-residue pLDDT array and (if available) a PAE matrix; we reduce those to the
+# same two numbers over the SAME flank-tripeptide loop definitions as the rest of
+# the pipeline, so the ESMFold2 recipe score is comparable to the AF3 one.
+try:
+    from select_binders_to_order import loop_residue_positions, ACTIVE_LOOPS, LOOP_CONFIGS
+except Exception:   # keep this scorer runnable in isolation (no sibling import)
+    LOOP_CONFIGS = {
+        "AB": {"left": "LVK", "right": "LVY"}, "C": {"left": "HTE", "right": "GLK"},
+        "EF": {"left": "MYT", "right": "FVE"}, "GH": {"left": "KSC", "right": "NEC"}}
+    ACTIVE_LOOPS = ["AB", "C", "EF"]
+
+    def loop_residue_positions(binder_seq, loops=ACTIVE_LOOPS):
+        out, cursor = {}, 0
+        for name in loops:
+            lc = LOOP_CONFIGS[name]
+            m = re.compile(f"{lc['left']}([A-Z]*?){lc['right']}").search(binder_seq[cursor:])
+            if m:
+                start = cursor + m.start() + len(lc["left"]) + 1   # 1-indexed loop start
+                out[name] = set(range(start, start + len(m.group(1))))
+                cursor = cursor + m.end() - len(lc["right"])
+            else:
+                out[name] = set()
+        return out
+
+_LOOP_PAE_WARNED = {"done": False}
+
+
+def _parse_design_loops(design_loops):
+    """Normalize 'AB' / 'AB,C,EF' / ['AB','C'] -> known-loop list (default: all active)."""
+    if design_loops is None or (isinstance(design_loops, float) and np.isnan(design_loops)):
+        return list(ACTIVE_LOOPS)
+    toks = re.split(r"[^A-Za-z]+", design_loops) if isinstance(design_loops, str) else list(design_loops)
+    loops = [str(t).upper() for t in toks if t and str(t).upper() in LOOP_CONFIGS]
+    return loops or list(ACTIVE_LOOPS)
+
+
+def _loop_positions_0indexed(binder_seq, design_loops):
+    """0-indexed binder positions of the redesigned loop(s), located by flanks."""
+    pos1 = loop_residue_positions(binder_seq, _parse_design_loops(design_loops))
+    allpos = sorted(set().union(*pos1.values())) if pos1 else []
+    return [p - 1 for p in allpos]
+
+
+def _binder_plddt_0_100(plddt_arr, binder_len):
+    """Binder per-residue pLDDT on a 0-100 scale (None if unavailable)."""
+    if plddt_arr is None:
+        return None
+    arr = np.asarray(plddt_arr, dtype=float).flatten()
+    if arr.size == 0:
+        return None
+    arr = arr[:binder_len] if arr.size >= binder_len else arr
+    finite = arr[np.isfinite(arr)]
+    if finite.size and np.nanmax(finite) <= 1.0:        # 0-1 -> 0-100
+        arr = arr * 100.0
+    return arr
+
+
+def _loop_plddt(plddt_res, loop_pos0):
+    """Mean pLDDT (0-100) over loop residues; NaN if unavailable."""
+    if plddt_res is None or not loop_pos0:
+        return float("nan")
+    vals = [plddt_res[i] for i in loop_pos0 if 0 <= i < plddt_res.size and np.isfinite(plddt_res[i])]
+    return float(np.mean(vals)) if vals else float("nan")
+
+
+def _extract_pae(res):
+    """Best-effort [N, N] PAE matrix from the fold result, or None (API-defensive)."""
+    cand = None
+    for owner in (res, getattr(res, "complex", None), getattr(res, "structure", None)):
+        if owner is None:
+            continue
+        for name in ("pae", "predicted_aligned_error", "pae_matrix", "aligned_error"):
+            v = getattr(owner, name, None)
+            if v is not None:
+                cand = v
+                break
+        if cand is not None:
+            break
+    if cand is None:
+        return None
+    try:
+        mat = np.asarray(cand, dtype=float)
+    except Exception:
+        try:
+            mat = cand.detach().cpu().numpy().astype(float)     # torch tensor
+        except Exception:
+            return None
+    mat = np.squeeze(mat)
+    return mat if mat.ndim == 2 else None
+
+
+def _loop_interface_pae(pae, loop_pos0, binder_len, target_len):
+    """Mean PAE (both directions) between binder loop residues and the target chain."""
+    if pae is None or not loop_pos0:
+        return float("nan")
+    total = binder_len + target_len
+    if pae.shape != (total, total):
+        # token count != residue count (e.g. chain-break tokens). Don't guess the
+        # offset -- emit NaN; the raw matrix is saved as .npy for offline recompute.
+        if not _LOOP_PAE_WARNED["done"]:
+            print(f"  note: PAE shape {tuple(pae.shape)} != "
+                  f"binder+target residues ({total}); skipping interface PAE.")
+            _LOOP_PAE_WARNED["done"] = True
+        return float("nan")
+    a_idx = np.array([i for i in loop_pos0 if 0 <= i < binder_len], dtype=int)
+    b_idx = np.arange(binder_len, total)
+    if a_idx.size == 0 or b_idx.size == 0:
+        return float("nan")
+    return float((pae[np.ix_(a_idx, b_idx)].mean() + pae[np.ix_(b_idx, a_idx)].mean()) / 2.0)
 
 
 # ── ESMFold2 interface (isolated; edit here if the installed API differs) ─────
@@ -98,12 +221,22 @@ def _save_structure(res, stub: str):
 
 
 def predict_complex(model, builder, binder_seq: str, target_seq: str,
-                    binder_len: int, seed: int = 0, cif_stub: str = None) -> dict:
+                    binder_len: int, seed: int = 0, cif_stub: str = None,
+                    design_loops=None) -> dict:
     """
-    Fold a two-chain complex and return {esm_iptm, esm_ptm, esm_plddt[, esm_cif]}.
-    pLDDT is the binder-chain mean (0-100). Field access is defensive so minor
-    API drift doesn't crash the run. If `cif_stub` is given, the predicted
-    structure is written to disk (free — it's already computed by fold()).
+    Fold a two-chain complex and return
+        {esm_iptm, esm_ptm, esm_plddt, esm_lplddt, esm_pae[, esm_cif]}.
+
+      esm_plddt   binder-chain mean pLDDT (0-100).
+      esm_lplddt  pLDDT over ONLY the redesigned-loop residues (0-100) -- the
+                  loop-focused confidence the binding recipe ranks on.
+                  `design_loops` restricts which loops (default: all active loops).
+      esm_pae     mean interface PAE (A) between those loop residues and the target
+                  chain, both directions. NaN if the model emits no PAE matrix.
+
+    Field access is defensive so minor API drift doesn't crash the run. If
+    `cif_stub` is given, the predicted structure (and PAE matrix, if any) is written
+    to disk (free -- already computed by fold()).
     """
     from esm.models.esmfold2 import ProteinInput, StructurePredictionInput
 
@@ -124,17 +257,15 @@ def predict_complex(model, builder, binder_seq: str, target_seq: str,
     iptm = _get(res, "iptm", "interface_ptm")
     ptm  = _get(res, "ptm")
 
-    # pLDDT: per-residue array → binder-chain mean → 0-100
-    plddt_arr = _get(res, "plddt", "plddts")
-    plddt = np.nan
-    if plddt_arr is not None:
-        arr = np.asarray(plddt_arr, dtype=float).flatten()
-        if arr.size >= binder_len:
-            arr = arr[:binder_len]
-        if arr.size:
-            plddt = float(arr.mean())
-            if 0.0 < plddt <= 1.0:
-                plddt *= 100.0
+    # Per-residue pLDDT (binder chain first) -> whole-binder mean + loop-only mean.
+    plddt_res = _binder_plddt_0_100(_get(res, "plddt", "plddts"), binder_len)
+    plddt = float(np.nanmean(plddt_res)) if plddt_res is not None and plddt_res.size else np.nan
+    loop_pos0 = _loop_positions_0indexed(binder_seq, design_loops)
+    lplddt = _loop_plddt(plddt_res, loop_pos0)
+
+    # Interface PAE over the loop residues (needs a PAE matrix; NaN if unavailable).
+    pae_mat = _extract_pae(res)
+    loop_pae = _loop_interface_pae(pae_mat, loop_pos0, binder_len, len(target_seq))
 
     def _f(x):
         try:
@@ -142,11 +273,17 @@ def predict_complex(model, builder, binder_seq: str, target_seq: str,
         except (TypeError, ValueError):
             return np.nan
 
-    out = {"esm_iptm": _f(iptm), "esm_ptm": _f(ptm), "esm_plddt": plddt}
+    out = {"esm_iptm": _f(iptm), "esm_ptm": _f(ptm), "esm_plddt": plddt,
+           "esm_lplddt": lplddt, "esm_pae": loop_pae}
     if cif_stub:
         saved = _save_structure(res, cif_stub)
         if saved:
             out["esm_cif"] = saved
+        if pae_mat is not None:                 # keep the raw matrix for offline recompute
+            try:
+                np.save(f"{cif_stub}_pae.npy", pae_mat)
+            except Exception:
+                pass
     return out
 
 
@@ -230,20 +367,23 @@ def main():
         cif_dir = Path(args.cif_dir)
         cif_dir.mkdir(parents=True, exist_ok=True)
 
+    has_loops = "design_loops" in designs.columns
     rows, n_ok = [], 0
     for i, d in enumerate(designs.itertuples(index=False), 1):
         bseq, tseq = d.full_seq, d.target_seq
         if not isinstance(bseq, str) or not isinstance(tseq, str) or not bseq or not tseq:
             continue
+        dloops = getattr(d, "design_loops", None) if has_loops else None
         try:
             stub = str(cif_dir / str(d.design_id)) if cif_dir else None
             metrics = predict_complex(model, builder, bseq, tseq, len(bseq),
-                                      seed=args.seed, cif_stub=stub)
+                                      seed=args.seed, cif_stub=stub, design_loops=dloops)
             rows.append({"design_id": d.design_id, "target_name": d.target_name,
                          "full_seq": bseq, **metrics})
             n_ok += 1
             print(f"  [{i}/{len(designs)}] {d.design_id}: "
-                  f"ipTM={metrics['esm_iptm']:.3f}  pLDDT={metrics['esm_plddt']:.1f}")
+                  f"ipTM={metrics['esm_iptm']:.3f}  pLDDT={metrics['esm_plddt']:.1f}  "
+                  f"LpLDDT={metrics['esm_lplddt']:.1f}  loopPAE={metrics['esm_pae']:.1f}")
         except Exception as exc:
             print(f"  [{i}/{len(designs)}] {d.design_id}: ERROR {exc}")
 

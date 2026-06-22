@@ -9,12 +9,11 @@ SLURM/SLURM_credentials.sh
 # RFdiffusion output files
 outputs/
 
-# Protein Analysis
-Protein Analysis/__pycache__/
-Protein Analysis/.streamlit/secrets.toml
+# Python cache files
+*/__pycache__/
 
-# MetalBinder
-MetalBinder/__pycache__/
+# Streamlit secrets
+*/.streamlit/secrets.toml
 
 # Inprogress Articles & Presentations
 Demonstrations/Papers/
