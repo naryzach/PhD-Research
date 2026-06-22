@@ -25,3 +25,7 @@ Demonstrations/Presentations/*/node_modules/
 Demonstrations/Presentations/*/dist/
 Demonstrations/Presentations/*/.slidev/
 Demonstrations/Presentations/*/package-lock.json
+
+# Other generated files
+*.pptx
+walkthrough.md

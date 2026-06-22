@@ -392,6 +392,51 @@ layout: default
 
 ---
 
+# ADAM17 Plasmid Miniprep (June 18)
+
+<div class="grid grid-cols-12 gap-6 mt-4 items-center">
+  <div class="col-span-5">
+    <h2 class="text-teal-600 font-semibold mb-2">Plasmid Isolation & Purity</h2>
+    <p class="text-xs text-gray-700 leading-relaxed mb-3">
+      Isolated the expression plasmid for <strong>(pET-)ADAM-17cd-HT</strong> using the Promega Wizard® Plus SV Miniprep kit.
+    </p>
+    <div class="p-2 bg-emerald-50 border border-emerald-200 rounded text-2xs text-emerald-800">
+      <strong>Sequence Validation:</strong> Isolated plasmid DNA was submitted to Eurofins Genomics for whole plasmid nanopore sequencing to verify construct integrity.
+    </div>
+  </div>
+  <div class="col-span-7 bg-white p-4 rounded border shadow-sm">
+    <div class="text-xs font-bold text-gray-800 mb-2">Spectrophotometric DNA Yields & Ratios</div>
+    <table class="w-full text-left text-2xs border-collapse">
+      <thead>
+        <tr class="border-b text-teal-600 font-bold">
+          <th class="py-1">Parameter</th>
+          <th class="py-1">Measured Value</th>
+          <th class="py-1">Quality Assessment</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="border-b">
+          <td class="py-1"><strong>DNA Concentration</strong></td>
+          <td class="py-1">99.5 ng/μL</td>
+          <td class="py-1 text-emerald-600 font-semibold">High Yield (9.95 μg total)</td>
+        </tr>
+        <tr class="border-b">
+          <td class="py-1"><strong>A260 / A280 Ratio</strong></td>
+          <td class="py-1">1.894</td>
+          <td class="py-1 text-emerald-600 font-semibold">Excellent Purity (Target: ~1.8)</td>
+        </tr>
+        <tr>
+          <td class="py-1"><strong>A260 / A230 Ratio</strong></td>
+          <td class="py-1">1.785</td>
+          <td class="py-1 text-emerald-600 font-semibold">Minimal salt/organic carryover</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+---
+
 # Summary & Next Steps
 
 <div class="grid grid-cols-2 gap-8 mt-6">
@@ -402,6 +447,7 @@ layout: default
     <ul class="space-y-3 text-xs text-gray-700">
       <li><strong>Western Blot & BCA:</strong> Verified 60 kDa soluble ADAM10 expression and standardized inputs to 0.20 mg/mL.</li>
       <li><strong>DNA Audit:</strong> Audited sequence properties (MW, pI, promoters, tags) of primary ADAM plasmids.</li>
+      <li><strong>ADAM17 Miniprep:</strong> Isolated (pET-)ADAM-17cd-HT plasmid construct yielding 99.5 ng/μL DNA with high purity (A260/A280 = 1.894).</li>
       <li><strong>Retry Setup:</strong> Initiated four-condition optimization trial for E. coli expression of ADAM10.</li>
     </ul>
   </div>
@@ -412,7 +458,7 @@ layout: default
     <ul class="space-y-3 text-xs text-gray-700">
       <li><strong>Process Retry Trials:</strong> Run SDS-PAGE and Western blots on harvesting timepoint aliquots.</li>
       <li><strong>Buffer Optimization:</strong> Calibrate FPLC buffer pH using verified pIs to enhance target column retention.</li>
-      <li><strong>ADAM17 Recovery:</strong> Optimize helper plasmid schemes to rescue low-concentration ADAM17 preparations.</li>
+      <li><strong>ADAM17 Expression:</strong> Transform BL21(DE3) with the verified plasmid and DsbC helper to initiate expression trials.</li>
     </ul>
   </div>
 </div>

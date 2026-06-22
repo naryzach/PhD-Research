@@ -58,25 +58,27 @@ def chain_seq(pdb, chain="A"):
 # target sequences (chain A = target in the HADDOCK PDBs)
 target_seq = {t: chain_seq(os.path.join(HAD, f"{t}_TIMP3_HADDOCK.pdb"), "A") for t in TARGETS}
 
-# binder sequences: map each twist row -> construct name via its loop + loop-seq
+# binder sequences: map each twist row -> (full_seq, designed-loop) via loop + loop-seq.
+# `full_seq` matches the column score_with_esmfold2.py --input expects; `design_loops`
+# tells the scorer which loop to measure for loop-pLDDT / interface-PAE.
 tw = pd.read_csv(TWIST)
-binder_seq = {}
+binder_info = {}   # construct -> (full_seq, loop "AB"/"C")
 for _, r in tw.iterrows():
     m = re.match(r"Var_(AB|C)_LOOP-([A-Za-z]+)", str(r["Construct Name"]))
     if not m:
         continue
     key = (m.group(1).lower(), m.group(2).lower())
     if key in CONSTRUCTS:
-        binder_seq[CONSTRUCTS[key]] = r["Amino Acid Sequence"]
+        binder_info[CONSTRUCTS[key]] = (r["Amino Acid Sequence"], m.group(1))
 
 rows = []
-for constr, bseq in binder_seq.items():
+for constr, (bseq, loop) in binder_info.items():
     for t in TARGETS:
-        rows.append({"design_id": constr, "target_name": t,
-                     "binder_seq": bseq, "target_seq": target_seq[t]})
+        rows.append({"design_id": constr, "target_name": t, "full_seq": bseq,
+                     "target_seq": target_seq[t], "design_loops": loop})
 man = pd.DataFrame(rows).sort_values(["design_id", "target_name"])
 out = os.path.join(OUTD, "esmfold2_manifest.csv")
 man.to_csv(out, index=False)
 print(f"Wrote {len(man)} folds ({man.design_id.nunique()} constructs x {len(TARGETS)} targets) -> {out}")
 print(f"Constructs: {sorted(man.design_id.unique())}")
-print(f"Missing binder seqs for: {set(CONSTRUCTS.values()) - set(binder_seq)}")
+print(f"Missing binder seqs for: {set(CONSTRUCTS.values()) - set(binder_info)}")

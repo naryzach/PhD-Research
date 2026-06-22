@@ -1317,6 +1317,54 @@ transition: fade-out
 </div>
 
 ---
+layout: default
+transition: fade-out
+---
+
+# ADAM17 Plasmid Miniprep (June 18)
+
+<div class="grid grid-cols-12 gap-6 mt-6 items-center">
+  <div class="col-span-5">
+    <h2 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-2">Plasmid Isolation & Purity</h2>
+    <p class="text-[10px] leading-relaxed opacity-70 mb-3">
+      Isolated the expression plasmid for <strong>(pET-)ADAM-17cd-HT</strong> using the Promega Wizard® Plus SV Miniprep kit.
+    </p>
+    <div class="p-2.5 bg-blue-500/10 border border-blue-500/20 rounded text-[9px]">
+      <strong class="text-blue-400">Sequence Validation:</strong> Isolated plasmid DNA was submitted to Eurofins Genomics for whole plasmid nanopore sequencing to verify construct integrity.
+    </div>
+  </div>
+  <div class="col-span-7 bg-white/5 p-4 rounded border border-white/10">
+    <div class="text-xs font-bold text-blue-300 mb-2">Spectrophotometric DNA Yields & Ratios</div>
+    <table class="w-full text-left text-[10px] border-collapse">
+      <thead>
+        <tr class="border-b border-white/20 text-blue-400 font-bold">
+          <th class="py-1">Parameter</th>
+          <th class="py-1">Measured Value</th>
+          <th class="py-1">Quality Assessment</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="border-b border-white/10">
+          <td class="py-1 font-medium">DNA Concentration</td>
+          <td class="py-1">99.5 ng/μL</td>
+          <td class="py-1 text-emerald-400 font-semibold">High Yield (9.95 μg total)</td>
+        </tr>
+        <tr class="border-b border-white/10">
+          <td class="py-1 font-medium">A260 / A280 Ratio</td>
+          <td class="py-1">1.894</td>
+          <td class="py-1 text-emerald-400 font-semibold">Excellent Purity (Target: ~1.8)</td>
+        </tr>
+        <tr>
+          <td class="py-1 font-medium">A260 / A230 Ratio</td>
+          <td class="py-1">1.785</td>
+          <td class="py-1 text-emerald-400 font-semibold">Minimal salt/organic carryover</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+---
 layout: center
 class: text-center
 ---
