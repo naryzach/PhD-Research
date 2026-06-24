@@ -160,40 +160,72 @@ def assign_groups(loops: pd.Series, cluster_hamming1: bool) -> np.ndarray:
 
 
 def grouped_split(wide: pd.DataFrame, cfg: dict) -> pd.DataFrame:
-    from sklearn.model_selection import GroupShuffleSplit
+    """Assign whole loop-groups to train/val/test, targeting ROW fractions.
 
+    Groups are placed greedily (shuffled) so the realised split matches the
+    requested row proportions even when group sizes are uneven -- unlike
+    sklearn's GroupShuffleSplit, which targets a fraction of *groups* and so
+    blows up the ratio when one group is huge.
+    """
     sp = cfg["split"]
     seed = int(sp.get("seed", 42))
-    groups = assign_groups(wide["loop"], bool(sp.get("cluster_hamming1", True)))
+    cluster = bool(sp.get("cluster_hamming1", False))
+    groups = assign_groups(wide["loop"], cluster)
     wide = wide.copy()
     wide["group"] = groups
 
-    idx = np.arange(len(wide))
-    test_frac = float(sp["test_frac"])
-    val_frac = float(sp["val_frac"])
+    n = len(wide)
+    sizes = wide.groupby("group").size()
+    biggest = int(sizes.max())
+    if biggest > 0.5 * n:
+        print(f"  [warn] largest loop-group is {biggest} rows ({biggest/n:.1%} of data) -- "
+              f"the edit-distance<=1 loop graph has percolated into a giant component, so a "
+              f"clean grouped split is impossible. Set split.cluster_hamming1: false "
+              f"(exact-loop groups) for a balanced split; see the Hamming-1 exposure diagnostic.")
 
-    gss1 = GroupShuffleSplit(n_splits=1, test_size=test_frac, random_state=seed)
-    trainval_idx, test_idx = next(gss1.split(idx, groups=groups))
+    test_target, val_target = float(sp["test_frac"]) * n, float(sp["val_frac"]) * n
+    gids = sizes.index.to_numpy().copy()
+    np.random.default_rng(seed).shuffle(gids)
 
-    rel_val = val_frac / (1.0 - test_frac)
-    gss2 = GroupShuffleSplit(n_splits=1, test_size=rel_val, random_state=seed)
-    tv_groups = groups[trainval_idx]
-    tr_rel, val_rel = next(gss2.split(trainval_idx, groups=tv_groups))
-    train_idx = trainval_idx[tr_rel]
-    val_idx = trainval_idx[val_rel]
+    assign, c_test, c_val = {}, 0, 0
+    for g in gids:
+        s = int(sizes[g])
+        if c_test < test_target:
+            assign[g], c_test = "test", c_test + s
+        elif c_val < val_target:
+            assign[g], c_val = "val", c_val + s
+        else:
+            assign[g] = "train"
+    wide["split"] = wide["group"].map(assign)
 
-    split = np.empty(len(wide), dtype=object)
-    split[train_idx] = "train"
-    split[val_idx] = "val"
-    split[test_idx] = "test"
-    wide["split"] = split
-
-    # Leakage assertion: no group shared across splits.
-    overlap = (
-        wide.groupby("group")["split"].nunique().gt(1).sum()
-    )
+    # No group may straddle splits (holds by construction; assert as a guard).
+    overlap = wide.groupby("group")["split"].nunique().gt(1).sum()
     assert overlap == 0, f"{overlap} loop-groups leaked across splits!"
     return wide
+
+
+def hamming1_exposure(wide: pd.DataFrame) -> dict:
+    """Fraction of val/test loops within edit-distance<=1 of any TRAIN loop.
+
+    Honest measure of how 'held out' the eval splits really are: with exact-loop
+    grouping the loops are disjoint, but near-neighbours can still cross splits.
+    """
+    train_keys = set()
+    for s in wide.loc[wide["split"] == "train", "loop"].fillna("").astype(str):
+        train_keys.add(("s", s))
+        for i in range(len(s)):
+            train_keys.add(("d", s[:i] + s[i + 1:]))
+
+    def exposed(s: str) -> bool:
+        if ("s", s) in train_keys:
+            return True
+        return any(("d", s[:i] + s[i + 1:]) in train_keys for i in range(len(s)))
+
+    out = {}
+    for spname in ("val", "test"):
+        loops = wide.loc[wide["split"] == spname, "loop"].fillna("").astype(str)
+        out[spname] = round(float(np.mean([exposed(l) for l in loops])), 4) if len(loops) else None
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -261,6 +293,7 @@ def main():
         s.to_parquet(out_dir / f"{sp}.parquet", index=False)
 
     manifest = build_manifest(wide, cfg)
+    manifest["hamming1_exposure"] = hamming1_exposure(wide)
     with open(out_dir / "manifest.json", "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2)
 
@@ -273,6 +306,8 @@ def main():
             print(f"        {t:<7} assayed={pt['n_assayed']:<6} "
                   f"pos={pt['n_pos']:<6} pos_rate={pt['pos_rate']}")
     print("\npos_weight (train n_neg/n_pos):", manifest["pos_weight"])
+    exp = manifest["hamming1_exposure"]
+    print(f"Hamming-1 exposure (val/test loops within 1 edit of a train loop): {exp}")
     print(f"\nSaved splits + manifest to {out_dir}")
 
 

@@ -38,8 +38,13 @@ preprocess:
 split:
   test_frac: 0.15
   val_frac: 0.15
-  cluster_hamming1: true   # merge edit-distance<=1 loops into one split group
-                           # (prevents near-duplicate loops leaking across splits)
+  # Group the split by exact loop motif (disjoint loops across train/val/test).
+  # NOTE: leave this false at full scale. The edit-distance<=1 loop graph
+  # percolates (~58% of loops form one connected component over the full 47k
+  # set), so cluster_hamming1: true collapses most data into one giant group and
+  # wrecks the train/val/test ratio. data_prep reports a Hamming-1 exposure
+  # diagnostic so you can see near-neighbour overlap regardless.
+  cluster_hamming1: false
   seed: 42
 
 train:
