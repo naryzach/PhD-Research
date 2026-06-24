@@ -1,0 +1,72 @@
+# ============================================================================
+# ESM-C binder-classification config
+# ----------------------------------------------------------------------------
+# Multi-task binary model: one ESM-C backbone, one bind/no-bind head per target.
+# Each lab example was assayed against ONE target, so its loss only supervises
+# that target's head (masked loss). At inference the model emits a binding
+# probability for ALL targets, letting you inspect (non-)selectivity.
+# ============================================================================
+
+data:
+  csv_path: "../Data/TIMP3_Binding_Results/TIMP_binder_all.csv"
+  seq_col: "Full Seq"      # full 188-aa scaffold sequence
+  target_col: "Target"     # protease the row was screened against
+  encoding_col: "Encoding" # 1 = bound that target, 0 = did not
+  loop_col: "Residues"     # the grafted variable loop (6 aa) -> located in seq
+  count_col: "Count"       # observation / read count = confidence
+
+# Order here defines the head order; it is persisted to model_meta.json.
+targets: ["ADAM17", "MMP3", "MMP9"]
+
+output_dir: "../Local/esmc_binder_out"
+
+model:
+  # Synthyra ESM++ = HF-native port of ESM-C (identical weights).
+  #   Synthyra/ESMplusplus_small -> ESM-C 300M (default, fits a 12 GB GPU)
+  #   Synthyra/ESMplusplus_large -> ESM-C 600M
+  model_id: "Synthyra/ESMplusplus_small"
+  pooling: "loop"          # loop | mean | cls  (loop = pool only the grafted loop)
+  dropout: 0.1
+  max_length: 1024
+
+preprocess:
+  min_count: 1             # drop (seq,target) whose total count < this
+  count_weighting: "log"   # none | log  -> per-target loss weight = log1p(count)
+  # conflicting (seq,target) rows (both 0 and 1 observed) are resolved by
+  # count-weighted majority vote; exact ties are dropped.
+
+split:
+  test_frac: 0.15
+  val_frac: 0.15
+  cluster_hamming1: true   # merge edit-distance<=1 loops into one split group
+                           # (prevents near-duplicate loops leaking across splits)
+  seed: 42
+
+train:
+  batch_size: 16
+  fp16: true
+  grad_clip: 1.0
+  weight_decay: 0.01
+  metric: "pr_auc"         # val selection metric (mean over targets): pr_auc | mcc | roc_auc
+  phase1:                  # warm up the randomly-initialised heads, backbone frozen
+    epochs: 3
+    lr: 1.0e-3
+  phase2:                  # fine-tune the backbone
+    epochs: 15
+    lr: 1.0e-5
+    unfreeze_layers: 6     # int = top-N transformer blocks | "all" | 0 (head only)
+    early_stop_patience: 3
+
+visualize:
+  reducer: "umap"          # umap | pca  (visualize.py falls back to pca if umap-learn absent)
+  n_neighbors: 15
+  min_dist: 0.1
+  max_points: 5000
+
+# Overrides applied when train.py / data_prep.py are run with --smoke / --limit.
+smoke:
+  limit: 1500
+  batch_size: 8
+  phase1_epochs: 1
+  phase2_epochs: 1
+  unfreeze_layers: 2

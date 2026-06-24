@@ -1,0 +1,16 @@
+# Core
+torch>=2.1
+transformers>=4.40
+einops             # required by the ESM++/ESM-C remote modeling code
+numpy
+pandas
+pyarrow            # parquet I/O for the prepared splits
+scikit-learn
+pyyaml
+tqdm
+
+# Visualization (visualize.py)
+matplotlib
+seaborn
+umap-learn         # UMAP dimensionality reduction; visualize.py falls back to PCA if absent
+                   # (pulls in numba + llvmlite; see README for the recommended Python env)
