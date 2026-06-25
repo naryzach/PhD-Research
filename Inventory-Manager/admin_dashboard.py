@@ -6,7 +6,7 @@ from friday_mailer import send_friday_digest
 from datetime import datetime
 import os
 import time
-from utils import display_tracking_button
+from utils import display_tracking_button, color_status
 
 # --- Authentication Setup ---
 def check_password():
@@ -38,23 +38,6 @@ def check_password():
         
     return False
 
-# --- Helper Functions ---
-def color_status(row):
-    # Support both internal 'status' and user-facing 'Status'
-    status_val = row.get('Status') if 'Status' in row else row.get('status')
-    status = str(status_val or '').lower()
-    if 'need to order' in status:
-        return ['background-color: rgba(255, 0, 0, 0.2)'] * len(row) # Red
-    elif 'ordered' in status:
-        return ['background-color: rgba(255, 255, 0, 0.2)'] * len(row) # Yellow
-    elif 'do not order' in status:
-        return ['background-color: rgba(128, 0, 128, 0.2)'] * len(row) # Purple
-    elif 'shipped' in status:
-        return ['background-color: rgba(0, 0, 255, 0.2)'] * len(row) # Blue
-    elif 'received' in status:
-        return ['background-color: rgba(0, 255, 0, 0.2)'] * len(row) # Green
-    return ['background-color: rgba(255, 85, 0, 0.25)'] * len(row) # Distinct Orange
-
 # --- Security Gate ---
 # If the password is wrong or not entered yet, stop the script entirely
 if not check_password():
@@ -75,6 +58,13 @@ db = get_db()
 
 # The core tables in your database
 TABLES = ["inventory", "purchase_requests", "usage_log"]
+
+# Primary key for each table, used to safely merge edits back into the database
+PRIMARY_KEYS = {
+    "inventory": "item_id",
+    "purchase_requests": "request_id",
+    "usage_log": "log_id",
+}
 
 menu = ["🔄 Manage Order Status", "✏️ Edit Tables Directly", "📥 Export Data (CSV)", "💻 Advanced: Raw SQL", "🛠️ Database Maintenance", "⚙️ System Settings"]
 choice = st.sidebar.radio("Admin Tools", menu)
@@ -297,24 +287,78 @@ elif choice == "✏️ Edit Tables Directly":
     st.warning("⚠️ **Warning:** You are editing the raw database. Changes made here will immediately affect the main app.")
     
     selected_table = st.selectbox("Select Table to Edit", TABLES)
-    
+
     # Load the current data
     df = db.get_query_df(f"SELECT * FROM {selected_table}")
-    
+
+    # --- View Controls (find a row faster; these never change the saved data) ---
+    with st.expander("🔎 Find / Sort  —  view only, does not change saved data", expanded=True):
+        fcol1, fcol2, fcol3 = st.columns([2, 1, 1])
+        with fcol1:
+            search = st.text_input("Search", placeholder="Filter rows by any column...", key=f"search_{selected_table}")
+        with fcol2:
+            sort_col = st.selectbox("Sort by", ["(unsorted)"] + list(df.columns), key=f"sortcol_{selected_table}")
+        with fcol3:
+            # Default to newest-first (Descending) for ID and date/timestamp columns
+            col_l = sort_col.lower()
+            newest_first = col_l.endswith("_id") or "date" in col_l or col_l.endswith("_at") or "depleted" in col_l
+            # Key includes the column so switching columns re-applies the smart default,
+            # while still letting the admin override the direction per column.
+            sort_dir = st.radio(
+                "Order", ["Ascending", "Descending"],
+                index=1 if newest_first else 0,
+                key=f"sortdir_{selected_table}_{sort_col}",
+            )
+        hide_received = False
+        if selected_table == "purchase_requests" and "status" in df.columns:
+            hide_received = st.checkbox("Hide 'Received' items", key="hide_received_pr")
+
+    # Build the filtered/sorted view that gets shown in the editor.
+    view_df = df.copy()
+    if hide_received:
+        view_df = view_df[view_df["status"].astype(str).str.lower() != "received"]
+    if search:
+        mask = view_df.apply(
+            lambda r: r.astype(str).str.contains(search, case=False, na=False, regex=False).any(),
+            axis=1,
+        )
+        view_df = view_df[mask]
+    if sort_col != "(unsorted)":
+        view_df = view_df.sort_values(
+            by=sort_col, ascending=(sort_dir == "Ascending"), kind="stable", na_position="last"
+        )
+
+    # Remember rows that are filtered OUT so we can preserve them untouched on save.
+    pk = PRIMARY_KEYS.get(selected_table)
+    if pk and pk in df.columns:
+        shown_ids = set(view_df[pk].dropna().tolist())
+        hidden_df = df[~df[pk].isin(shown_ids)]
+    else:
+        hidden_df = df.iloc[0:0]
+
     # Display the interactive editor
     st.markdown(f"### Editing: `{selected_table}`")
-    st.caption("You can edit cells directly, click column headers to sort, or use the UI to add/delete rows.")
-    
+    st.caption(
+        f"Showing {len(view_df)} of {len(df)} rows. "
+        "Edits are merged back safely — rows hidden by search/sort/filter are left untouched."
+    )
+
+    # Key the editor to the current view so changing a filter/sort starts a clean
+    # editor instead of misapplying pending edits to different rows.
+    view_sig = f"{selected_table}|{search}|{sort_col}|{sort_dir}|{hide_received}"
     # st.data_editor allows full CRUD (Create, Read, Update, Delete) right in the browser
-    edited_df = st.data_editor(df, num_rows="dynamic", width='stretch', key=f"editor_{selected_table}")
-    
+    edited_df = st.data_editor(view_df, num_rows="dynamic", width='stretch', key=f"editor_{view_sig}")
+
     if st.button("💾 Save Changes to Database"):
         try:
+            # Recombine edited (visible) rows with the untouched hidden rows so that
+            # filtering the view never deletes data.
+            final_df = pd.concat([hidden_df, edited_df], ignore_index=True)
             # To preserve your schema (primary keys, defaults), we empty the table...
             db.cursor.execute(f"DELETE FROM {selected_table}")
-            # ...and re-insert the perfectly edited dataframe. 
-            # Because edited_df still contains the original IDs, relationships remain intact.
-            edited_df.to_sql(selected_table, db.conn, if_exists='append', index=False)
+            # ...and re-insert the full dataframe.
+            # Because final_df still contains the original IDs, relationships remain intact.
+            final_df.to_sql(selected_table, db.conn, if_exists='append', index=False)
             db.commit()
             st.success(f"Successfully updated the '{selected_table}' table!")
         except Exception as e:

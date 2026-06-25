@@ -1,0 +1,4 @@
+[server]
+# Don't auto-open a browser tab when running `streamlit run`.
+# Open the printed Local URL in your own browser instead.
+headless = true

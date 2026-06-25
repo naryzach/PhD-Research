@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import smtplib
 from email.message import EmailMessage
 import time
-from utils import display_tracking_button
+from utils import display_tracking_button, color_status, highlight_low_stock, color_inventory_matches
 
 # --- Smart Defaults Configuration ---
 CATEGORY_DEFAULTS = {
@@ -39,49 +39,6 @@ db = get_db()
 
 # --- Email Digest Function ---
 # Remote function imported from friday_mailer
-
-# --- Helper function for UI styling ---
-def highlight_low_stock(row):
-    """Highlights rows based on stock level."""
-    # Note: These keys match the display names in the dashboard
-    qty = row.get('Quantity', 0)
-    threshold = row.get('Reorder Threshold', 0)
-    is_depleted = row.get('is_depleted', False)
-    
-    if is_depleted or qty <= 0:
-        return ['background-color: rgba(255, 0, 0, 0.2)'] * len(row) # Red
-    elif qty <= threshold:
-        return ['background-color: rgba(255, 255, 0, 0.2)'] * len(row) # Yellow
-    return [''] * len(row)
-
-def color_status(row):
-    # Support both internal 'status' and user-facing 'Status'
-    status_val = row.get('Status') if 'Status' in row else row.get('status')
-    status = str(status_val or '').lower()
-    if 'need to order' in status:
-        return ['background-color: rgba(255, 0, 0, 0.2)'] * len(row) # Red
-    elif 'ordered' in status:
-        return ['background-color: rgba(255, 255, 0, 0.2)'] * len(row) # Yellow
-    elif 'do not order' in status:
-        return ['background-color: rgba(128, 0, 128, 0.2)'] * len(row) # Purple
-    elif 'shipped' in status:
-        return ['background-color: rgba(0, 0, 255, 0.2)'] * len(row) # Blue
-    elif 'received' in status:
-        return ['background-color: rgba(0, 255, 0, 0.2)'] * len(row) # Green
-    return ['background-color: rgba(255, 85, 0, 0.25)'] * len(row) # Distinct Orange
-
-def color_inventory_matches(row):
-    """Highlights inventory search results based on stock level."""
-    # Note: Using 'Qty' to match the renamed column in search results
-    qty = float(row.get('Qty', 0))
-    threshold = float(row.get('reorder_threshold', 0))
-    is_depleted = row.get('is_depleted', False)
-    
-    if is_depleted or qty <= 0:
-        return ['background-color: rgba(255, 0, 0, 0.2)'] * len(row) # Light Red
-    elif qty <= threshold:
-        return ['background-color: rgba(255, 255, 0, 0.2)'] * len(row) # Light Yellow
-    return [''] * len(row)
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="Lab Manager", layout="wide", page_icon="🔬")
@@ -141,8 +98,8 @@ if choice == "Inventory Dashboard":
         }
         df_display = df_inv.rename(columns=clean_headers)
         
-        # Define the columns we want to show (hiding is_depleted used for styling)
-        display_order = ("Item Name", "Category", "Source Type", "Quantity", "Unit", "Reorder Threshold", "Storage Location", "Owner")
+        # Define the columns we want to show (Category omitted — the tabs already split by category)
+        display_order = ("Item Name", "Source Type", "Quantity", "Unit", "Reorder Threshold", "Storage Location", "Owner")
         
         if categories:
             tabs = st.tabs(["All Items"] + categories)
@@ -176,7 +133,7 @@ if choice == "Inventory Dashboard":
             SELECT i.item_id, i.name, i.quantity, i.unit, i.reorder_threshold, i.is_depleted, i.last_depleted, i.catalog_number, i.seller,
                    (SELECT status FROM purchase_requests pr 
                     WHERE (pr.item_name = i.name OR (i.catalog_number IS NOT NULL AND i.catalog_number != '' AND pr.catalog_number = i.catalog_number))
-                    AND pr.status NOT IN ('Received', 'Cancelled', 'LOST')
+                    AND pr.status NOT IN ('Received', 'Cancelled', 'Lost')
                     ORDER BY pr.request_date DESC LIMIT 1) as pending_status
             FROM inventory i
             WHERE (i.quantity <= i.reorder_threshold OR i.is_depleted IS TRUE)
@@ -237,7 +194,7 @@ elif choice == "Request a Purchase":
     if 'search_term' not in st.session_state:
         st.session_state.search_term = ""
     # States to hold pre-filled data for reorders
-    for key in ['prefill_cat', 'prefill_seller', 'prefill_link', 'prefill_price']:
+    for key in ['prefill_cat', 'prefill_seller', 'prefill_link', 'prefill_price', 'prefill_specs']:
         if key not in st.session_state:
             st.session_state[key] = "" if key != 'prefill_price' else 0.0
 
@@ -296,7 +253,8 @@ elif choice == "Request a Purchase":
                         st.session_state.prefill_seller = row_data['seller'] if pd.notna(row_data['seller']) else ""
                         st.session_state.prefill_link = row_data['link'] if pd.notna(row_data['link']) else ""
                         st.session_state.prefill_price = float(row_data['price']) if pd.notna(row_data['price']) else 0.0
-                        
+                        st.session_state.prefill_specs = row_data['specs'] if pd.notna(row_data['specs']) else ""
+
                         st.session_state.purchase_step = 2
                         time.sleep(0.5)
                         st.rerun()
@@ -320,7 +278,8 @@ elif choice == "Request a Purchase":
                         st.session_state.prefill_seller = row_data['seller'] if pd.notna(row_data['seller']) else ""
                         st.session_state.prefill_link = row_data['link'] if pd.notna(row_data['link']) else ""
                         st.session_state.prefill_price = float(row_data['price']) if pd.notna(row_data['price']) else 0.0
-                        
+                        st.session_state.prefill_specs = row_data['specs'] if pd.notna(row_data['specs']) else ""
+
                         st.session_state.purchase_step = 2
                         time.sleep(0.5)
                         st.rerun()
@@ -336,6 +295,7 @@ elif choice == "Request a Purchase":
                 st.session_state.prefill_seller = ""
                 st.session_state.prefill_link = ""
                 st.session_state.prefill_price = 0.0
+                st.session_state.prefill_specs = ""
                 st.session_state.purchase_step = 2
                 st.rerun()
 
@@ -353,7 +313,7 @@ elif choice == "Request a Purchase":
             req_name = st.text_input("Your Name")
             # Pulls the name from the search bar or the reorder selection
             item_name = st.text_input("Exact Item Name", value=st.session_state.search_term)
-            specs = st.text_area("Specifications (e.g., volume, purity, variant wt)")
+            specs = st.text_area("Specifications (e.g., volume, purity, variant wt)", value=st.session_state.prefill_specs)
         with col2:
             # --- Vendor Suggestion Logic ---
             existing_vendors = db.get_unique_vendors()
@@ -430,18 +390,18 @@ elif choice == "Process Orders":
     if not df_pending.empty:
         # Style the dataframe by status
         # Hide request_id from user view and use friendly headers
-        display_df = df_pending[['item_name', 'requester_name', 'keep_on_ice', 'status', 'status_updated_at']].copy()
-        
+        display_df = df_pending[['item_name', 'specs', 'keep_on_ice', 'status', 'status_updated_at']].copy()
+
         # Format dates for readability
         display_df['status_updated_at'] = pd.to_datetime(display_df['status_updated_at']).dt.strftime('%Y-%m-%d')
-        
+
         # Add visual indicator for ice BEFORE renaming
         display_df['keep_on_ice'] = display_df['keep_on_ice'].apply(lambda x: "❄️ YES" if x else "No")
-        
+
         # Rename to friendly headers
         display_df = display_df.rename(columns={
             "item_name": "Item Name",
-            "requester_name": "Requested By",
+            "specs": "Size",
             "keep_on_ice": "Keep on Ice",
             "status": "Status",
             "status_updated_at": "Last Update"
