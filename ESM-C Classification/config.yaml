@@ -56,6 +56,8 @@ train:
   gradient_checkpointing: false  # true trades compute for memory (helps fit 600M + big batch)
   grad_clip: 1.0
   weight_decay: 0.01
+  log_every: 0             # >0 prints a plain "step i/N loss=.. it/s" line every N steps
+                           # (recommended on a cluster, e.g. 50-100; tqdm auto-hides in log files)
   metric: "pr_auc"         # val selection metric (mean over targets): pr_auc | mcc | roc_auc
   phase1:                  # warm up the randomly-initialised heads, backbone frozen
     epochs: 3

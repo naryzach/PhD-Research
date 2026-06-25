@@ -88,8 +88,12 @@ big cluster card:
   with the 600M model.
 - `gradient_checkpointing: true` — trades compute for memory to fit the 600M model + large
   batches.
-- `multi_gpu: auto` — wraps the model in `DataParallel` across all visible GPUs (single-node).
-  For multi-node / maximum throughput, prefer a DDP launcher; this is the simple convenience path.
+- `multi_gpu` — leave **false** for this model. `DataParallel` re-replicates the 600M model
+  across GPUs every step, so it shows both cards "full" with little real speedup and a garbled
+  progress bar. A single 32 GB GPU fits the 600M model fine. To use multiple cards productively,
+  run independent jobs (`CUDA_VISIBLE_DEVICES=0/1 ...`) or a real DDP launcher (`torchrun`).
+- `log_every` — `>0` prints a plain `step i/N loss=.. it/s` line every N steps; recommended on a
+  cluster (tqdm auto-hides when output is redirected to a log file). Also `--log-every N`.
 - `num_workers` / `pin_memory` — bump on many-core cluster nodes.
 
 **CUDA build vs driver (common cluster gotcha):** `pip install torch` grabs the newest CUDA

@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import time
 from pathlib import Path
 
 import numpy as np
@@ -67,11 +68,14 @@ def resolve_precision(precision, device):
     return None, None  # fp32
 
 
-def run_train_epoch(model, loader, optimizer, scaler, device, grad_clip, desc):
+def run_train_epoch(model, loader, optimizer, scaler, device, grad_clip, desc, log_every=0):
     model.train()
     total, n = 0.0, 0
     params = [p for p in model.parameters() if p.requires_grad]
-    for batch in tqdm(loader, desc=desc, leave=False):
+    n_steps = len(loader)
+    last_t, last_i = time.time(), 0
+    # tqdm bar on a terminal; auto-hidden when output is redirected (clean cluster logs).
+    for i, batch in enumerate(tqdm(loader, desc=desc, leave=False, disable=None)):
         batch = to_device(batch, device)
         optimizer.zero_grad()
         out = model(**batch)              # autocast is inside forward
@@ -91,6 +95,12 @@ def run_train_epoch(model, loader, optimizer, scaler, device, grad_clip, desc):
         bs = batch["input_ids"].size(0)
         total += loss.item() * bs
         n += bs
+        if log_every and ((i + 1) % log_every == 0 or i + 1 == n_steps):
+            now = time.time()
+            rate = (i + 1 - last_i) / max(now - last_t, 1e-9)  # window rate, not cumulative
+            last_t, last_i = now, i + 1
+            print(f"  {desc}: step {i+1}/{n_steps}  loss={loss.item():.4f}  "
+                  f"{rate:.1f} it/s", flush=True)
     return total / max(n, 1)
 
 
@@ -138,7 +148,7 @@ def fmt_report(per, targets):
 
 
 def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None,
-                       model_id=None, strict_test=False):
+                       model_id=None, strict_test=False, log_every=None):
     """Run the full staged fine-tune + held-out test evaluation once.
 
     Returns a result dict (per-target test metrics, thresholds, best val score,
@@ -171,6 +181,7 @@ def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None,
     unfreeze = smoke.get("unfreeze_layers", tr["phase2"]["unfreeze_layers"]) if args.smoke else tr["phase2"]["unfreeze_layers"]
     grad_clip = float(tr.get("grad_clip", 1.0))
     sel_metric = tr.get("metric", "pr_auc")
+    log_every = int(tr.get("log_every", 0)) if log_every is None else int(log_every)
 
     data_dir = resolve_path(cfg, cfg["output_dir"]) / "data"
     manifest = json.loads((data_dir / "manifest.json").read_text())
@@ -225,7 +236,7 @@ def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None,
     opt = build_optimizer(model, float(tr["phase1"]["lr"]), float(tr["weight_decay"]))
     for ep in range(p1_epochs):
         loss = run_train_epoch(train_model, dl["train"], opt, scaler, device, grad_clip,
-                               desc=f"P1 epoch {ep+1}/{p1_epochs}")
+                               desc=f"P1 epoch {ep+1}/{p1_epochs}", log_every=log_every)
         per, *_ = evaluate(model, dl["val"], device, targets)
         print(f"  P1 ep{ep+1}: train_loss={loss:.4f} val_{sel_metric}={mean_metric(per, sel_metric):.4f}")
 
@@ -238,7 +249,7 @@ def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None,
     best_score, best_state, bad = -np.inf, None, 0
     for ep in range(p2_epochs):
         loss = run_train_epoch(train_model, dl["train"], opt, scaler, device, grad_clip,
-                               desc=f"P2 epoch {ep+1}/{p2_epochs}")
+                               desc=f"P2 epoch {ep+1}/{p2_epochs}", log_every=log_every)
         per, *_ = evaluate(model, dl["val"], device, targets)
         score = mean_metric(per, sel_metric)
         print(f"  P2 ep{ep+1}: train_loss={loss:.4f} val_{sel_metric}={score:.4f}")
@@ -327,10 +338,12 @@ def main():
     ap.add_argument("--out-name", default=None, help="override model output folder name")
     ap.add_argument("--strict-test", action="store_true",
                     help="also report on the novel-loop test subset (no train near-neighbour)")
+    ap.add_argument("--log-every", type=int, default=None,
+                    help="print a plain progress line every N steps (good for cluster logs)")
     args = ap.parse_args()
     cfg = load_config(args.config)
     train_and_evaluate(cfg, smoke=args.smoke, pooling=args.pooling, model_id=args.model_id,
-                       out_name=args.out_name, strict_test=args.strict_test)
+                       out_name=args.out_name, strict_test=args.strict_test, log_every=args.log_every)
 
 
 if __name__ == "__main__":
