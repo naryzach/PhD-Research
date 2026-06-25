@@ -18,6 +18,7 @@ would dilute it ~30x. ``mean`` / ``cls`` are kept as ablations.
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import List, Optional
 
 import numpy as np
@@ -58,6 +59,16 @@ class MultiTaskESMC(nn.Module):
         if pos_weight is None:
             pos_weight = torch.ones(self.num_targets)
         self.register_buffer("pos_weight", pos_weight.float())
+        # Set by the trainer so autocast runs INSIDE forward (correct under
+        # nn.DataParallel, whose replica threads don't inherit an outer autocast).
+        self._amp_dtype = None
+
+    def enable_gradient_checkpointing(self):
+        fn = getattr(self.backbone, "gradient_checkpointing_enable", None)
+        if callable(fn):
+            fn()
+            return True
+        return False
 
     def _infer_hidden_size(self) -> int:
         cfg = getattr(self.backbone, "config", None)
@@ -100,25 +111,28 @@ class MultiTaskESMC(nn.Module):
 
     def forward(self, input_ids, attention_mask=None, labels=None,
                 count_weight=None, loop_start=None, loop_len=None):
-        out = self.backbone(input_ids=input_ids, attention_mask=attention_mask)
-        hs = self._hidden_states(out)
-        pooled = self._pool(hs, attention_mask, loop_start, loop_len)
-        logits = self.head(pooled)
+        amp = (torch.autocast("cuda", dtype=self._amp_dtype)
+               if self._amp_dtype is not None else nullcontext())
+        with amp:
+            out = self.backbone(input_ids=input_ids, attention_mask=attention_mask)
+            hs = self._hidden_states(out)
+            pooled = self._pool(hs, attention_mask, loop_start, loop_len)
+            logits = self.head(pooled)
 
-        loss = None
-        if labels is not None:
-            target_mask = (labels != -100).float()
-            safe_labels = torch.where(labels == -100,
-                                      torch.zeros_like(labels), labels).float()
-            bce = F.binary_cross_entropy_with_logits(
-                logits, safe_labels, reduction="none",
-                pos_weight=self.pos_weight,
-            )
-            bce = bce * target_mask
-            if count_weight is not None:
-                bce = bce * count_weight
-            denom = target_mask.sum().clamp(min=1.0)
-            loss = bce.sum() / denom
+            loss = None
+            if labels is not None:
+                target_mask = (labels != -100).float()
+                safe_labels = torch.where(labels == -100,
+                                          torch.zeros_like(labels), labels).float()
+                bce = F.binary_cross_entropy_with_logits(
+                    logits, safe_labels, reduction="none",
+                    pos_weight=self.pos_weight,
+                )
+                bce = bce * target_mask
+                if count_weight is not None:
+                    bce = bce * count_weight
+                denom = target_mask.sum().clamp(min=1.0)
+                loss = bce.sum() / denom
         return {"loss": loss, "logits": logits}
 
     @torch.no_grad()
@@ -184,8 +198,11 @@ class MultiTaskESMC(nn.Module):
 class SeqDataset(Dataset):
     """Reads a prepared parquet split into per-sequence training examples."""
 
-    def __init__(self, parquet_path, targets: List[str], count_weighting: str = "log"):
-        self.df = pd.read_parquet(parquet_path).reset_index(drop=True)
+    def __init__(self, source, targets: List[str], count_weighting: str = "log"):
+        # ``source`` may be a parquet path or an already-loaded DataFrame
+        # (the latter lets the trainer score arbitrary subsets, e.g. novel loops).
+        self.df = (source.reset_index(drop=True) if isinstance(source, pd.DataFrame)
+                   else pd.read_parquet(source).reset_index(drop=True))
         self.targets = list(targets)
         self.count_weighting = count_weighting
 
