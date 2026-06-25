@@ -92,6 +92,22 @@ big cluster card:
   For multi-node / maximum throughput, prefer a DDP launcher; this is the simple convenience path.
 - `num_workers` / `pin_memory` — bump on many-core cluster nodes.
 
+**CUDA build vs driver (common cluster gotcha):** `pip install torch` grabs the newest CUDA
+build, which may be newer than the node's GPU driver supports — torch then prints "NVIDIA driver
+too old" and silently runs on **CPU**. Check the driver's CUDA in `nvidia-smi` and install a
+matching build, e.g. `pip install torch --index-url https://download.pytorch.org/whl/cu128`
+(any `cu12x` ≤ the driver's CUDA works). `train.py` prints a loud warning if it ends up on CPU.
+
+**Older GPUs (V100 / Volta, CC 7.0):** recent torch wheels dropped Volta kernels (symptom:
+`no kernel image is available for execution on the device`). Install a torch that still ships
+sm_70, e.g. `pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121`
+(verify with `python -c "import torch;x=torch.randn(64,64,device='cuda');print(float((x@x).sum()))"`).
+That older torch is in turn missing some Dynamo config knobs the ESM++ remote code sets
+(`recompile_limit`); `esmc_utils.patch_dynamo_config_compat()` neutralises those so the model
+still imports. On Volta, `precision: auto` correctly selects fp16 (no native bf16).
+If your cluster has an **Ampere+ partition (A100/H100)**, prefer it — the default modern torch
+works as-is with bf16 and avoids this whole chain.
+
 ### Quick smoke run (tiny + fast, validates the whole chain)
 
 ```bash

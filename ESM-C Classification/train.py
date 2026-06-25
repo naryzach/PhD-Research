@@ -56,7 +56,10 @@ def resolve_precision(precision, device):
     if device.type != "cuda":
         return None, None
     if precision == "auto":
-        precision = "bf16" if torch.cuda.is_bf16_supported() else "fp16"
+        # bf16 needs Ampere+ (CC >= 8.0); on Volta/Turing (e.g. V100 = 7.0) bf16
+        # has no hardware support and is emulated/slow, so use fp16 there.
+        cc_major = torch.cuda.get_device_capability(0)[0]
+        precision = "bf16" if cc_major >= 8 else "fp16"
     if precision == "bf16":
         return torch.bfloat16, None
     if precision == "fp16":
@@ -150,6 +153,13 @@ def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None,
     pooling = pooling or cfg["model"]["pooling"]
     model_id = model_id or cfg["model"]["model_id"]
     print(f"Device: {device} | model: {model_id} | pooling: {pooling}")
+    if device.type == "cpu":
+        print("\n" + "!" * 70 + "\n"
+              "WARNING: no GPU detected -- training the 600M model on CPU is\n"
+              "impractically slow. This usually means the installed torch CUDA build\n"
+              "is newer than the GPU driver supports (see 'NVIDIA driver too old').\n"
+              "Fix: pip install torch --index-url https://download.pytorch.org/whl/cu128\n"
+              "(match the cuXYZ build to your driver's CUDA in `nvidia-smi`).\n" + "!" * 70 + "\n")
 
     # --- resolve hyper-params (apply smoke overrides) -----------------------
     args = type("A", (), {"smoke": smoke})()  # shim so the body below reads args.smoke

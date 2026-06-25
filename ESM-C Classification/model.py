@@ -38,7 +38,9 @@ class MultiTaskESMC(nn.Module):
                  trust_remote_code: bool = True):
         super().__init__()
         from transformers import AutoModel
+        from esmc_utils import patch_dynamo_config_compat
 
+        patch_dynamo_config_compat()  # tolerate ESM++ remote code on older torch
         self.backbone = AutoModel.from_pretrained(
             model_id, trust_remote_code=trust_remote_code
         )

@@ -57,9 +57,40 @@ def get_device():
 
 
 # --------------------------------------------------------------------------- #
+# Compatibility shims
+# --------------------------------------------------------------------------- #
+def patch_dynamo_config_compat() -> None:
+    """Tolerate ESM++ remote code on older torch (needed for V100/sm_70 wheels).
+
+    ESM++'s ``modeling_esm_plusplus.py`` sets ``torch._dynamo.config`` knobs such
+    as ``recompile_limit`` that don't exist on torch versions old enough to still
+    ship Volta (sm_70) kernels. We never use torch.compile, so make assignments of
+    unknown knobs no-ops instead of letting them crash the model import.
+    """
+    try:
+        import torch._dynamo.config as dcfg
+        cls = type(dcfg)
+        if getattr(cls, "_esmc_lenient", False):
+            return
+        _orig_setattr = cls.__setattr__
+
+        def _lenient(self, name, value):
+            try:
+                _orig_setattr(self, name, value)
+            except AttributeError:
+                pass  # unknown dynamo knob on this torch version -> ignore
+
+        cls.__setattr__ = _lenient
+        cls._esmc_lenient = True
+    except Exception:
+        pass  # never let the shim itself break loading
+
+
+# --------------------------------------------------------------------------- #
 # Tokenizer
 # --------------------------------------------------------------------------- #
 def get_tokenizer(model_id: str):
+    patch_dynamo_config_compat()
     """Return the ESM++/ESM-C tokenizer.
 
     ESM++ registers a custom tokenizer; depending on the transformers version it
