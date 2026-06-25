@@ -46,26 +46,47 @@ def to_device(batch, device):
     return {k: (v.to(device) if torch.is_tensor(v) else v) for k, v in batch.items()}
 
 
+def resolve_precision(precision, device):
+    """Return (amp_dtype | None, GradScaler | None) for the requested precision.
+
+    'auto' picks bf16 on capable GPUs (more stable, no loss scaler needed) and
+    falls back to fp16 otherwise. bf16/fp32 need no scaler; fp16 does.
+    Autocast itself happens inside ``MultiTaskESMC.forward`` (DataParallel-safe).
+    """
+    if device.type != "cuda":
+        return None, None
+    if precision == "auto":
+        # bf16 needs Ampere+ (CC >= 8.0); on Volta/Turing (e.g. V100 = 7.0) bf16
+        # has no hardware support and is emulated/slow, so use fp16 there.
+        cc_major = torch.cuda.get_device_capability(0)[0]
+        precision = "bf16" if cc_major >= 8 else "fp16"
+    if precision == "bf16":
+        return torch.bfloat16, None
+    if precision == "fp16":
+        return torch.float16, torch.amp.GradScaler("cuda")
+    return None, None  # fp32
+
+
 def run_train_epoch(model, loader, optimizer, scaler, device, grad_clip, desc):
     model.train()
     total, n = 0.0, 0
+    params = [p for p in model.parameters() if p.requires_grad]
     for batch in tqdm(loader, desc=desc, leave=False):
         batch = to_device(batch, device)
         optimizer.zero_grad()
-        with torch.amp.autocast("cuda", enabled=scaler is not None):
-            out = model(**batch)
-            loss = out["loss"]
+        out = model(**batch)              # autocast is inside forward
+        loss = out["loss"]
+        if loss.dim() > 0:                # DataParallel gathers one loss per GPU
+            loss = loss.mean()
         if scaler is not None:
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(
-                [p for p in model.parameters() if p.requires_grad], grad_clip)
+            torch.nn.utils.clip_grad_norm_(params, grad_clip)
             scaler.step(optimizer)
             scaler.update()
         else:
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(
-                [p for p in model.parameters() if p.requires_grad], grad_clip)
+            torch.nn.utils.clip_grad_norm_(params, grad_clip)
             optimizer.step()
         bs = batch["input_ids"].size(0)
         total += loss.item() * bs
@@ -77,11 +98,9 @@ def run_train_epoch(model, loader, optimizer, scaler, device, grad_clip, desc):
 def evaluate(model, loader, device, targets, thresholds=None):
     model.eval()
     logits_all, labels_all = [], []
-    use_amp = device.type == "cuda"
     for batch in loader:
         b = to_device(batch, device)
-        with torch.amp.autocast("cuda", enabled=use_amp):
-            out = model(**b)
+        out = model(**b)                  # autocast is inside forward
         logits_all.append(out["logits"].float().cpu())
         labels_all.append(batch["labels"])
     logits = torch.cat(logits_all).numpy()
@@ -118,18 +137,29 @@ def fmt_report(per, targets):
     return "\n".join(lines)
 
 
-def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None):
+def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None,
+                       model_id=None, strict_test=False):
     """Run the full staged fine-tune + held-out test evaluation once.
 
     Returns a result dict (per-target test metrics, thresholds, best val score,
     output dir). ``pooling`` overrides ``cfg['model']['pooling']`` (used by the
-    pooling-comparison harness); ``out_name`` overrides the model output folder.
+    pooling-comparison harness); ``model_id`` overrides the backbone;
+    ``out_name`` overrides the model output folder; ``strict_test`` adds a
+    novel-loop (no train near-neighbour) test report.
     """
     set_seed(int(cfg["split"].get("seed", 42)))
     targets = cfg["targets"]
     device = get_device()
     pooling = pooling or cfg["model"]["pooling"]
-    print(f"Device: {device} | model: {cfg['model']['model_id']} | pooling: {pooling}")
+    model_id = model_id or cfg["model"]["model_id"]
+    print(f"Device: {device} | model: {model_id} | pooling: {pooling}")
+    if device.type == "cpu":
+        print("\n" + "!" * 70 + "\n"
+              "WARNING: no GPU detected -- training the 600M model on CPU is\n"
+              "impractically slow. This usually means the installed torch CUDA build\n"
+              "is newer than the GPU driver supports (see 'NVIDIA driver too old').\n"
+              "Fix: pip install torch --index-url https://download.pytorch.org/whl/cu128\n"
+              "(match the cuXYZ build to your driver's CUDA in `nvidia-smi`).\n" + "!" * 70 + "\n")
 
     # --- resolve hyper-params (apply smoke overrides) -----------------------
     args = type("A", (), {"smoke": smoke})()  # shim so the body below reads args.smoke
@@ -148,27 +178,45 @@ def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None):
     print("pos_weight:", {t: round(float(w), 3) for t, w in zip(targets, pos_weight)})
 
     # --- data ---------------------------------------------------------------
-    tokenizer = get_tokenizer(cfg["model"]["model_id"])
+    tokenizer = get_tokenizer(model_id)
     bos_offset = detect_bos_offset(tokenizer)
     collate = Collator(tokenizer, bos_offset=bos_offset,
                        max_length=int(cfg["model"]["max_length"]))
     cw = cfg["preprocess"].get("count_weighting", "log")
+    nw = int(tr.get("num_workers", 0))
+    pin = bool(tr.get("pin_memory", False)) and device.type == "cuda"
     ds = {sp: SeqDataset(data_dir / f"{sp}.parquet", targets, count_weighting=cw)
           for sp in ("train", "val", "test")}
     print({sp: len(ds[sp]) for sp in ds})
     dl = {
-        "train": DataLoader(ds["train"], batch_size=batch_size, shuffle=True, collate_fn=collate),
-        "val": DataLoader(ds["val"], batch_size=batch_size, shuffle=False, collate_fn=collate),
-        "test": DataLoader(ds["test"], batch_size=batch_size, shuffle=False, collate_fn=collate),
+        "train": DataLoader(ds["train"], batch_size=batch_size, shuffle=True,
+                            collate_fn=collate, num_workers=nw, pin_memory=pin),
+        "val": DataLoader(ds["val"], batch_size=batch_size, shuffle=False,
+                          collate_fn=collate, num_workers=nw, pin_memory=pin),
+        "test": DataLoader(ds["test"], batch_size=batch_size, shuffle=False,
+                           collate_fn=collate, num_workers=nw, pin_memory=pin),
     }
 
     # --- model --------------------------------------------------------------
     model = MultiTaskESMC(
-        model_id=cfg["model"]["model_id"], targets=targets,
+        model_id=model_id, targets=targets,
         pooling=pooling, dropout=float(cfg["model"]["dropout"]),
         pos_weight=pos_weight,
     ).to(device)
-    scaler = torch.amp.GradScaler("cuda") if (device.type == "cuda" and tr.get("fp16", True)) else None
+
+    # precision (autocast happens inside forward) + optional multi-GPU
+    amp_dtype, scaler = resolve_precision(str(tr.get("precision", "auto")), device)
+    model._amp_dtype = amp_dtype
+    print(f"precision: {('fp32' if amp_dtype is None else str(amp_dtype).split('.')[-1])} "
+          f"| loss-scaler: {scaler is not None}")
+    if tr.get("gradient_checkpointing", False):
+        ok = model.enable_gradient_checkpointing()
+        print(f"gradient checkpointing: {'enabled' if ok else 'not supported by backbone'}")
+    n_gpu = torch.cuda.device_count() if device.type == "cuda" else 0
+    train_model = model
+    if str(tr.get("multi_gpu", "false")).lower() == "auto" and n_gpu > 1:
+        train_model = torch.nn.DataParallel(model)
+        print(f"DataParallel across {n_gpu} GPUs")
 
     # === Phase 1: frozen backbone, train heads =============================
     model.freeze_backbone()
@@ -176,7 +224,7 @@ def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None):
     print(f"\n[Phase 1] heads only - trainable {t:,}/{total:,} params")
     opt = build_optimizer(model, float(tr["phase1"]["lr"]), float(tr["weight_decay"]))
     for ep in range(p1_epochs):
-        loss = run_train_epoch(model, dl["train"], opt, scaler, device, grad_clip,
+        loss = run_train_epoch(train_model, dl["train"], opt, scaler, device, grad_clip,
                                desc=f"P1 epoch {ep+1}/{p1_epochs}")
         per, *_ = evaluate(model, dl["val"], device, targets)
         print(f"  P1 ep{ep+1}: train_loss={loss:.4f} val_{sel_metric}={mean_metric(per, sel_metric):.4f}")
@@ -189,7 +237,7 @@ def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None):
     patience = int(tr["phase2"].get("early_stop_patience", 3))
     best_score, best_state, bad = -np.inf, None, 0
     for ep in range(p2_epochs):
-        loss = run_train_epoch(model, dl["train"], opt, scaler, device, grad_clip,
+        loss = run_train_epoch(train_model, dl["train"], opt, scaler, device, grad_clip,
                                desc=f"P2 epoch {ep+1}/{p2_epochs}")
         per, *_ = evaluate(model, dl["val"], device, targets)
         score = mean_metric(per, sel_metric)
@@ -221,6 +269,24 @@ def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None):
     print(report)
     print("thresholds:", {k: round(v, 3) for k, v in thresholds.items()})
 
+    # --- strict novel-loop subset (no train near-neighbour) ----------------
+    per_novel, novel_report = None, None
+    if strict_test:
+        test_df = SeqDataset(data_dir / "test.parquet", targets, count_weighting=cw).df
+        if "near_train_h1" in test_df.columns:
+            novel = test_df[~test_df["near_train_h1"].astype(bool)]
+            print(f"\n=== STRICT NOVEL-LOOP TEST ({len(novel)}/{len(test_df)} seqs, "
+                  f"no train neighbour within 1 edit) ===")
+            if len(novel):
+                ndl = DataLoader(SeqDataset(novel, targets, count_weighting=cw),
+                                 batch_size=batch_size, shuffle=False, collate_fn=collate,
+                                 num_workers=nw, pin_memory=pin)
+                per_novel, *_ = evaluate(model, ndl, device, targets, thresholds=thresholds)
+                novel_report = fmt_report(per_novel, targets)
+                print(novel_report)
+        else:
+            print("\n[info] --strict-test: re-run data_prep.py to add the near_train_h1 column.")
+
     # --- save ---------------------------------------------------------------
     if out_name is None:
         out_name = "model_smoke" if args.smoke else "model"
@@ -228,7 +294,7 @@ def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None):
     out_dir.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), out_dir / "model_state.pt")
     meta = {
-        "model_id": cfg["model"]["model_id"],
+        "model_id": model_id,
         "targets": targets,
         "pooling": pooling,
         "dropout": float(cfg["model"]["dropout"]),
@@ -239,11 +305,15 @@ def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None):
         "val_best_metric": {sel_metric: float(best_score)},
     }
     (out_dir / "model_meta.json").write_text(json.dumps(meta, indent=2))
-    (out_dir / "test_report.txt").write_text(report + "\n\nthresholds: " + str(thresholds) + "\n")
+    report_txt = report + "\n\nthresholds: " + str(thresholds) + "\n"
+    if novel_report:
+        report_txt += "\n=== STRICT NOVEL-LOOP TEST ===\n" + novel_report + "\n"
+    (out_dir / "test_report.txt").write_text(report_txt)
     (out_dir / "test_report.json").write_text(json.dumps(
-        {"per_target": per_test, "thresholds": thresholds}, indent=2))
+        {"per_target": per_test, "per_target_novel": per_novel,
+         "thresholds": thresholds}, indent=2))
     print(f"\nSaved model + meta + test report to {out_dir}")
-    return {"per_test": per_test, "thresholds": thresholds,
+    return {"per_test": per_test, "per_novel": per_novel, "thresholds": thresholds,
             "best_val": float(best_score), "out_dir": str(out_dir), "pooling": pooling}
 
 
@@ -253,10 +323,14 @@ def main():
     ap.add_argument("--smoke", action="store_true", help="tiny fast run")
     ap.add_argument("--pooling", default=None, choices=["loop", "mean", "cls"],
                     help="override config pooling for this run")
+    ap.add_argument("--model-id", default=None, help="override config model_id (e.g. ESMplusplus_small)")
     ap.add_argument("--out-name", default=None, help="override model output folder name")
+    ap.add_argument("--strict-test", action="store_true",
+                    help="also report on the novel-loop test subset (no train near-neighbour)")
     args = ap.parse_args()
     cfg = load_config(args.config)
-    train_and_evaluate(cfg, smoke=args.smoke, pooling=args.pooling, out_name=args.out_name)
+    train_and_evaluate(cfg, smoke=args.smoke, pooling=args.pooling, model_id=args.model_id,
+                       out_name=args.out_name, strict_test=args.strict_test)
 
 
 if __name__ == "__main__":

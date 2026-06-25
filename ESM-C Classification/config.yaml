@@ -22,9 +22,9 @@ output_dir: "../Local/esmc_binder_out"
 
 model:
   # Synthyra ESM++ = HF-native port of ESM-C (identical weights).
-  #   Synthyra/ESMplusplus_small -> ESM-C 300M (default, fits a 12 GB GPU)
-  #   Synthyra/ESMplusplus_large -> ESM-C 600M
-  model_id: "Synthyra/ESMplusplus_small"
+  #   Synthyra/ESMplusplus_small -> ESM-C 300M (fits a 12 GB GPU)
+  #   Synthyra/ESMplusplus_large -> ESM-C 600M (default; use a bigger cluster GPU)
+  model_id: "Synthyra/ESMplusplus_large"
   pooling: "loop"          # loop | mean | cls  (loop = pool only the grafted loop)
   dropout: 0.1
   max_length: 1024
@@ -48,8 +48,12 @@ split:
   seed: 42
 
 train:
-  batch_size: 16
-  fp16: true
+  batch_size: 16           # raise on a big-VRAM cluster GPU (e.g. 32-64 on A100/H100)
+  precision: "auto"        # auto | bf16 | fp16 | fp32  (auto: bf16 if the GPU supports it, else fp16)
+  multi_gpu: "false"       # auto | false  (auto: DataParallel across all visible GPUs)
+  num_workers: 4           # DataLoader workers (bump on multi-core cluster nodes)
+  pin_memory: true
+  gradient_checkpointing: false  # true trades compute for memory (helps fit 600M + big batch)
   grad_clip: 1.0
   weight_decay: 0.01
   metric: "pr_auc"         # val selection metric (mean over targets): pr_auc | mcc | roc_auc

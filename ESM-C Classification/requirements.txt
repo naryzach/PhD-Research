@@ -1,4 +1,8 @@
 # Core
+# NOTE: plain `pip install torch` grabs the newest CUDA build, which may be too
+# new for your GPU driver (symptom: "NVIDIA driver too old", falls back to CPU).
+# On a cluster, match the build to the driver's CUDA (see `nvidia-smi`), e.g.:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
 torch>=2.1
 transformers>=4.40
 einops             # required by the ESM++/ESM-C remote modeling code
