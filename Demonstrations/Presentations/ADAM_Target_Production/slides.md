@@ -437,6 +437,112 @@ layout: default
 
 ---
 
+# Western Blot Trials (June 22)
+
+<div class="grid grid-cols-12 gap-6 mt-4 items-center">
+  <div class="col-span-5">
+    <h2 class="text-teal-600 font-semibold mb-2">Total Protein Transfer Audit</h2>
+    <p class="text-xs text-gray-700 leading-relaxed mb-3">
+      Evaluated total protein transfer of ADAM10/17 periplasmic extracts onto nitrocellulose membranes.
+    </p>
+    <div class="p-2 bg-yellow-50 border border-yellow-200 rounded text-2xs text-yellow-800 mb-2">
+      <strong>Key Issue:</strong> Target bands were run into the nitrocellulose divider sheet rather than the membrane itself.
+    </div>
+    <ul class="space-y-1 text-2xs text-gray-700 list-disc pl-4">
+      <li>Resolved buffer dilution issue: running buffer labeled as 40x was actually 5x.</li>
+      <li>Ponceau S staining performed before blocking to enable densitometry.</li>
+      <li>Secondary antibody incubation and imaging scheduled for next steps.</li>
+    </ul>
+  </div>
+  <div class="col-span-7 flex flex-col items-center border p-2 rounded bg-gray-50">
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260624_Ponceau.jpg" class="h-52 object-contain" alt="Ponceau S Membrane Stain"/>
+    <div class="text-2xs text-gray-600 mt-1"><strong>Ponceau S Stain (June 24):</strong> Verification of transfer stack lanes and ladder.</div>
+  </div>
+</div>
+
+---
+
+# FPLC Chromatogram Trace (June 25)
+
+<div class="grid grid-cols-12 gap-6 mt-4 items-center">
+  <div class="col-span-5">
+    <h2 class="text-teal-600 font-semibold mb-2">AEC Purification of ADAM10</h2>
+    <p class="text-xs text-gray-700 leading-relaxed mb-3">
+      Purification of osmotic shock periplasmic extracts on AEC HiTrap Q FF 5mL column under salt gradient.
+    </p>
+    <div class="p-2 bg-emerald-50 border border-emerald-200 rounded text-2xs text-emerald-800 mb-2">
+      <strong>Chromatogram Peak:</strong> Elution trace confirms target peak at low salt.
+    </div>
+    <ul class="space-y-1 text-2xs text-gray-700 list-disc pl-4">
+      <li>Main UV peak reaches <strong>67 mAU</strong> at <strong>13.1 mL</strong>.</li>
+      <li>Salt gradient %B (green curve) shows elution occurs at low conductivity.</li>
+      <li>Enriched fractions pooled for yield optimization and downstream assays.</li>
+    </ul>
+  </div>
+  <div class="col-span-7 flex flex-col items-center border p-2 rounded bg-gray-50">
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/fplc_chromatogram_20260625.png" class="h-52 object-contain" alt="FPLC Purification Trace"/>
+    <div class="text-2xs text-gray-600 mt-1"><strong>HiTrap Q AEC Trace (June 25):</strong> UV A280 (blue) and Salt Gradient %B (green).</div>
+  </div>
+</div>
+
+---
+
+# Western Blot Trials (June 26)
+
+<div class="grid grid-cols-12 gap-6 mt-4 items-center">
+  <div class="col-span-5">
+    <h2 class="text-teal-600 font-semibold mb-2">Lysis Pellet and Supernatant Fractions</h2>
+    <p class="text-xs text-gray-700 leading-relaxed mb-3">
+      Evaluated total protein transfer of supernatant and lysis pellet fractions of ADAM10-pMopac expression trials.
+    </p>
+    <div class="p-2 bg-emerald-50 border border-emerald-200 rounded text-2xs text-emerald-800 mb-2">
+      <strong>Transfer Verification:</strong> Successful protein transfer verified via Ponceau S staining.
+    </div>
+    <ul class="space-y-1 text-2xs text-gray-700 list-disc pl-4">
+      <li>Ponceau S staining confirmed successful protein transfer and lane alignment for both pellet and supernatant membranes.</li>
+      <li>Membranes are currently incubating in anti-FLAG primary antibody overnight at 4°C.</li>
+      <li>Fluorescence detection is scheduled for tomorrow to verify soluble vs. insoluble target yields.</li>
+    </ul>
+  </div>
+  <div class="col-span-7 grid grid-cols-2 gap-2 border p-2 rounded bg-gray-50">
+    <div class="flex flex-col items-center">
+      <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260626_Supernatant_Ponceau_labeled.png" class="h-44 object-contain" alt="Supernatant Ponceau"/>
+      <div class="text-3xs text-gray-500 mt-1">Supernatant Ponceau Stain</div>
+    </div>
+    <div class="flex flex-col items-center">
+      <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260626_Pellet_Ponceau_labeled.png" class="h-44 object-contain" alt="Pellet Ponceau"/>
+      <div class="text-3xs text-gray-500 mt-1">Lysis Pellet Ponceau Stain</div>
+    </div>
+  </div>
+</div>
+
+---
+
+# ADAM10 Silver-Stain Validation (June 26)
+
+<div class="grid grid-cols-12 gap-6 mt-4 items-center">
+  <div class="col-span-5">
+    <h2 class="text-teal-600 font-semibold mb-2">30°C Induction Time Course</h2>
+    <p class="text-xs text-gray-700 leading-relaxed mb-3">
+      SDS-PAGE and high-sensitivity silver staining analysis of the 30°C ADAM10-pMopac expression trials.
+    </p>
+    <div class="p-2 bg-yellow-50 border border-yellow-200 rounded text-2xs text-yellow-800 mb-2">
+      <strong>Expression Results:</strong> Strong target expression peaking at 20-22 hours.
+    </div>
+    <ul class="space-y-1 text-2xs text-gray-700 list-disc pl-4">
+      <li>Visible target band at expected molecular weight (~60-70 kDa) starting around 3 hours post-induction.</li>
+      <li>High abundance in lysis pellet confirms partitioning predominantly into insoluble inclusion bodies.</li>
+      <li>Lysis supernatant shows faint band, suggesting presence of soluble fraction.</li>
+    </ul>
+  </div>
+  <div class="col-span-7 flex flex-col items-center border p-2 rounded bg-gray-50">
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260626_ADAM10_Silver_labeled.png" class="h-52 object-contain" alt="ADAM10 Silver Gel"/>
+    <div class="text-2xs text-gray-600 mt-1"><strong>Silver-Stained Gel (June 26):</strong> Progressive 30°C induction timecourse.</div>
+  </div>
+</div>
+
+---
+
 # Summary & Next Steps
 
 <div class="grid grid-cols-2 gap-8 mt-6">
@@ -445,10 +551,9 @@ layout: default
       <span class="p-1 bg-teal-100 text-teal-800 rounded-full text-2xs">✓</span> Achieved Milestones
     </h2>
     <ul class="space-y-3 text-xs text-gray-700">
-      <li><strong>Western Blot & BCA:</strong> Verified 60 kDa soluble ADAM10 expression and standardized inputs to 0.20 mg/mL.</li>
-      <li><strong>DNA Audit:</strong> Audited sequence properties (MW, pI, promoters, tags) of primary ADAM plasmids.</li>
-      <li><strong>ADAM17 Miniprep:</strong> Isolated (pET-)ADAM-17cd-HT plasmid construct yielding 99.5 ng/μL DNA with high purity (A260/A280 = 1.894).</li>
-      <li><strong>Retry Setup:</strong> Initiated four-condition optimization trial for E. coli expression of ADAM10.</li>
+      <li><strong>Western Blot Ponceau (June 26):</strong> Confirmed transfer stack and lane alignment for pellet & supernatant samples.</li>
+      <li><strong>Silver-Stained SDS-PAGE (June 26):</strong> Visualized 30°C induction of ADAM10 (target band at ~60-70 kDa peaking at 20-22 hr).</li>
+      <li><strong>FPLC AEC Trace (June 25):</strong> Captured and analyzed elution profile of recombinant ADAM10 (peak at 13.1 mL).</li>
     </ul>
   </div>
   <div>
@@ -456,9 +561,9 @@ layout: default
       <span class="p-1 bg-teal-100 text-teal-800 rounded-full text-2xs">→</span> Future Directions
     </h2>
     <ul class="space-y-3 text-xs text-gray-700">
-      <li><strong>Process Retry Trials:</strong> Run SDS-PAGE and Western blots on harvesting timepoint aliquots.</li>
-      <li><strong>Buffer Optimization:</strong> Calibrate FPLC buffer pH using verified pIs to enhance target column retention.</li>
-      <li><strong>ADAM17 Expression:</strong> Transform BL21(DE3) with the verified plasmid and DsbC helper to initiate expression trials.</li>
+      <li><strong>Western Blot Detection:</strong> Image anti-FLAG fluorophore-labeled membranes to determine soluble vs. insoluble yields.</li>
+      <li><strong>ADAM17 Target Recovery:</strong> Re-isolate and sequence pMopac-ADAM17 after helper plasmid contamination was identified.</li>
+      <li><strong>Functional Assays:</strong> Conduct Enzo MMP target assays to verify activity of purified ADAM10 fractions.</li>
     </ul>
   </div>
 </div>
