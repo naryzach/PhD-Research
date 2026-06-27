@@ -27,6 +27,7 @@ import cv2
 import numpy as np
 import yaml
 from PIL import Image, ImageDraw, ImageFont
+from scipy import ndimage
 from scipy.signal import find_peaks
 
 from ladders import LADDER_DB, LADDER_ALIASES, Ladder, LadderBand, resolve as resolve_ladder
@@ -491,10 +492,37 @@ def _deep_pigment(color: Tuple[int, int, int], value: float = 0.62) -> Tuple[int
     return tuple(int(round(255 * c)) for c in (r, g, b))
 
 
+def _despeckle(signal: np.ndarray, thresh: float = 0.08,
+               min_area_frac: float = 4e-5) -> np.ndarray:
+    """
+    Remove small isolated signal blobs (dust / hot pixels) from a 0–1 map.
+
+    Connected regions of `signal > thresh` smaller than `min_area_frac` of the
+    image are zeroed; large regions (real bands/ladder) and their faint gradient
+    tails are left untouched.
+    """
+    h, w = signal.shape
+    min_area = max(20, int(h * w * min_area_frac))
+    m = (signal > thresh).astype(np.uint8)
+    if not m.any():
+        return signal
+    num, labels, stats, _ = cv2.connectedComponentsWithStats(m, 8)
+    remove = np.zeros((h, w), dtype=bool)
+    for i in range(1, num):
+        if stats[i, cv2.CC_STAT_AREA] < min_area:
+            remove |= labels == i
+    if remove.any():
+        signal = signal.copy()
+        signal[remove] = 0.0
+    return signal
+
+
 def colorize_layer(
     gray: np.ndarray,
     color: Tuple[int, int, int],
     role: str,
+    mark_saturated: bool = False,
+    denoise: bool = True,
     low_pct: float = 1.0,
     high_pct: float = 99.9,
 ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
@@ -503,9 +531,16 @@ def colorize_layer(
 
     Signal strength drives a gradient from white (no signal) to the deep pigment
     (peak), so a band's intense core is deepest and fades out with intensity,
-    like a real gel band.  `high_pct` sets the peak: it is near the top because a
+    like a real gel band.  The peak is set near the top of the data because a
     fluorescent frame is mostly dark background, so a lower percentile would land
     in the background and flatten every band to one colour.
+
+    `mark_saturated=False` (default) hides the detector's saturation artefact: a
+    band intense enough to saturate reads back with a depressed ("holed") core
+    that would grade to an off pinkish colour, so those saturated pixels and the
+    core they enclose are filled to the deepest colour and the band stays solid.
+    Set `mark_saturated=True` to leave that raw, distinctly-coloured core visible.
+    `denoise=True` drops small speckle/dust blobs.
 
     Returns (layer_rgb, signal, membrane_mask).  `membrane_mask` is only non-None
     for a brightfield channel, where it defines the croppable region.
@@ -530,39 +565,58 @@ def colorize_layer(
             signal[~inner] = 0.0       # blank surround + dark membrane cut-rim
     else:
         # Bright signal on a dark field: normalise so band cores reach full depth.
-        lo, hi = np.percentile(g, [low_pct, high_pct])
+        lo = float(np.percentile(g, low_pct))
+        hi = float(np.percentile(g, high_pct))
         if hi - lo < 1e-3:
             hi = lo + 1.0
         signal = np.clip((g - lo) / (hi - lo), 0.0, 1.0)
+        if not mark_saturated:
+            # Hide the saturation artefact: an over-saturated band reads with a
+            # depressed core, so fill the region enclosed by the saturated
+            # (max-value) pixels and pin it to the deepest colour.
+            sat = float(g.max())
+            if sat >= 250.0:               # a genuine 8-bit saturation plateau
+                core = (g >= sat - 1.0).astype(np.uint8)
+                k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+                core = cv2.morphologyEx(core, cv2.MORPH_CLOSE, k)
+                core = ndimage.binary_fill_holes(core)
+                signal[core] = 1.0
+
+    if denoise:
+        signal = _despeckle(signal)
 
     s = signal[..., None]
     layer = 255.0 * (1.0 - s) + deep * s
     return np.clip(np.round(layer), 0, 255).astype(np.uint8), signal, mask
 
 
-def merge_images(channels: List[Tuple[Path, Tuple[int, int, int], str]]) -> np.ndarray:
+def merge_images(channels: List[Tuple]) -> np.ndarray:
     """
     Build a display merge from channels of one blot.
 
-    `channels` is a list of (image_path, base_colour, role).  Images are resized
-    to the first channel's size.  Every channel is rendered as a white-background
-    gradient layer and the layers are multiply-composited, like overlapping ink
-    on paper.  The brightfield channel supplies the membrane outline and an
-    independently coloured ladder; where a band channel also has signal in the
-    ladder lane (the ladder is mildly fluorescent) the colours simply combine.
-    Returns RGB with a black surround so the result crops/annotates like a gel.
+    `channels` is a list of (image_path, base_colour, role[, mark_sat[, denoise]]).
+    Images are resized to the first channel's size.  Every channel is rendered as
+    a white-background gradient layer and the layers are multiply-composited, like
+    overlapping ink on paper.  The brightfield channel supplies the membrane
+    outline and an independently coloured ladder; where a band channel also has
+    signal in the ladder lane (the ladder is mildly fluorescent) the colours
+    simply combine.  Returns RGB with a black surround so the result
+    crops/annotates like a gel.
     """
     base_gray = np.array(Image.open(channels[0][0]).convert("L"))
     h, w = base_gray.shape
 
     acc = np.ones((h, w, 3), dtype=np.float32)   # multiply accumulator (white)
     membrane: Optional[np.ndarray] = None
-    for path, color, role in channels:
-        role = _norm_role(role)
+    for ch in channels:
+        path, color, role = ch[0], ch[1], _norm_role(ch[2])
+        mark_sat = ch[3] if len(ch) > 3 else False
+        denoise = ch[4] if len(ch) > 4 else True
         gray = np.array(Image.open(path).convert("L"))
         if gray.shape != (h, w):
             gray = cv2.resize(gray, (w, h), interpolation=cv2.INTER_AREA)
-        layer, _signal, mask = colorize_layer(gray, color, role)
+        layer, _signal, mask = colorize_layer(gray, color, role,
+                                              mark_saturated=mark_sat, denoise=denoise)
         acc *= layer.astype(np.float32) / 255.0
         if role == "brightfield" and mask is not None and membrane is None:
             membrane = mask
@@ -576,6 +630,8 @@ def merge_images(channels: List[Tuple[Path, Tuple[int, int, int], str]]) -> np.n
 
 def build_merge(merge_cfg: dict, base_dir: Path) -> np.ndarray:
     """Build a merged image from a config 'merge:' block (see example_config)."""
+    g_mark = bool(merge_cfg.get("mark_saturated", False))
+    g_denoise = bool(merge_cfg.get("denoise", True))
     channels = []
     for ch in merge_cfg.get("channels", []):
         img = Path(ch["image"])
@@ -592,7 +648,9 @@ def build_merge(merge_cfg: dict, base_dir: Path) -> np.ndarray:
             role = _norm_role(str(ch["role"]))
         if "color" in ch:
             color = parse_color(ch["color"])
-        channels.append((img, color, role))
+        mark_sat = bool(ch.get("mark_saturated", g_mark))
+        denoise = bool(ch.get("denoise", g_denoise))
+        channels.append((img, color, role, mark_sat, denoise))
     if not channels:
         raise ValueError("merge config has no channels.")
     return merge_images(channels)
@@ -1166,6 +1224,12 @@ def main():
                              "--merge blot_AF647.tif=af647 blot_color.tif=brightfield "
                              "-o merged.png. Channels: fluorophores (af488, af647, cy5…), "
                              "chemi, brightfield, or colour names.")
+    parser.add_argument("--mark-saturated", action="store_true",
+                        help="Merge: leave over-saturated band cores at their raw "
+                             "depressed/off-pink colour (by default they are filled to the "
+                             "deepest colour so the band stays solid).")
+    parser.add_argument("--no-denoise", action="store_true",
+                        help="Merge: keep small speckle/dust (disable blob removal).")
     args = parser.parse_args()
 
     if args.swatch:
@@ -1187,7 +1251,7 @@ def main():
                 color, role = resolve_channel(spec)
             except KeyError as e:
                 parser.error(str(e))
-            channels.append((path, color, role))
+            channels.append((path, color, role, args.mark_saturated, not args.no_denoise))
         print(f"Merging {len(channels)} channel(s):")
         merged = merge_images(channels)
         out_path = args.output or Path("merged.png")
