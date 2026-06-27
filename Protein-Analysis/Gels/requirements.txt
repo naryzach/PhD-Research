@@ -1,4 +1,4 @@
-opencv-python>=4.8
+opencv-python>=4.8        # on headless servers / WSL, opencv-python-headless works too
 numpy>=1.24
 Pillow>=10.0
 PyYAML>=6.0

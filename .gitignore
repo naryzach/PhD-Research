@@ -10,7 +10,7 @@ SLURM/SLURM_credentials.sh
 outputs/
 
 # Python cache files
-*/__pycache__/
+__pycache__/
 
 # Streamlit secrets
 */.streamlit/secrets.toml
