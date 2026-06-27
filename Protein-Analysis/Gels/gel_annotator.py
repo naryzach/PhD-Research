@@ -1095,7 +1095,12 @@ def annotate(input_path: Path, config_path: Path, output_path: Optional[Path] = 
 
     # ── Detect ladder band positions ─────────────────────────────────────────
     ladder_x = lane_xs[min(ladder_lane_idx, n_lanes - 1)]
-    band_ys = detect_band_positions(gel, ladder_x, lane_width, len(ladder.bands))
+    manual_ys = cfg.get("ladder", {}).get("bands_y")
+    if manual_ys:
+        band_ys = [int(y) for y in manual_ys]
+        print(f"Using {len(band_ys)} manually-specified ladder band positions.")
+    else:
+        band_ys = detect_band_positions(gel, ladder_x, lane_width, len(ladder.bands))
     if not band_ys:
         print("Warning: no ladder bands detected; guide lines and labels will be omitted.")
     elif len(band_ys) != len(ladder.bands):
