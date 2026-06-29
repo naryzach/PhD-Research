@@ -889,6 +889,33 @@ def detect_band_positions(gel_rgb: np.ndarray, lane_x: int, lane_width: int,
     return []
 
 
+def candidate_band_peaks(gel_rgb: np.ndarray, lane_x: int, lane_width: int,
+                         prominence_frac: float = MIN_BAND_PROMINENCE_FRAC / 3
+                         ) -> List[Tuple[int, float]]:
+    """
+    Return ALL candidate ladder-band y-positions at a relaxed prominence, for
+    diagnosing missed bands (used by --print-bands). Scans the dark-band (dip)
+    orientation — the usual case for a prestained ladder rendered dark-on-light
+    or as a grey ladder in a merge. Returns (y, prominence) sorted top→bottom.
+    """
+    h, w = gel_rgb.shape[:2]
+    x0 = max(0, lane_x - lane_width // 2)
+    x1 = min(w, lane_x + lane_width // 2)
+    gray = cv2.cvtColor(gel_rgb[:, x0:x1], cv2.COLOR_RGB2GRAY).astype(float)
+    profile = gray.mean(axis=1)
+    ks = max(3, h // 60)
+    if ks % 2 == 0:
+        ks += 1
+    profile_s = cv2.GaussianBlur(profile.reshape(-1, 1), (1, ks), 0).ravel()
+    ptp = float(np.ptp(profile_s))
+    if ptp < 1:
+        return []
+    peaks, props = find_peaks(-profile_s, distance=max(3, h // 80),
+                              prominence=ptp * prominence_frac)
+    return sorted(((int(y), float(p)) for y, p in zip(peaks, props["prominences"])),
+                  key=lambda t: t[0])
+
+
 # ── Font helper ───────────────────────────────────────────────────────────────
 
 def _get_font(size: int) -> ImageFont.FreeTypeFont:
@@ -1012,7 +1039,8 @@ def _ladder_from_config(cfg: dict) -> Ladder:
 # ── Main pipeline ──────────────────────────────────────────────────────────────
 
 def annotate(input_path: Path, config_path: Path, output_path: Optional[Path] = None,
-             stain: Optional[str] = None, surround: Optional[str] = None):
+             stain: Optional[str] = None, surround: Optional[str] = None,
+             print_bands: bool = False):
     cfg = _load_config(config_path)
     merge_cfg = cfg.get("merge")
 
@@ -1111,6 +1139,21 @@ def annotate(input_path: Path, config_path: Path, output_path: Optional[Path] = 
 
     # Pair bands (sorted largest → smallest, same as top → bottom)
     paired = list(zip(ladder.bands, band_ys))
+
+    # ── Optional: report ladder pixel positions (for manual bands_y tuning) ────
+    if print_bands:
+        src = "manual" if manual_ys else "detected"
+        print(f"\n── Ladder band y-positions ({src}, lane {ladder_lane_idx + 1}, "
+              f"gel-corrected px) ──")
+        for band, y in paired:
+            print(f"   {band.size:>6} {ladder.unit}:  y = {y}")
+        print(f"   bands_y: [{', '.join(str(y) for _, y in paired)}]")
+        cands = candidate_band_peaks(gel, ladder_x, lane_width)
+        if cands:
+            print("   relaxed candidate peaks (y: prominence) — use to spot a "
+                  "missed band:")
+            print("     " + ", ".join(f"{y}:{p:.0f}" for y, p in cands))
+        print()
 
     # ── Fonts ────────────────────────────────────────────────────────────────
     font_lane = _get_font(FONT_SIZE_LANE)
@@ -1235,6 +1278,10 @@ def main():
                              "deepest colour so the band stays solid).")
     parser.add_argument("--no-denoise", action="store_true",
                         help="Merge: keep small speckle/dust (disable blob removal).")
+    parser.add_argument("--print-bands", action="store_true",
+                        help="Print the ladder band y-positions (gel-corrected px) plus "
+                             "relaxed candidate peaks, so missed bands can be identified "
+                             "and pasted back into the config 'bands_y' list.")
     args = parser.parse_args()
 
     if args.swatch:
@@ -1296,7 +1343,8 @@ def main():
             print(f"Error: input not found: {args.input}")
             sys.exit(1)
 
-    annotate(args.input, args.config, args.output, stain=args.stain, surround=args.surround)
+    annotate(args.input, args.config, args.output, stain=args.stain, surround=args.surround,
+             print_bands=args.print_bands)
 
 
 if __name__ == "__main__":
