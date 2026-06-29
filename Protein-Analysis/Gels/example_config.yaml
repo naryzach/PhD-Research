@@ -1,7 +1,41 @@
 # gel_annotator config — copy and edit this for each gel
 #
+# ── Optional: multi-channel merge ────────────────────────────────────────────
+# Build the image from several greyscale acquisitions of ONE blot instead of a
+# single input file. Signal channels (fluorophores / chemi) are rendered as deep
+# colour on white (strongest = deepest); a 'brightfield' channel supplies the
+# membrane outline and a ladder coloured independently of the bands. The merge
+# is cropped and annotated by the same pipeline below. See merge_demo.yaml.
+# When 'merge:' is present, no input image argument is needed.
+#
+# merge:
+#   mark_saturated: false                 # (default) fill over-saturated band cores to the
+#                                         #   deepest colour — an intense band that saturates
+#                                         #   the detector otherwise reads with a depressed,
+#                                         #   off-pink core. true (or --mark-saturated) leaves
+#                                         #   that raw core visible.
+#   denoise: true                         # remove small speckle/dust blobs. Also --no-denoise.
+#   channels:
+#     - image: "blot(Colorimetric).tif"   # path relative to this config file
+#       channel: brightfield              # membrane + ladder
+#       color: gray                       # ladder colour (independent of bands)
+#     - image: "blot(Alexa 647).tif"
+#       channel: af647                    # fluorophore → deep far-red; or 'chemi', af488, cy5…
+#       # color: "#1a7f1a"                # optional explicit colour override
+#       # clip: true                      # per-channel overrides of the merge-level options
+#       # denoise: false
+#
 # gel_type: 'protein' (SDS-PAGE) or 'dna'
 gel_type: protein
+
+# Recolour the greyscale scan to mimic the physical stain (Image-Lab style).
+# Options: silver | coomassie | ponceau | none   (omit or 'none' = keep greyscale)
+# Can also be set/overridden on the command line with --stain.
+# Run: python gel_annotator.py --list-stains   for aliases.
+stain: none
+# stain_autostretch: false   # optional: true rescales contrast for faint/under-exposed gels
+# stain_mask_bg: true        # optional: isolate a sample on a dark surround (e.g. membrane on black); auto-skipped on white
+# stain_surround: auto       # auto/white = clear surround; black = keep black surround + flatten membrane to white (also --surround)
 
 ladder:
   # Named ladder key OR catalog number (e.g. "26619", "N3232")

@@ -204,11 +204,13 @@ def grouped_split(wide: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     return wide
 
 
-def hamming1_exposure(wide: pd.DataFrame) -> dict:
-    """Fraction of val/test loops within edit-distance<=1 of any TRAIN loop.
+def hamming1_flags(wide: pd.DataFrame) -> pd.Series:
+    """Per-row bool: is this val/test loop within edit-distance<=1 of a TRAIN loop?
 
     Honest measure of how 'held out' the eval splits really are: with exact-loop
     grouping the loops are disjoint, but near-neighbours can still cross splits.
+    Train rows are False (not applicable). Persisted as ``near_train_h1`` so the
+    trainer can carve a strict 'novel-loop' subset (no near-neighbour in train).
     """
     train_keys = set()
     for s in wide.loc[wide["split"] == "train", "loop"].fillna("").astype(str):
@@ -221,11 +223,10 @@ def hamming1_exposure(wide: pd.DataFrame) -> dict:
             return True
         return any(("d", s[:i] + s[i + 1:]) in train_keys for i in range(len(s)))
 
-    out = {}
-    for spname in ("val", "test"):
-        loops = wide.loc[wide["split"] == spname, "loop"].fillna("").astype(str)
-        out[spname] = round(float(np.mean([exposed(l) for l in loops])), 4) if len(loops) else None
-    return out
+    flags = []
+    for split, loop in zip(wide["split"], wide["loop"].fillna("").astype(str)):
+        flags.append(False if split == "train" else exposed(loop))
+    return pd.Series(flags, index=wide.index)
 
 
 # --------------------------------------------------------------------------- #
@@ -285,6 +286,7 @@ def main():
         print(f"  [smoke] limited to {len(wide)} sequences")
 
     wide = grouped_split(wide, cfg)
+    wide["near_train_h1"] = hamming1_flags(wide)
 
     out_dir = resolve_path(cfg, cfg["output_dir"]) / "data"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -293,7 +295,10 @@ def main():
         s.to_parquet(out_dir / f"{sp}.parquet", index=False)
 
     manifest = build_manifest(wide, cfg)
-    manifest["hamming1_exposure"] = hamming1_exposure(wide)
+    manifest["hamming1_exposure"] = {
+        sp: round(float(wide.loc[wide["split"] == sp, "near_train_h1"].mean()), 4)
+        for sp in ("val", "test")
+    }
     with open(out_dir / "manifest.json", "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2)
 

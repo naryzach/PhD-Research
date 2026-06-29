@@ -5,6 +5,7 @@ gel_annotator.py — Annotate SDS-PAGE and DNA gel images with lane labels and l
 Usage:
     python gel_annotator.py my_gel.tif my_config.yaml
     python gel_annotator.py my_gel.png my_config.yaml -o results/gel_labeled.png
+    python gel_annotator.py my_gel.tif my_config.yaml --stain silver
 
 The script will:
   1. Detect and perspective-correct the gel region.
@@ -12,7 +13,9 @@ The script will:
   3. Detect ladder band positions, then label them with size text.
   4. Draw faint horizontal guide lines at each ladder band.
   5. Draw diagonal lane labels above each lane.
-  6. Save the annotated image in the same format as the input.
+  6. Optionally recolour the greyscale scan to mimic the physical stain
+     (silver / coomassie / ponceau) via --stain or the config 'stain:' key.
+  7. Save the annotated image in the same format as the input.
 """
 
 import argparse
@@ -24,6 +27,7 @@ import cv2
 import numpy as np
 import yaml
 from PIL import Image, ImageDraw, ImageFont
+from scipy import ndimage
 from scipy.signal import find_peaks
 
 from ladders import LADDER_DB, LADDER_ALIASES, Ladder, LadderBand, resolve as resolve_ladder
@@ -66,6 +70,590 @@ def _sample_color(arr_rgba: np.ndarray, y0: int, y1: int, x0: int, x1: int
     if patch.size == 0:
         return (128.0, 128.0, 128.0)
     return tuple(patch.mean(axis=(0, 1)).tolist())
+
+
+# ── Stain recolouring (Image-Lab-style pseudocolour LUTs) ─────────────────────
+#
+# A scanned gel is greyscale.  These LUTs repaint that greyscale through a
+# colourmap.  Each LUT is a list of (grey, (R, G, B)) control points keyed by
+# 8-bit intensity — grey 0 = lowest signal, grey 255 = highest — and the
+# 256-entry table is filled by linear interpolation between the points.
+# (For absorptive stains the substrate is bright and bands dark; for the
+# fluorescent maps signal is bright on a dark field — same table either way.)
+#
+# All palettes except Ponceau were sampled directly from Bio-Rad Image Lab: one
+# gel was exported through every Image Lab colourmap plus the identity "Gray"
+# map, and each empirical intensity→RGB curve recovered against Gray (mean error
+# ≤0.5/channel), so they reproduce Image Lab's colourmaps.  Image Lab has no
+# Ponceau map, so that one is hand-tuned to a magenta-pink Ponceau S membrane.
+
+STAIN_LUTS: Dict[str, List[Tuple[int, Tuple[int, int, int]]]] = {
+    # ── Identity / greyscale ──
+    "gray": [
+        (  0, (  0,   0,   0)),
+        (255, (255, 255, 255)),
+    ],
+    # ── Protein stains (substrate bright, bands dark) ──
+    # Coomassie: bright azure bands → white substrate.
+    "coomassie": [
+        (  0, (  0, 118, 250)),
+        (128, (129, 187, 252)),
+        (255, (255, 255, 255)),
+    ],
+    # Silver: near-black-red bands → tan → warm-grey substrate.
+    "silver": [
+        (  0, ( 33,   0,   0)),
+        (153, (140,  70,   0)),
+        (254, (229, 228, 227)),
+        (255, (255, 255, 255)),
+    ],
+    # Gold-Silver: diverging gold/blue map with black band cores.
+    "gold_silver": [
+        (  0, (173, 181, 175)),
+        ( 45, (255, 255, 255)),
+        ( 91, (  0,   0,   0)),
+        (127, (124, 147, 201)),
+        (191, (255, 209,  86)),
+        (204, (252, 226,  53)),
+        (216, (255, 201,  73)),
+        (229, (  0,   0,   0)),
+        (254, (180, 183, 245)),
+        (255, (255, 255, 255)),
+    ],
+    # SYPRO Ruby: deep-red → orange bands → white.
+    "sypro_ruby": [
+        (  0, (  0,   0,   0)),
+        (190, (132,  10,   0)),
+        (254, (216,  79,   0)),
+        (255, (255, 255, 255)),
+    ],
+    # Flamingo: olive/chartreuse bands → white.
+    "flamingo": [
+        (  0, (  0,   0,   0)),
+        (254, (199, 199,   0)),
+        (255, (255, 255, 255)),
+    ],
+    # Stain Free: cyan bands → white.
+    "stain_free": [
+        (  0, (  0, 200, 255)),
+        (254, (  0,   0,   1)),
+        (255, (255, 255, 255)),
+    ],
+    # Ponceau S: magenta-pink bands → white membrane (hand-tuned, no Image Lab map).
+    "ponceau": [
+        (  0, (171,  20,  84)),
+        ( 64, (206,  52, 110)),
+        (128, (228, 116, 156)),
+        (192, (246, 196, 212)),
+        (232, (252, 236, 240)),
+        (255, (255, 255, 255)),
+    ],
+    # ── Nucleic-acid dyes (signal bright on dark field) ──
+    # EtBr: black → red → orange, with only saturated (255) clipping to white.
+    "etbr": [
+        (  0, (  0,   0,   0)),
+        (178, (255,  40,  10)),
+        (254, (255, 126,  62)),
+        (255, (255, 255, 255)),
+    ],
+    # SYBR Green: black → green → white.
+    "sybr_green": [
+        (  0, (  0,   0,   0)),
+        (254, (  0, 254,  17)),
+        (255, (255, 255, 255)),
+    ],
+    # ── Display maps ──
+    # Spectrum: blue → cyan → yellow → red rainbow.
+    "spectrum": [
+        (  0, (  0,   0,   0)),
+        ( 63, (  0,   0, 255)),
+        (127, (  0, 255, 255)),
+        (191, (255, 255,   0)),
+        (254, (255,   3,   0)),
+        (255, (255, 255, 255)),
+    ],
+    # Pseudo: red → yellow → green → cyan → blue → magenta.
+    "pseudo": [
+        (  0, (255,   0,   0)),
+        ( 51, (240, 230,   0)),
+        ( 89, (  0, 255,   0)),
+        (127, (  0, 255, 255)),
+        (178, (  0,   0, 255)),
+        (254, (251,   0, 255)),
+        (255, (255, 255, 255)),
+    ],
+    # False Color: high-contrast banded discrete map.
+    "false_color": [
+        (  0, (208,  96,   0)),
+        ( 68, ( 96,   0,   0)),
+        (102, (112, 160, 240)),
+        (132, ( 16,  80,  32)),
+        (160, (112, 240, 108)),
+        (186, ( 16,  96,  64)),
+        (221, (240,  80,  96)),
+        (254, ( 69,  95, 158)),
+        (255, (255, 255, 255)),
+    ],
+}
+
+# Order used for the swatch preview (matches the Image Lab dialog, Ponceau last).
+SWATCH_ORDER = [
+    "gray", "etbr", "coomassie", "stain_free", "sybr_green", "sypro_ruby",
+    "flamingo", "silver", "false_color", "spectrum", "gold_silver", "pseudo",
+    "ponceau",
+]
+
+# Substrate flattening for the 'black' surround look: within the membrane mask,
+# this high percentile of intensity is treated as bare membrane (→ pure white)
+# and this low percentile as the deepest band (→ saturated dye).
+SUBSTRATE_WHITE_PCT = 55.0
+SUBSTRATE_FLOOR_PCT = 0.3
+
+# Friendly spellings → canonical LUT key.
+STAIN_ALIASES = {
+    "gray": "gray", "grey": "gray", "greyscale": "gray", "grayscale": "gray",
+    "coomassie": "coomassie", "coomassie_blue": "coomassie",
+    "coomassieblue": "coomassie", "cbb": "coomassie", "blue": "coomassie",
+    "silver": "silver", "silver_stain": "silver", "silverstain": "silver",
+    "ag": "silver",
+    "gold_silver": "gold_silver", "goldsilver": "gold_silver",
+    "sypro_ruby": "sypro_ruby", "sypro": "sypro_ruby", "ruby": "sypro_ruby",
+    "flamingo": "flamingo",
+    "stain_free": "stain_free", "stainfree": "stain_free", "sf": "stain_free",
+    "ponceau": "ponceau", "ponceau_s": "ponceau", "ponceaus": "ponceau",
+    "red": "ponceau",
+    "etbr": "etbr", "ethidium": "etbr", "ethidium_bromide": "etbr",
+    "sybr_green": "sybr_green", "sybr": "sybr_green", "sybrgreen": "sybr_green",
+    "green": "sybr_green",
+    "spectrum": "spectrum", "rainbow": "spectrum",
+    "pseudo": "pseudo", "pseudocolor": "pseudo", "pseudocolour": "pseudo",
+    "false_color": "false_color", "falsecolor": "false_color",
+    "false_colour": "false_color", "false": "false_color",
+}
+
+
+def resolve_stain(name: str) -> str:
+    """Map a user-supplied stain name to a canonical LUT key."""
+    key = STAIN_ALIASES.get(name.strip().lower().replace(" ", "_").replace("-", "_"))
+    if key is None:
+        raise KeyError(
+            f"Unknown stain '{name}'. Available: {', '.join(sorted(STAIN_LUTS))}."
+        )
+    return key
+
+
+def _build_lut(stops: List[Tuple[int, Tuple[int, int, int]]]) -> np.ndarray:
+    """Expand (grey, RGB) control points into a 256×3 uint8 LUT indexed by grey."""
+    stops = sorted(stops, key=lambda s: s[0])
+    xs = np.array([s[0] for s in stops], dtype=float)
+    cols = np.array([s[1] for s in stops], dtype=float)
+    grid = np.arange(256, dtype=float)
+    lut = np.stack([np.interp(grid, xs, cols[:, c]) for c in range(3)], axis=1)
+    return np.clip(np.round(lut), 0, 255).astype(np.uint8)
+
+
+def _membrane_mask(gray: np.ndarray) -> Optional[np.ndarray]:
+    """
+    Find the sample (gel/membrane) region when it sits on a dark scan surround.
+
+    A membrane scanned on black background reads bright while the surround reads
+    dark, so an Otsu split separates them.  Dark bands inside the membrane fall
+    below the threshold too, so the bright region's interior holes are filled —
+    leaving a solid mask of the whole sample, bands included.
+
+    Returns a bool mask (True = sample) or None when there is no dark surround
+    framing the image (e.g. a gel imaged on white), in which case masking would
+    be a no-op or harmful and should be skipped.
+    """
+    g = np.clip(np.round(gray), 0, 255).astype(np.uint8)
+    t, _ = cv2.threshold(g, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    border = np.concatenate([g[0, :], g[-1, :], g[:, 0], g[:, -1]])
+    # Only mask when a real dark surround exists AND it frames the image edges.
+    if (g < t).mean() < 0.02 or (border < t).mean() < 0.5:
+        return None
+
+    fg = (g >= t).astype(np.uint8)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    fg = cv2.morphologyEx(fg, cv2.MORPH_OPEN, kernel)
+    num, labels, stats, _ = cv2.connectedComponentsWithStats(fg, 8)
+    if num <= 1:
+        return None
+
+    largest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    region = (labels == largest).astype(np.uint8)
+    # Fill interior holes (the dark bands) by flooding the external contour.
+    contours, _ = cv2.findContours(region, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    filled = np.zeros_like(region)
+    cv2.drawContours(filled, contours, -1, 1, thickness=cv2.FILLED)
+    return filled.astype(bool)
+
+
+def recolor_gel(
+    gel_rgb: np.ndarray,
+    stain: str,
+    auto_stretch: bool = False,
+    mask_background: bool = True,
+    surround: str = "auto",
+    low_pct: float = 1.0,
+    high_pct: float = 99.0,
+) -> np.ndarray:
+    """
+    Repaint a greyscale-scanned gel to resemble a physical stain.
+
+    The greyscale luminance is looked up directly through the stain's colourmap
+    (grey 255 → clear substrate, grey 0 → darkest band), matching how Image Lab
+    maps intensity to colour.  This reproduces Image Lab's output for normally
+    exposed scans without any contrast tweaking.
+
+    Set `auto_stretch=True` to first rescale intensity between robust percentiles
+    (`low_pct`/`high_pct`) — useful for faint or under-exposed gels where the
+    bands don't reach the dark end of the map on their own.
+
+    With `mask_background=True` (default), a sample scanned on a dark surround
+    (e.g. a Ponceau membrane on black) is isolated from that surround.  It is
+    automatically skipped when no dark surround is present, so gels imaged on
+    white are unaffected.  `surround` then controls how the surround is rendered:
+
+      • "auto" / "white" — repaint the surround as clear substrate (white).
+      • "black"          — keep a black surround for contrast and flatten the
+                           membrane background to pure white so only the bands
+                           carry colour (the "membrane on black" presentation).
+
+    Returns an RGB uint8 array the same size as the input.
+    """
+    lut = _build_lut(STAIN_LUTS[resolve_stain(stain)])
+    surround = surround.strip().lower()
+
+    gray = cv2.cvtColor(gel_rgb, cv2.COLOR_RGB2GRAY).astype(np.float32)
+    mask = _membrane_mask(gray) if mask_background else None
+
+    if surround == "black" and mask is not None:
+        # Flatten the membrane: bare substrate → white, deepest band → dye floor.
+        vals = gray[mask]
+        lo = float(np.percentile(vals, SUBSTRATE_FLOOR_PCT))
+        hi = float(np.percentile(vals, SUBSTRATE_WHITE_PCT))
+        if hi - lo < 1e-3:
+            hi = lo + 1.0
+        gray = (gray - lo) / (hi - lo) * 255.0
+    elif auto_stretch:
+        lo, hi = np.percentile(gray, [low_pct, high_pct])
+        if hi - lo < 1e-3:
+            hi = lo + 1.0
+        gray = (gray - lo) / (hi - lo) * 255.0
+
+    idx = np.clip(np.round(gray), 0, 255).astype(np.intp)
+    out = lut[idx]
+    if mask is not None:
+        out[~mask] = (0, 0, 0) if surround == "black" else lut[255]
+    return out
+
+
+def render_swatches(path: Path, bar_w: int = 320, bar_h: int = 26,
+                    pad: int = 8, label_w: int = 120) -> Path:
+    """
+    Render a labelled gradient swatch for every stain palette to `path`.
+
+    Each bar runs low intensity (left) → high intensity (right), the same
+    orientation as Bio-Rad Image Lab's colourmap picker.
+    """
+    font = _get_font(14)
+    keys = [k for k in SWATCH_ORDER if k in STAIN_LUTS]
+    keys += [k for k in STAIN_LUTS if k not in keys]  # any not listed, appended
+
+    width = label_w + bar_w + pad * 2
+    height = pad + (bar_h + pad) * len(keys)
+    img = Image.new("RGB", (width, height), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+
+    ramp = np.linspace(0, 255, bar_w).round().astype(np.intp)
+    for i, key in enumerate(keys):
+        lut = _build_lut(STAIN_LUTS[key])
+        bar = np.repeat(lut[ramp][None, :, :], bar_h, axis=0)
+        x0, y0 = label_w, pad + i * (bar_h + pad)
+        img.paste(Image.fromarray(bar), (x0, y0))
+        draw.rectangle([x0, y0, x0 + bar_w - 1, y0 + bar_h - 1], outline=(170, 170, 170))
+        draw.text((pad, y0 + bar_h // 2 - 7), key, font=font, fill=(20, 20, 20))
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(str(path))
+    return path
+
+
+# ── Multi-channel merge (fluorescence / chemiluminescence / brightfield) ──────
+#
+# Each acquisition channel is a greyscale image.  Although fluorescence/chemi
+# signal physically glows on a black field, for a publication-style figure each
+# channel is rendered as if inverted onto white paper: strong signal tints the
+# white background toward the channel's deep pigment (strongest = deepest, not
+# white), and channels are multiply-composited (like overlapping ink).  The
+# brightfield/colorimetric channel supplies the membrane outline and a ladder
+# coloured independently of the band channels.  Fluorophore hues come from their
+# emission wavelength, so AF488 reads green and AF647 reads far-red, etc.  A
+# black surround is kept so the result crops and annotates like a normal gel.
+
+# Emission-peak wavelengths (nm) for common fluorophores / labels.
+FLUOROPHORE_NM: Dict[str, float] = {
+    "af405": 421, "af488": 519, "af532": 554, "af546": 573, "af555": 565,
+    "af568": 603, "af594": 617, "af647": 668, "af680": 702, "af700": 723,
+    "af750": 775, "af790": 800,
+    "dapi": 461, "fitc": 519, "gfp": 509, "yfp": 527, "cy2": 506, "cy3": 566,
+    "cy5": 670, "cy55": 694, "cy7": 767, "texas_red": 615, "tritc": 576,
+    "pe": 578,
+}
+
+# Glowing-blue base for luminol/HRP enhanced chemiluminescence (peak ≈ 425 nm,
+# rendered as a bright blue that blooms to a white-hot core).
+CHEMI_COLOR = (40, 110, 255)
+
+
+def wavelength_to_rgb(nm: float) -> Tuple[int, int, int]:
+    """Approximate the perceived display colour of a (visible) wavelength in nm."""
+    nm = float(np.clip(nm, 380.0, 780.0))
+    if nm < 440:
+        r, g, b = -(nm - 440) / 60.0, 0.0, 1.0
+    elif nm < 490:
+        r, g, b = 0.0, (nm - 440) / 50.0, 1.0
+    elif nm < 510:
+        r, g, b = 0.0, 1.0, -(nm - 510) / 20.0
+    elif nm < 580:
+        r, g, b = (nm - 510) / 70.0, 1.0, 0.0
+    elif nm < 645:
+        r, g, b = 1.0, -(nm - 645) / 65.0, 0.0
+    else:
+        r, g, b = 1.0, 0.0, 0.0
+    if nm < 420:
+        f = 0.3 + 0.7 * (nm - 380) / 40.0
+    elif nm <= 700:
+        f = 1.0
+    else:
+        f = 0.3 + 0.7 * (780 - nm) / 80.0
+    return tuple(int(round(255 * c * f)) for c in (r, g, b))
+
+
+def resolve_channel(spec: str) -> Tuple[Tuple[int, int, int], str]:
+    """
+    Resolve a channel name to (base_colour, role).
+
+    role ∈ {'fluorescent', 'chemi', 'brightfield'} selects how the channel's
+    greyscale is read: 'fluorescent'/'chemi' treat bright pixels as signal;
+    'brightfield' treats dark marks on a bright membrane (a prestained ladder)
+    as signal.  `base_colour` is the hue; it is deepened by `_deep_pigment` so
+    it reads on white.
+    """
+    key = spec.strip().lower().replace(" ", "_").replace("-", "_")
+    if key in ("brightfield", "colorimetric", "marker", "trans", "ladder",
+               "white", "gray", "grey"):
+        return (200, 200, 200), "brightfield"
+    if key in ("chemi", "chemiluminescence", "chemiluminescent", "luminol", "ecl", "hrp"):
+        return CHEMI_COLOR, "chemi"
+    if key in FLUOROPHORE_NM:
+        return wavelength_to_rgb(FLUOROPHORE_NM[key]), "fluorescent"
+    named = {"red": (255, 0, 0), "green": (0, 255, 0), "blue": (40, 110, 255),
+             "magenta": (255, 0, 255), "cyan": (0, 255, 255), "yellow": (255, 255, 0)}
+    if key in named:
+        return named[key], "fluorescent"
+    raise KeyError(
+        f"Unknown channel '{spec}'. Use a fluorophore (e.g. af488, af647, cy5), "
+        f"'chemi', 'brightfield', or a colour name."
+    )
+
+
+def _norm_role(role: str) -> str:
+    r = role.strip().lower()
+    if r.startswith("fluor"):
+        return "fluorescent"
+    if r.startswith("chemi") or r in ("luminol", "ecl", "hrp"):
+        return "chemi"
+    if r in ("brightfield", "colorimetric", "marker", "ladder", "trans"):
+        return "brightfield"
+    return r
+
+
+def parse_color(value) -> Tuple[int, int, int]:
+    """Parse a colour given as [r,g,b], '#rrggbb', or a known name."""
+    if isinstance(value, (list, tuple)):
+        return tuple(int(v) for v in value[:3])
+    s = str(value).strip()
+    if s.startswith("#") and len(s) == 7:
+        return tuple(int(s[i:i + 2], 16) for i in (1, 3, 5))
+    return resolve_channel(s)[0]
+
+
+def _deep_pigment(color: Tuple[int, int, int], value: float = 0.62) -> Tuple[int, int, int]:
+    """Convert a (bright) hue into a deep, saturated pigment that reads on white."""
+    import colorsys
+    r, g, b = (c / 255.0 for c in color)
+    h, s, v = colorsys.rgb_to_hsv(r, g, b)
+    if s < 0.08:                       # achromatic → a mid-dark grey (e.g. ladder)
+        lvl = int(round(255 * 0.42))
+        return (lvl, lvl, lvl)
+    r, g, b = colorsys.hsv_to_rgb(h, 1.0, value)
+    return tuple(int(round(255 * c)) for c in (r, g, b))
+
+
+def _despeckle(signal: np.ndarray, thresh: float = 0.08,
+               min_area_frac: float = 4e-5) -> np.ndarray:
+    """
+    Remove small isolated signal blobs (dust / hot pixels) from a 0–1 map.
+
+    Connected regions of `signal > thresh` smaller than `min_area_frac` of the
+    image are zeroed; large regions (real bands/ladder) and their faint gradient
+    tails are left untouched.
+    """
+    h, w = signal.shape
+    min_area = max(20, int(h * w * min_area_frac))
+    m = (signal > thresh).astype(np.uint8)
+    if not m.any():
+        return signal
+    num, labels, stats, _ = cv2.connectedComponentsWithStats(m, 8)
+    remove = np.zeros((h, w), dtype=bool)
+    for i in range(1, num):
+        if stats[i, cv2.CC_STAT_AREA] < min_area:
+            remove |= labels == i
+    if remove.any():
+        signal = signal.copy()
+        signal[remove] = 0.0
+    return signal
+
+
+def colorize_layer(
+    gray: np.ndarray,
+    color: Tuple[int, int, int],
+    role: str,
+    mark_saturated: bool = False,
+    denoise: bool = True,
+    low_pct: float = 1.0,
+    high_pct: float = 99.9,
+) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+    """
+    Render one channel as a white-background layer tinted toward its deep pigment.
+
+    Signal strength drives a gradient from white (no signal) to the deep pigment
+    (peak), so a band's intense core is deepest and fades out with intensity,
+    like a real gel band.  The peak is set near the top of the data because a
+    fluorescent frame is mostly dark background, so a lower percentile would land
+    in the background and flatten every band to one colour.
+
+    `mark_saturated=False` (default) hides the detector's saturation artefact: a
+    band intense enough to saturate reads back with a depressed ("holed") core
+    that would grade to an off pinkish colour, so those saturated pixels and the
+    core they enclose are filled to the deepest colour and the band stays solid.
+    Set `mark_saturated=True` to leave that raw, distinctly-coloured core visible.
+    `denoise=True` drops small speckle/dust blobs.
+
+    Returns (layer_rgb, signal, membrane_mask).  `membrane_mask` is only non-None
+    for a brightfield channel, where it defines the croppable region.
+    """
+    deep = np.array(_deep_pigment(color), dtype=np.float32)
+    g = gray.astype(np.float32)
+    mask = None
+
+    if role == "brightfield":
+        # Dark marks on a bright membrane: invert so the ladder becomes signal.
+        mask = _membrane_mask(g)
+        vals = g[mask] if mask is not None else g.ravel()
+        hi = float(np.percentile(vals, 90))
+        lo = float(np.percentile(vals, 2))
+        if hi - lo < 1e-3:
+            hi = lo + 1.0
+        signal = np.clip((hi - g) / (hi - lo), 0.0, 1.0) ** 2.4  # gamma kills dust
+        if mask is not None:
+            er = max(3, int(min(g.shape) * 0.012))
+            ek = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (er, er))
+            inner = cv2.erode(mask.astype(np.uint8), ek).astype(bool)
+            signal[~inner] = 0.0       # blank surround + dark membrane cut-rim
+    else:
+        # Bright signal on a dark field: normalise so band cores reach full depth.
+        lo = float(np.percentile(g, low_pct))
+        hi = float(np.percentile(g, high_pct))
+        if hi - lo < 1e-3:
+            hi = lo + 1.0
+        signal = np.clip((g - lo) / (hi - lo), 0.0, 1.0)
+        if not mark_saturated:
+            # Hide the saturation artefact: an over-saturated band reads with a
+            # depressed core, so fill the region enclosed by the saturated
+            # (max-value) pixels and pin it to the deepest colour.
+            sat = float(g.max())
+            if sat >= 250.0:               # a genuine 8-bit saturation plateau
+                core = (g >= sat - 1.0).astype(np.uint8)
+                k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+                core = cv2.morphologyEx(core, cv2.MORPH_CLOSE, k)
+                core = ndimage.binary_fill_holes(core)
+                signal[core] = 1.0
+
+    if denoise:
+        signal = _despeckle(signal)
+
+    s = signal[..., None]
+    layer = 255.0 * (1.0 - s) + deep * s
+    return np.clip(np.round(layer), 0, 255).astype(np.uint8), signal, mask
+
+
+def merge_images(channels: List[Tuple]) -> np.ndarray:
+    """
+    Build a display merge from channels of one blot.
+
+    `channels` is a list of (image_path, base_colour, role[, mark_sat[, denoise]]).
+    Images are resized to the first channel's size.  Every channel is rendered as
+    a white-background gradient layer and the layers are multiply-composited, like
+    overlapping ink on paper.  The brightfield channel supplies the membrane
+    outline and an independently coloured ladder; where a band channel also has
+    signal in the ladder lane (the ladder is mildly fluorescent) the colours
+    simply combine.  Returns RGB with a black surround so the result
+    crops/annotates like a gel.
+    """
+    base_gray = np.array(Image.open(channels[0][0]).convert("L"))
+    h, w = base_gray.shape
+
+    acc = np.ones((h, w, 3), dtype=np.float32)   # multiply accumulator (white)
+    membrane: Optional[np.ndarray] = None
+    for ch in channels:
+        path, color, role = ch[0], ch[1], _norm_role(ch[2])
+        mark_sat = ch[3] if len(ch) > 3 else False
+        denoise = ch[4] if len(ch) > 4 else True
+        gray = np.array(Image.open(path).convert("L"))
+        if gray.shape != (h, w):
+            gray = cv2.resize(gray, (w, h), interpolation=cv2.INTER_AREA)
+        layer, _signal, mask = colorize_layer(gray, color, role,
+                                              mark_saturated=mark_sat, denoise=denoise)
+        acc *= layer.astype(np.float32) / 255.0
+        if role == "brightfield" and mask is not None and membrane is None:
+            membrane = mask
+        print(f"  {role:<12} {tuple(_deep_pigment(color))} ← {Path(path).name}")
+
+    merged = np.clip(np.round(acc * 255.0), 0, 255).astype(np.uint8)
+    if membrane is not None:
+        merged[~membrane] = (0, 0, 0)   # black surround → croppable like a gel
+    return merged
+
+
+def build_merge(merge_cfg: dict, base_dir: Path) -> np.ndarray:
+    """Build a merged image from a config 'merge:' block (see example_config)."""
+    g_mark = bool(merge_cfg.get("mark_saturated", False))
+    g_denoise = bool(merge_cfg.get("denoise", True))
+    channels = []
+    for ch in merge_cfg.get("channels", []):
+        img = Path(ch["image"])
+        if not img.is_absolute():
+            img = base_dir / img
+        if not img.exists():
+            raise FileNotFoundError(f"merge channel image not found: {img}")
+        if "channel" in ch:
+            color, role = resolve_channel(str(ch["channel"]))
+        else:
+            role = _norm_role(str(ch.get("role", "fluorescent")))
+            color = (200, 200, 200) if role == "brightfield" else (255, 0, 0)
+        if "role" in ch:
+            role = _norm_role(str(ch["role"]))
+        if "color" in ch:
+            color = parse_color(ch["color"])
+        mark_sat = bool(ch.get("mark_saturated", g_mark))
+        denoise = bool(ch.get("denoise", g_denoise))
+        channels.append((img, color, role, mark_sat, denoise))
+    if not channels:
+        raise ValueError("merge config has no channels.")
+    return merge_images(channels)
 
 
 # ── Image I/O ─────────────────────────────────────────────────────────────────
@@ -301,6 +889,33 @@ def detect_band_positions(gel_rgb: np.ndarray, lane_x: int, lane_width: int,
     return []
 
 
+def candidate_band_peaks(gel_rgb: np.ndarray, lane_x: int, lane_width: int,
+                         prominence_frac: float = MIN_BAND_PROMINENCE_FRAC / 3
+                         ) -> List[Tuple[int, float]]:
+    """
+    Return ALL candidate ladder-band y-positions at a relaxed prominence, for
+    diagnosing missed bands (used by --print-bands). Scans the dark-band (dip)
+    orientation — the usual case for a prestained ladder rendered dark-on-light
+    or as a grey ladder in a merge. Returns (y, prominence) sorted top→bottom.
+    """
+    h, w = gel_rgb.shape[:2]
+    x0 = max(0, lane_x - lane_width // 2)
+    x1 = min(w, lane_x + lane_width // 2)
+    gray = cv2.cvtColor(gel_rgb[:, x0:x1], cv2.COLOR_RGB2GRAY).astype(float)
+    profile = gray.mean(axis=1)
+    ks = max(3, h // 60)
+    if ks % 2 == 0:
+        ks += 1
+    profile_s = cv2.GaussianBlur(profile.reshape(-1, 1), (1, ks), 0).ravel()
+    ptp = float(np.ptp(profile_s))
+    if ptp < 1:
+        return []
+    peaks, props = find_peaks(-profile_s, distance=max(3, h // 80),
+                              prominence=ptp * prominence_frac)
+    return sorted(((int(y), float(p)) for y, p in zip(peaks, props["prominences"])),
+                  key=lambda t: t[0])
+
+
 # ── Font helper ───────────────────────────────────────────────────────────────
 
 def _get_font(size: int) -> ImageFont.FreeTypeFont:
@@ -423,11 +1038,20 @@ def _ladder_from_config(cfg: dict) -> Ladder:
 
 # ── Main pipeline ──────────────────────────────────────────────────────────────
 
-def annotate(input_path: Path, config_path: Path, output_path: Optional[Path] = None):
+def annotate(input_path: Path, config_path: Path, output_path: Optional[Path] = None,
+             stain: Optional[str] = None, surround: Optional[str] = None,
+             print_bands: bool = False):
     cfg = _load_config(config_path)
+    merge_cfg = cfg.get("merge")
 
-    # ── Load & correct ───────────────────────────────────────────────────────
-    img = load_image(input_path)
+    # ── Build (merge) or load the source image ───────────────────────────────
+    if merge_cfg:
+        print("Building merged image from channels:")
+        img = build_merge(merge_cfg, config_path.parent)
+    else:
+        img = load_image(input_path)
+
+    # ── Correct ──────────────────────────────────────────────────────────────
     corners = detect_gel_corners(img)
     if corners is not None:
         gel = perspective_correct(img, corners)
@@ -437,6 +1061,28 @@ def annotate(input_path: Path, config_path: Path, output_path: Optional[Path] = 
         print("Warning: gel boundary not detected; using full image.")
 
     gel_h, gel_w = gel.shape[:2]
+
+    # ── Stain recolouring ─────────────────────────────────────────────────────
+    # A merged image is already colourised, so stain recolouring is skipped.
+    # Otherwise the CLI flag wins over the config 'stain:' key; detection below
+    # always runs on the original greyscale `gel`, only the display copy changes.
+    gel_display = gel
+    stain_cfg = stain if stain is not None else cfg.get("stain")
+    if merge_cfg:
+        pass
+    elif stain_cfg and str(stain_cfg).strip().lower() not in ("", "none", "grey", "gray"):
+        try:
+            key = resolve_stain(str(stain_cfg))
+            surround_opt = surround if surround is not None else cfg.get("stain_surround", "auto")
+            gel_display = recolor_gel(
+                gel, key,
+                auto_stretch=bool(cfg.get("stain_autostretch", False)),
+                mask_background=bool(cfg.get("stain_mask_bg", True)),
+                surround=str(surround_opt),
+            )
+            print(f"Recoloured gel with '{key}' stain palette (surround={surround_opt}).")
+        except KeyError as e:
+            print(f"Warning: {e} Leaving gel greyscale.")
 
     # ── Resolve ladder ───────────────────────────────────────────────────────
     ladder = _ladder_from_config(cfg)
@@ -477,7 +1123,12 @@ def annotate(input_path: Path, config_path: Path, output_path: Optional[Path] = 
 
     # ── Detect ladder band positions ─────────────────────────────────────────
     ladder_x = lane_xs[min(ladder_lane_idx, n_lanes - 1)]
-    band_ys = detect_band_positions(gel, ladder_x, lane_width, len(ladder.bands))
+    manual_ys = cfg.get("ladder", {}).get("bands_y")
+    if manual_ys:
+        band_ys = [int(y) for y in manual_ys]
+        print(f"Using {len(band_ys)} manually-specified ladder band positions.")
+    else:
+        band_ys = detect_band_positions(gel, ladder_x, lane_width, len(ladder.bands))
     if not band_ys:
         print("Warning: no ladder bands detected; guide lines and labels will be omitted.")
     elif len(band_ys) != len(ladder.bands):
@@ -488,6 +1139,21 @@ def annotate(input_path: Path, config_path: Path, output_path: Optional[Path] = 
 
     # Pair bands (sorted largest → smallest, same as top → bottom)
     paired = list(zip(ladder.bands, band_ys))
+
+    # ── Optional: report ladder pixel positions (for manual bands_y tuning) ────
+    if print_bands:
+        src = "manual" if manual_ys else "detected"
+        print(f"\n── Ladder band y-positions ({src}, lane {ladder_lane_idx + 1}, "
+              f"gel-corrected px) ──")
+        for band, y in paired:
+            print(f"   {band.size:>6} {ladder.unit}:  y = {y}")
+        print(f"   bands_y: [{', '.join(str(y) for _, y in paired)}]")
+        cands = candidate_band_peaks(gel, ladder_x, lane_width)
+        if cands:
+            print("   relaxed candidate peaks (y: prominence) — use to spot a "
+                  "missed band:")
+            print("     " + ", ".join(f"{y}:{p:.0f}" for y, p in cands))
+        print()
 
     # ── Fonts ────────────────────────────────────────────────────────────────
     font_lane = _get_font(FONT_SIZE_LANE)
@@ -516,12 +1182,13 @@ def annotate(input_path: Path, config_path: Path, output_path: Optional[Path] = 
     canvas_h = gel_h + top_pad + bottom_pad
 
     # ── Canvas background (match gel surroundings) ───────────────────────────
-    corners_px = [gel[:10, :10], gel[:10, -10:], gel[-10:, :10], gel[-10:, -10:]]
+    corners_px = [gel_display[:10, :10], gel_display[:10, -10:],
+                  gel_display[-10:, :10], gel_display[-10:, -10:]]
     bg_lum = _luminance(np.mean([p.mean(axis=(0, 1)) for p in corners_px], axis=0))
     canvas_fill = (18, 18, 18) if bg_lum < 128 else (235, 235, 235)
 
     canvas = Image.new("RGBA", (canvas_w, canvas_h), canvas_fill + (255,))
-    canvas.paste(Image.fromarray(gel), (left_pad, top_pad))
+    canvas.paste(Image.fromarray(gel_display), (left_pad, top_pad))
 
     gel_left = left_pad
     gel_right = left_pad + gel_w
@@ -561,7 +1228,10 @@ def annotate(input_path: Path, config_path: Path, output_path: Optional[Path] = 
 
     # ── Save ─────────────────────────────────────────────────────────────────
     if output_path is None:
-        output_path = input_path.parent / (input_path.stem + "_annotated" + input_path.suffix)
+        if input_path is not None:
+            output_path = input_path.parent / (input_path.stem + "_annotated" + input_path.suffix)
+        else:
+            output_path = config_path.parent / (config_path.stem + "_merged_annotated.png")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     final_rgb = np.array(canvas.convert("RGB"))
@@ -575,13 +1245,71 @@ def main():
     parser = argparse.ArgumentParser(
         description="Annotate gel electrophoresis images with lane labels and ladder sizes."
     )
-    parser.add_argument("input", type=Path, help="Input gel image (JPG / PNG / TIFF)")
-    parser.add_argument("config", type=Path, help="Config YAML file")
+    parser.add_argument("input", type=Path, nargs="?", default=None,
+                        help="Input gel image (JPG / PNG / TIFF)")
+    parser.add_argument("config", type=Path, nargs="?", default=None,
+                        help="Config YAML file")
     parser.add_argument("-o", "--output", type=Path, default=None,
                         help="Output path (default: <input>_annotated.<ext> in same directory)")
+    parser.add_argument("--stain", default=None,
+                        help="Recolour the greyscale scan to mimic a physical stain: "
+                             f"{', '.join(sorted(STAIN_LUTS))} (or 'none'). "
+                             "Overrides the config 'stain:' key.")
+    parser.add_argument("--surround", default=None, choices=["auto", "white", "black"],
+                        help="For samples on a dark surround (e.g. membrane on black): "
+                             "'white' (default) repaints the surround clear; 'black' keeps it "
+                             "black and flattens the membrane to white. Overrides 'stain_surround'.")
     parser.add_argument("--list-ladders", action="store_true",
                         help="Print all available ladder keys and exit")
+    parser.add_argument("--list-stains", action="store_true",
+                        help="Print all available stain palettes and exit")
+    parser.add_argument("--swatch", nargs="?", const="stain_swatches.png", default=None,
+                        metavar="PATH",
+                        help="Render a swatch preview of every stain palette to PATH "
+                             "(default: stain_swatches.png) and exit.")
+    parser.add_argument("--merge", nargs="+", default=None, metavar="IMAGE=CHANNEL",
+                        help="Merge multiple channel images of one blot, e.g. "
+                             "--merge blot_AF647.tif=af647 blot_color.tif=brightfield "
+                             "-o merged.png. Channels: fluorophores (af488, af647, cy5…), "
+                             "chemi, brightfield, or colour names.")
+    parser.add_argument("--mark-saturated", action="store_true",
+                        help="Merge: leave over-saturated band cores at their raw "
+                             "depressed/off-pink colour (by default they are filled to the "
+                             "deepest colour so the band stays solid).")
+    parser.add_argument("--no-denoise", action="store_true",
+                        help="Merge: keep small speckle/dust (disable blob removal).")
+    parser.add_argument("--print-bands", action="store_true",
+                        help="Print the ladder band y-positions (gel-corrected px) plus "
+                             "relaxed candidate peaks, so missed bands can be identified "
+                             "and pasted back into the config 'bands_y' list.")
     args = parser.parse_args()
+
+    if args.swatch:
+        out = render_swatches(Path(args.swatch))
+        print(f"Saved swatch preview: {out}")
+        sys.exit(0)
+
+    if args.merge:
+        channels = []
+        for token in args.merge:
+            if "=" not in token:
+                parser.error(f"--merge expects IMAGE=CHANNEL tokens, got '{token}'")
+            path_str, _, spec = token.rpartition("=")
+            path = Path(path_str)
+            if not path.exists():
+                print(f"Error: merge image not found: {path}")
+                sys.exit(1)
+            try:
+                color, role = resolve_channel(spec)
+            except KeyError as e:
+                parser.error(str(e))
+            channels.append((path, color, role, args.mark_saturated, not args.no_denoise))
+        print(f"Merging {len(channels)} channel(s):")
+        merged = merge_images(channels)
+        out_path = args.output or Path("merged.png")
+        save_image(merged, out_path)
+        print(f"Saved: {out_path}")
+        sys.exit(0)
 
     if args.list_ladders:
         print("\nAvailable ladders:")
@@ -590,14 +1318,33 @@ def main():
             print(f"  {key:<38} [{lad.catalog}]  {bands} {lad.unit}")
         sys.exit(0)
 
-    if not args.input.exists():
-        print(f"Error: input not found: {args.input}")
-        sys.exit(1)
+    if args.list_stains:
+        print("\nAvailable stain palettes (use --stain or 'stain:' in config):")
+        for key in sorted(STAIN_LUTS):
+            aliases = sorted(a for a, v in STAIN_ALIASES.items() if v == key and a != key)
+            print(f"  {key:<12} aliases: {', '.join(aliases)}")
+        sys.exit(0)
+
+    # A config may build its image from a 'merge:' block, in which case the
+    # positional input image is optional — accept a lone config argument.
+    if args.config is None and args.input is not None:
+        args.input, args.config = None, args.input
+    if args.config is None:
+        parser.error("the following arguments are required: config")
     if not args.config.exists():
         print(f"Error: config not found: {args.config}")
         sys.exit(1)
+    config_is_merge = bool((_load_config(args.config) or {}).get("merge"))
+    if not config_is_merge:
+        if args.input is None:
+            parser.error("the following arguments are required: input "
+                         "(unless the config has a 'merge:' block)")
+        if not args.input.exists():
+            print(f"Error: input not found: {args.input}")
+            sys.exit(1)
 
-    annotate(args.input, args.config, args.output)
+    annotate(args.input, args.config, args.output, stain=args.stain, surround=args.surround,
+             print_bands=args.print_bands)
 
 
 if __name__ == "__main__":
