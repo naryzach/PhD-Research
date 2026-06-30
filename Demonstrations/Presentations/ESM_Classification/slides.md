@@ -91,8 +91,41 @@ Experimental Pipeline
 
 ---
 
+# ESM-C Binder Enumeration & Motif Analysis
+
+## Cross-Target Selectivity & Motif Architecture (June 29)
+
+- **Target Overlap:** MMP3 and MMP9 share 38.1% of their top predicted binder sequences (Jaccard index 0.381). ADAM17 predictions are highly distinct (Jaccard overlap of 14.7% with MMP3 and 6.6% with MMP9).
+- **Sticky MMP3 Subset:** Among the top 50,000 predicted binders, MMP9 is assigned 44,235 winning-target calls while MMP3 receives 0, indicating MMP3 hits represent a sticky subset of MMP9 hits.
+- **Consensus Loop Motifs:**
+  - **ADAM17:** `LSSDTT`
+  - **MMP3:** `LSPDTT`
+  - **MMP9:** `LSPTTL`
+- **Mutational Insights:** Specificity is dictated by three positions on a shared `LS-x-x-T` core scaffold (positions 1, 2, 5). P3 separates ADAM17 (S) from MMP3/9 (P), and P4/P6 separate MMP9 (T, L) from MMP3 (D, T).
+- **Novelty:** 100% of the top 300 deduped candidate loops are completely absent from the classifier training data.
+
+---
+
+# Fine-Tuned ESM-C Classifier Evaluation
+
+## Held-Out Test Performance & Validation Gaps (June 30)
+
+- **MMP9 Test Performance:** Evaluation on a test set of 6,788 sequences (381 positives, 5.61% positive class balance) shows highly robust classification results:
+  - **ROC-AUC:** `0.912` (high discriminative power)
+  - **PR-AUC:** `0.746`
+  - **MCC:** `0.722`
+  - **F1-Score:** `0.734`
+  - **Optimal Classification Threshold:** `0.872`
+- **Validation Gaps & Limitations:**
+  - **Single Target Focus:** Quantitative performance validation is currently restricted to MMP9 due to data availability.
+  - **Strict Novel-Loop Challenge:** The out-of-distribution test set contains 0 positives (out of 152 sequences), leaving out-of-distribution generalization unvalidated.
+- **Next Steps:** Future wet-lab binding screening is required to obtain labeled data for ADAM17, MMP3, and novel out-of-distribution loop designs.
+
+---
+
 # Conclusions
 
 - ESM-based classification provides a data-driven complement to generative design
 - Predictive models leverage evolutionary information for binding prediction
 - Comparative framework validates ML categorizations against *de novo* outputs
+
