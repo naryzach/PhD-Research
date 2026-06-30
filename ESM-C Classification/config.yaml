@@ -8,7 +8,7 @@
 # ============================================================================
 
 data:
-  csv_path: "../Data/TIMP3_Binding_Results/TIMP_binder_all.csv"
+  csv_path: "../Data/TIMP3_Binding_Results/TIMP_binder_Cloop_IHTE_CGLK.csv"
   seq_col: "Full Seq"      # full 188-aa scaffold sequence
   target_col: "Target"     # protease the row was screened against
   encoding_col: "Encoding" # 1 = bound that target, 0 = did not
@@ -24,7 +24,7 @@ model:
   # Synthyra ESM++ = HF-native port of ESM-C (identical weights).
   #   Synthyra/ESMplusplus_small -> ESM-C 300M (fits a 12 GB GPU)
   #   Synthyra/ESMplusplus_large -> ESM-C 600M (default; use a bigger cluster GPU)
-  model_id: "Synthyra/ESMplusplus_large"
+  model_id: "Synthyra/ESMplusplus_small"
   pooling: "loop"          # loop | mean | cls  (loop = pool only the grafted loop)
   dropout: 0.1
   max_length: 1024
