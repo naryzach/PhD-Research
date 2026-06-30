@@ -1,4 +1,5 @@
 import os
+import argparse
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -220,8 +221,12 @@ def analyze_ion_specificity(df):
         print("This indicates LigandMPNN design is highly attuned to the specific metal microenvironments.")
 
 def main():
-    base_output_path = "../Local/lanm_output"
-    
+    parser = argparse.ArgumentParser(description="Analyze MetalBinder pipeline output")
+    parser.add_argument("--out-dir", default="../Local/lanm_output",
+                        help="Pipeline output directory (same as run_pipeline.py --out-dir)")
+    args = parser.parse_args()
+    base_output_path = args.out_dir
+
     df = load_data(base_output_path)
     if df is None or df.empty:
         print(f"No valid data to plot in {base_output_path}. Make sure the pipeline has finished running.")
