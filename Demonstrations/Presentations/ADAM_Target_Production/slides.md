@@ -437,6 +437,31 @@ layout: default
 
 ---
 
+# Plasmid Sequence Recovery (June 30)
+
+<div class="grid grid-cols-12 gap-6 mt-4 items-center">
+  <div class="col-span-5">
+    <h2 class="text-teal-600 font-semibold mb-2">Oxford Nanopore Results</h2>
+    <p class="text-xs text-gray-700 leading-relaxed mb-3">
+      Analyzed Eurofins whole-plasmid sequencing reads (3,167 raw reads, 27 Mbp) to verify plasmid integrity. Metagenomic assembly resolved a mixture of two plasmids.
+    </p>
+    <div class="p-2 bg-red-50 border border-red-200 rounded text-2xs text-red-800 mb-2">
+      <strong>Construct Failure:</strong> The target ADAM17 catalytic-domain insert is entirely absent. The cloning cassette is empty, with the pelB secretion leader directly preceding the FLAG tag and stop codon.
+    </div>
+    <ul class="space-y-1 text-2xs text-gray-700 list-disc pl-4">
+      <li>Resolved two circular contigs: dimer of pBAD-DsbC chaperone plasmid and tetramer of empty parental pMoPac vector.</li>
+      <li>Consensus assembly achieved ~3,300x average coverage depth.</li>
+      <li>Cassette translation: <code class="text-xs text-red-900 font-mono">MKSLLPTAAAGLLLLAAADYKDDDDKGRA*</code></li>
+    </ul>
+  </div>
+  <div class="col-span-7 flex flex-col items-center border p-2 rounded bg-gray-50">
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/pMopac_recovered_map.png" class="h-52 object-contain" alt="Recovered pMopac Plasmid Map"/>
+    <div class="text-2xs text-gray-600 mt-1"><strong>Recovered Plasmid (June 30):</strong> Parental pMoPac vector (4,347 bp) with empty cloning cassette.</div>
+  </div>
+</div>
+
+---
+
 # Western Blot Trials (June 22)
 
 <div class="grid grid-cols-12 gap-6 mt-4 items-center">
