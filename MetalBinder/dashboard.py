@@ -397,12 +397,13 @@ def get_eval_plot(df, selected_shape, selected_color, rad_range_vals, rmsd_range
             if opt_col == 'binding_probability':
                 output_labels[opt_col] = 'Probability'
     
+    use_plddt_size = 'plddt' in df.columns and df['plddt'].notna().any()
     fig = px.scatter(
-        df, 
-        x='loop_rmsd', 
-        y='binding_radius_A', 
-        color=color_col, 
-        size='plddt' if 'plddt' in df.columns else None,
+        df,
+        x='loop_rmsd',
+        y='binding_radius_A',
+        color=color_col,
+        size='plddt' if use_plddt_size else None,
         symbol=symbol_col,
         hover_data=hover_cols,
         color_continuous_scale="Viridis" if color_col != "metal_ion" else None,
@@ -410,9 +411,9 @@ def get_eval_plot(df, selected_shape, selected_color, rad_range_vals, rmsd_range
         labels=output_labels,
         title="Candidate Evaluation (Thresholds: RMSD < 1.5, Radius 2.3-2.6)"
     )
-    
+
     # If size is NOT mapped to pLDDT, set a small fixed size
-    if 'plddt' not in df.columns:
+    if not use_plddt_size:
         fig.update_traces(marker=dict(size=6))
     
     # Force axis range to match filters
@@ -615,6 +616,8 @@ st.sidebar.subheader("Quality Metrics")
 def get_range_filter(df, col, label, key):
     if col in df.columns:
         m_min, m_max = float(df[col].min()), float(df[col].max())
+        if pd.isna(m_min) or pd.isna(m_max):
+            return None
         if m_min == m_max:
             return (m_min, m_max)
             

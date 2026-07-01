@@ -405,11 +405,11 @@ def main():
                       flush=True)
         except FileNotFoundError:
             print(
-                f"Chai-1 python not found at: {CHAI1_PYTHON}\n"
+                f"\n*** CHAI-1 SKIPPED — python not found at: {CHAI1_PYTHON}\n"
                 "  Set CHAI1_PYTHON env var or pass --chai1-python.\n"
                 "  Install: conda create -n chai1 python=3.10 -y\n"
                 "           conda activate chai1 && pip install chai-lab\n"
-                "  pLDDT/pTM will be NaN; RMSD and binding metrics are unaffected.",
+                "  pLDDT/pTM will be NaN; RMSD and binding metrics are unaffected. ***\n",
                 flush=True,
             )
         except subprocess.TimeoutExpired:
@@ -422,7 +422,6 @@ def main():
     bb_atom_names = set(PROTEIN_BACKBONE_ATOM_NAMES) - {"OXT"}
 
     for job in tqdm(esm_queue, desc="Chai-1 Post-processing", unit="design"):
-        print(f"Processing Chai-1 results for {job['design_id']}...", flush=True)
         try:
             chai_m   = chai_scores.get(job['design_id'], {})
             plddt    = float(chai_m.get("chai_plddt", float("nan")))
