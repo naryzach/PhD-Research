@@ -669,6 +669,76 @@ layout: default
 transition: fade-out
 ---
 
+# Design-Prediction Verdict Scorecard (July 2)
+
+<div class="grid grid-cols-2 gap-8 mt-6 items-start">
+  <div class="space-y-4">
+    <div class="p-4 bg-white/5 rounded border border-white/10">
+      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-3">Model vs. Bench Scorecard</h4>
+      <p class="text-[11px] leading-relaxed opacity-75">
+        A systematic tally comparing the design intent of engineered TIMP3 loop variants against measured binding profiles across targets (MMP9, MMP2, and ADAM10).
+      </p>
+      <ul class="text-[10px] list-disc pl-4 space-y-1.5 opacity-70 mt-3">
+        <li><b>Directional Hits (6/13):</b> Constructs successfully demonstrated binding trends matching computational design hypotheses.</li>
+        <li><b>Partial Consensus (3/13):</b> Exhibited directional intent but failed to meet statistical significance due to experimental variance.</li>
+        <li><b>Untestable / Misses (4/13):</b> Limited by low target activity, degraded prep quality, or mismatch in screening thresholds.</li>
+      </ul>
+    </div>
+    <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
+      <b class="text-amber-400">Experimental Resolution:</b> Low positive control activity in commercial ADAM10 and degradation of in-house MMP9 preps restrict the statistical resolution of the campaign.
+    </div>
+  </div>
+  <div class="space-y-3 flex flex-col items-center">
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/verdict_scorecard.png"
+         alt="Design-prediction verdict scorecard"
+         class="w-full rounded-lg border border-white/10 shadow-sm"
+         style="max-height: 280px; object-fit: contain;">
+    <p class="text-[9px] opacity-40 italic text-center">
+      Tally of design campaign success rate across 13 scored constructs (July 2).
+    </p>
+  </div>
+</div>
+
+---
+layout: default
+transition: fade-out
+---
+
+# AlphaFold ipTM Calibration vs. Wet-Lab Binding (July 3)
+
+<div class="grid grid-cols-2 gap-8 mt-6 items-start">
+  <div class="space-y-4">
+    <div class="p-4 bg-white/5 rounded border border-white/10">
+      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-3">ipTM vs. Yeast Display NMR</h4>
+      <p class="text-[11px] leading-relaxed opacity-75">
+        Linear correlation analysis comparing computational design metrics (AlphaFold ipTM) with experimental yeast display normalized median ratio (NMR) binding across three targets.
+      </p>
+      <ul class="text-[10px] list-disc pl-4 space-y-1.5 opacity-70 mt-3">
+        <li><b>ADAM17 (Orange):</b> Weak negative correlation (r = -0.163, p = 0.613).</li>
+        <li><b>MMP2 (Blue):</b> Essentially zero correlation (r = 0.029, p = 0.928).</li>
+        <li><b>MMP9 (Red):</b> Moderate negative correlation (r = -0.471, p = 0.123).</li>
+      </ul>
+    </div>
+    <div class="p-3 bg-red-500/10 rounded border border-red-500/20 text-[10px]">
+      <b class="text-red-400">Design Implication:</b> Computational ipTM score does not predict bench-measured binding. Designing solely to maximize ipTM is insufficient for fine-grained library optimization.
+    </div>
+  </div>
+  <div class="space-y-3 flex flex-col items-center">
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/alphafold_calibration_multipanel.png"
+         alt="AlphaFold ipTM vs. Yeast Display NMR Calibration"
+         class="w-full rounded-lg border border-white/10 shadow-sm"
+         style="max-height: 280px; object-fit: contain;">
+    <p class="text-[9px] opacity-40 italic text-center">
+      Multi-panel correlation of ipTM predictions vs. experimental NMR across 12 constructs (July 3).
+    </p>
+  </div>
+</div>
+
+---
+layout: default
+transition: fade-out
+---
+
 # Next Steps and Translational Vision
 
 <div class="grid grid-cols-2 gap-8 mt-6">
