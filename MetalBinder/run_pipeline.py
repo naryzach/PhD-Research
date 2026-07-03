@@ -204,11 +204,11 @@ def main():
             
             spec_input = DesignInputSpecification(
                 input=loop_cif_path,
-                contig=contig_str, 
+                contig=contig_str,
                 length=f"{new_total_len}-{new_total_len}",
                 ligand=ion,
                 select_buried={ion: "ALL"},
-                extra={}
+                extra={'allow_ligand_on_existing_chain': True}
             )
             
             rfd3_queue.append({
