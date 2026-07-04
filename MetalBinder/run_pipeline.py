@@ -208,7 +208,8 @@ def main():
                 length=f"{new_total_len}-{new_total_len}",
                 ligand=ion,
                 select_buried={ion: "ALL"},
-                extra={'allow_ligand_on_existing_chain': True}
+                allow_ligand_on_existing_chain=True,
+                extra={}
             )
             
             rfd3_queue.append({
@@ -239,7 +240,7 @@ def main():
                 
             # Utilize diffusion_batch_size properly!
             rfd3_config = getattr(__import__('rfd3.engine', fromlist=['RFD3InferenceConfig']), 'RFD3InferenceConfig')(
-                diffusion_batch_size=args.batch_size, 
+                diffusion_batch_size=args.batch_size,
                 low_memory_mode=False,
                 specification={'length': job['total_len'], 'contig': job['contig_str'], 'extra': {}},
                 inference_sampler=inference_sampler_kwargs
