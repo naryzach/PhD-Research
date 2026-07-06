@@ -20,9 +20,12 @@ fi
 # ── Core Python packages ────────────────────────────────────────────────────────
 info "Core packages (protdesign env)"
 for pkg in torch torchvision numpy scipy lightning rfd3 biotite; do
-    python -c "import $pkg; print('  [OK]   $pkg', getattr($pkg, '__version__', '?'))" 2>/dev/null \
-        || fail "$pkg not importable"
-    ((PASS++)) 2>/dev/null; true  # suppress arithmetic error; ok() already increments
+    VER=$(python -c "import $pkg; print(getattr($pkg, '__version__', '?'))" 2>/dev/null)
+    if [[ -n "$VER" ]]; then
+        ok "$pkg $VER"
+    else
+        fail "$pkg not importable"
+    fi
 done
 
 # torch/torchvision version match
@@ -46,37 +49,42 @@ else
     fail "numpy < 2.0 — fix: pip install 'numpy>=2.0'"
 fi
 
-# GPU accessible
-python -c "import torch; assert torch.cuda.is_available(), 'no GPU'" 2>/dev/null \
-    && ok "CUDA GPU available ($(python -c 'import torch; print(torch.cuda.get_device_name(0))' 2>/dev/null))" \
-    || fail "CUDA GPU not available — ensure SLURM gres=gpu:1 is set"
+# GPU accessible (skip warning if outside SLURM)
+if [[ -n "$SLURM_JOB_ID" ]]; then
+    python -c "import torch; assert torch.cuda.is_available()" 2>/dev/null \
+        && ok "CUDA GPU available ($(python -c 'import torch; print(torch.cuda.get_device_name(0))' 2>/dev/null))" \
+        || fail "CUDA GPU not available inside SLURM — check gres=gpu:1"
+else
+    python -c "import torch; assert torch.cuda.is_available()" 2>/dev/null \
+        && ok "CUDA GPU available" \
+        || echo "  [SKIP] CUDA GPU — not inside SLURM, will be checked at job time"
+fi
 
-# ── Chai-1 env ──────────────────────────────────────────────────────────────────
-info "Chai-1 subprocess env"
-CHAI1_PY="${CHAI1_PYTHON:-$HOME/miniconda3/envs/chai1/bin/python}"
+# ── Chai-1 ─────────────────────────────────────────────────────────────────────
+info "Chai-1"
+CHAI1_PY="${CHAI1_PYTHON:-$(which python)}"
 if [[ -x "$CHAI1_PY" ]]; then
-    ok "Chai-1 python found: $CHAI1_PY"
+    ok "Chai-1 python: $CHAI1_PY"
     CHAI_VER=$("$CHAI1_PY" -c "import chai_lab; print(chai_lab.__version__)" 2>/dev/null)
     if [[ -n "$CHAI_VER" ]]; then
         ok "chai_lab $CHAI_VER importable"
     else
-        fail "chai_lab not importable in $CHAI1_PY — fix: $CHAI1_PY -m pip install chai-lab"
+        fail "chai_lab not importable — fix: pip install chai-lab"
     fi
 else
-    fail "Chai-1 python not found at: $CHAI1_PY"
-    echo "         Fix:"
-    echo "           conda create -n chai1 python=3.10 -y"
-    echo "           conda activate chai1 && pip install chai-lab && conda deactivate"
-    echo "         Then add to SLURM script: export CHAI1_PYTHON=$CHAI1_PY"
+    fail "python not found at: $CHAI1_PY"
 fi
 
 # ── Input files ─────────────────────────────────────────────────────────────────
 info "Input files"
-INPUT_CIF="$(dirname "$0")/../Tools/EF_Hand/calmodulin_ef_hand.cif"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+INPUT_CIF="$REPO_ROOT/Data/8FNS.cif"
 if [[ -f "$INPUT_CIF" ]]; then
     ok "Input CIF: $INPUT_CIF"
 else
     fail "Input CIF not found: $INPUT_CIF"
+    echo "         Expected: $INPUT_CIF"
 fi
 
 # ── Summary ─────────────────────────────────────────────────────────────────────

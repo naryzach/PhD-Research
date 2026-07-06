@@ -34,10 +34,7 @@ from rfd3.inference.input_parsing import DesignInputSpecification
 #
 # Set CHAI1_PYTHON to that env's python before running, e.g.:
 #   export CHAI1_PYTHON=~/miniconda3/envs/chai1/bin/python
-CHAI1_PYTHON  = os.environ.get(
-    "CHAI1_PYTHON",
-    os.path.join(os.path.expanduser("~"), "miniconda3", "envs", "chai1", "bin", "python"),
-)
+CHAI1_PYTHON  = os.environ.get("CHAI1_PYTHON", sys.executable)
 CHAI1_SCRIPT  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "score_with_chai1.py")
 # Chai-1 loads the model fresh each design call; allow more time than ESMFold2.
 # Rough estimate: ~2 min model load + ~3 min inference per design on a V100.
