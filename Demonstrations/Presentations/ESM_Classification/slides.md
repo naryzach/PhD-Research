@@ -122,10 +122,117 @@ Experimental Pipeline
 - **Next Steps:** Future wet-lab binding screening is required to obtain labeled data for ADAM17, MMP3, and novel out-of-distribution loop designs.
 
 ---
+layout: default
+transition: fade-out
+---
+
+# ESM-C Classifier Confidence Distributions (July 4)
+
+<div class="grid grid-cols-2 gap-8 mt-6 items-start">
+  <div class="space-y-4">
+    <div class="p-4 bg-white/5 rounded border border-white/10">
+      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-3">Model Prediction Histograms</h4>
+      <p class="text-[11px] leading-relaxed opacity-75">
+        Probability distribution histograms comparing predicted binding confidence of the top 50,000 enumerated loop candidates across three targets.
+      </p>
+      <ul class="text-[10px] list-disc pl-4 space-y-1.5 opacity-70 mt-3">
+        <li><b>MMP9 Domination:</b> Extremely high/tight distribution (mean = 0.999996, max = 1.0), defining a strict preference.</li>
+        <li><b>MMP3 Modesty:</b> Flat and low-confidence distribution (mean = 0.5599, max = 0.6663).</li>
+        <li><b>ADAM17 Flatness:</b> Extremely narrow/low distribution (mean = 0.5323, max = 0.5375).</li>
+      </ul>
+    </div>
+    <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
+      <b class="text-amber-400">Calibration Insights:</b> Because MMP9 confidence peaks near 1.0 while MMP3/ADAM17 remain near 0.5, selectivity metrics (like margin) are heavily skewed towards MMP9, requiring target-specific classification calibration.
+    </div>
+  </div>
+  <div class="space-y-3 flex flex-col items-center">
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/esmc_target_probability_distributions.png"
+         alt="ESM-C Target Probability Distributions"
+         class="w-full rounded-lg border border-white/10 shadow-sm"
+         style="max-height: 280px; object-fit: contain;">
+    <p class="text-[9px] opacity-40 italic text-center">
+      Comparative predicted probability distributions for the top 50,000 designs per target (July 4).
+    </p>
+  </div>
+</div>
+
+---
+layout: default
+transition: fade-out
+---
+
+# ESM-C Classifier Evaluation (July 5)
+
+<div class="grid grid-cols-2 gap-8 mt-6 items-start">
+  <div class="space-y-4">
+    <div class="p-4 bg-white/5 rounded border border-white/10">
+      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-3">Held-Out Test Performance</h4>
+      <p class="text-[11px] leading-relaxed opacity-75">
+        Performance evaluation of the ESM-C classifier on held-out test data, showing metrics across targets (ROC-AUC, PR-AUC, MCC, and F1-score).
+      </p>
+      <ul class="text-[10px] list-disc pl-4 space-y-1.5 opacity-70 mt-3">
+        <li><b>High Classification Skill:</b> Excellent classification performance on MMP9 (ROC-AUC = 0.91), showing high discriminative power.</li>
+        <li><b>Target Specificity:</b> Model metrics allow assessing predictive capability relative to class imbalances (PR-AUC vs. pos-rate).</li>
+        <li><b>Pipeline Utility:</b> Validates using the fine-tuned classifier to sort and select TwistBio constructs.</li>
+      </ul>
+    </div>
+    <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
+      <b class="text-amber-400">Next Steps:</b> The baseline classification capability is established; feature attribution (SHAP plots) represents the next analytical extension.
+    </div>
+  </div>
+  <div class="space-y-3 flex flex-col items-center">
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/esmc_performance.png"
+         alt="ESM-C Classifier Performance"
+         class="w-full rounded-lg border border-white/10 shadow-sm"
+         style="max-height: 280px; object-fit: contain;">
+    <p class="text-[9px] opacity-40 italic text-center">
+      Fine-tuned ESM-C classifier held-out test performance per target (July 5).
+    </p>
+  </div>
+</div>
+
+
+---
+layout: default
+transition: fade-out
+---
+
+# AlphaFold LpLDDT vs. MMP9 Binding Calibration (July 6)
+
+<div class="grid grid-cols-2 gap-8 mt-6 items-start">
+  <div class="space-y-4">
+    <div class="p-4 bg-white/5 rounded border border-white/10">
+      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-3">Structural Metric Calibration</h4>
+      <p class="text-[11px] leading-relaxed opacity-75">
+        Correlation analysis plotting AlphaFold structural confidence score (LpLDDT) against bench-measured flow cytometry binding (NMR) for MMP9.
+      </p>
+      <ul class="text-[10px] list-disc pl-4 space-y-1.5 opacity-70 mt-3">
+        <li><b>Poor Correlation:</b> Correlation coefficient of $r = 0.19$, showing essentially no predictive relationship.</li>
+        <li><b>Implications for Design:</b> Optimizing sequence libraries solely for structural confidence does not yield higher binding affinities.</li>
+        <li><b>Pipeline Complement:</b> Emphasizes the need for fine-tuned sequence classifiers (like ESM-C) to filter candidates.</li>
+      </ul>
+    </div>
+    <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
+      <b class="text-amber-400">Calibration Takeaway:</b> Structural confidence metrics from folding models are poor surrogates for actual binding activity on this target.
+    </div>
+  </div>
+  <div class="space-y-3 flex flex-col items-center">
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/af_calibration_LpLDDT_mmp9.png"
+         alt="AlphaFold LpLDDT vs MMP9 Binding"
+         class="w-full rounded-lg border border-white/10 shadow-sm"
+         style="max-height: 280px; object-fit: contain;">
+    <p class="text-[9px] opacity-40 italic text-center">
+      AlphaFold LpLDDT score vs. measured MMP9 binding ratios (July 6).
+    </p>
+  </div>
+</div>
+
+---
 
 # Conclusions
 
 - ESM-based classification provides a data-driven complement to generative design
 - Predictive models leverage evolutionary information for binding prediction
 - Comparative framework validates ML categorizations against *de novo* outputs
+
 
