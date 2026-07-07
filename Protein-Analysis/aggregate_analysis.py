@@ -89,6 +89,254 @@ def standardize_construct(name):
         return f"{prefix} {number}"
     return None
 
+# ---- CONTROL IDENTIFICATION PATTERNS ----
+# Shared by the CLI (main) and the importable core used by the FCS viewer.
+POS_CTRL_PATTERNS = ["POSITIVE CONTROL", "TIMP 3"]
+NEG_CTRL_PATTERNS = ["NC", "NEGATIVE CONTROL"]
+
+
+def get_local_dir(local_dir=None):
+    """Resolve the ../Local data directory relative to this script unless given."""
+    if local_dir is not None:
+        return local_dir
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.abspath(os.path.join(base_dir, "../Local"))
+
+
+def get_analysis_dirs(local_dir=None):
+    """Return the sorted list of Local/*_Analysis trial directories (full paths)."""
+    local_dir = get_local_dir(local_dir)
+    return sorted([d for d in glob.glob(os.path.join(local_dir, "*_Analysis")) if os.path.isdir(d)])
+
+
+def aggregate_records(records, target, date, pos_patterns=None, neg_patterns=None):
+    """Aggregate a trial's per-file summary_stats records into aggregate rows.
+
+    `records` is an iterable of dict rows matching the summary_stats.csv schema
+    (values may be strings, as from csv.DictReader, or numbers, as computed live
+    by the FCS viewer). Mirrors the schema written to aggregate_summary.csv.
+    Negative controls are dropped; positive controls are kept as their own rows.
+
+    pos_patterns / neg_patterns override the control-identification keywords
+    (case-insensitive); they default to the module constants so CLI behavior is
+    unchanged. The viewer passes its "PC Keywords" setting here.
+    """
+    records = list(records)
+    rows = []
+
+    pos_patterns = [str(p).upper() for p in (pos_patterns or POS_CTRL_PATTERNS)]
+    neg_patterns = [str(p).upper() for p in (neg_patterns or NEG_CTRL_PATTERNS)]
+
+    # Trial-level QC from the positive control(s)
+    trial_failed = False
+    trial_failed_reason = ""
+    pos_ctrl_dps = []
+    for row in records:
+        raw_name = row.get('Filename', '')
+        if any(ctrl in raw_name.upper() for ctrl in pos_patterns):
+            try:
+                pos_ctrl_dps.append(float(row.get('Double+ %', 0)))
+            except (ValueError, TypeError):
+                continue
+    if not pos_ctrl_dps:
+        trial_failed = True
+        trial_failed_reason = "No Positive Control found"
+    elif max(pos_ctrl_dps) < 2.0:
+        trial_failed = True
+        trial_failed_reason = f"Pos Ctrl Double+ % too low ({max(pos_ctrl_dps):.1f}%)"
+
+    # Per-construct metrics
+    for row in records:
+        raw_name = row.get('Filename', '')
+        is_nc = any(ctrl in raw_name.upper() for ctrl in neg_patterns)
+        is_pc = any(ctrl in raw_name.upper() for ctrl in pos_patterns)
+
+        if is_nc:
+            continue
+
+        standard_name = standardize_construct(raw_name)
+        if not standard_name and is_pc:
+            standard_name = raw_name
+
+        if not standard_name:
+            continue
+
+        try:
+            num_match = re.search(r'(\d+)', standard_name)
+            construct_num = num_match.group(1) if num_match else None
+
+            row_target = str(row.get('Target', '') or '').strip().upper()
+            if not row_target and target:
+                row_target = target
+            elif not row_target:
+                row_target = "UNKNOWN"
+
+            pos_med_ratio = float(row.get('Pos Med Ratio', 0))
+            norm_med_ratio = float(row.get('Norm Pos Med Ratio', 0))
+            pos_mean_ratio = float(row.get('Pos Mean Ratio', 0))
+            norm_mean_ratio = float(row.get('Norm Pos Mean Ratio', 0))
+            double_pos = float(row.get('Double+ %', 0))
+            expr_pos = float(row.get('Expr+ %', 0))
+            gated_events = int(float(row.get('Gated Events', 0)))
+
+            low_expression = expr_pos < 1.0
+            low_events = gated_events < 500
+
+            bind_med_expr = float(row.get('Bind Med (Expr+)', 0))
+            norm_bind_med_expr = float(row.get('Norm Bind Med (Expr+)', 0))
+            bind_mean_expr = float(row.get('Bind Mean (Expr+)', 0))
+            norm_bind_mean_expr = float(row.get('Norm Bind Mean (Expr+)', 0))
+            expr_med_bind = float(row.get('Expr Med (Bind+)', 0))
+            norm_expr_med_bind = float(row.get('Norm Expr Med (Bind+)', 0))
+
+            bind_eff = 0
+            for col in row:
+                if "Binding Efficiency (DP/" in col:
+                    bind_eff = float(row.get(col, 0))
+                    break
+            iwb_index = float(row.get('Intensity-Weighted Binding Index', 0))
+            norm_iwb_index = float(row.get('Norm Intensity-Weighted Binding Index', 0))
+
+            rows.append({
+                'Target': row_target,
+                'Date': date,
+                'Construct': standard_name,
+                'Construct Num': construct_num,
+                'Raw Name': raw_name,
+                'Pos Med Ratio': pos_med_ratio,
+                'Norm Median Ratio': norm_med_ratio,
+                'Pos Mean Ratio': pos_mean_ratio,
+                'Norm Mean Ratio': norm_mean_ratio,
+                'Double+ %': double_pos,
+                'Bind Med (Expr+)': bind_med_expr,
+                'Norm Bind Med (Expr+)': norm_bind_med_expr,
+                'Bind Mean (Expr+)': bind_mean_expr,
+                'Norm Bind Mean (Expr+)': norm_bind_mean_expr,
+                'Expr Med (Bind+)': expr_med_bind,
+                'Norm Expr Med (Bind+)': norm_expr_med_bind,
+                'Binding Efficiency': bind_eff,
+                'Intensity-Weighted Binding Index': iwb_index,
+                'Norm Intensity-Weighted Binding Index': norm_iwb_index,
+                'Expr+ %': expr_pos,
+                'Gated Events': gated_events,
+                'Low Expression': low_expression,
+                'Low Events': low_events,
+                'Trial Failed': trial_failed,
+                'Trial Failed Reason': trial_failed_reason
+            })
+        except (ValueError, KeyError):
+            continue
+
+    return rows
+
+
+def _parse_summary_stats(csv_path, target, date, verbose=True):
+    """Read one summary_stats.csv and aggregate it (CLI/Local path)."""
+    try:
+        with open(csv_path, 'r') as f:
+            records = list(csv.DictReader(f))
+    except Exception as e:
+        if verbose:
+            print(f"  Error reading {csv_path}: {e}", flush=True)
+        return []
+    return aggregate_records(records, target, date)
+
+    return rows
+
+
+def build_aggregate_data(exclude_dates=None, exclude_dirs=None, local_dir=None, verbose=True):
+    """Parse every Local/*_Analysis/summary_stats.csv into a list of row dicts.
+
+    The returned rows match the aggregate_summary.csv schema but nothing is
+    written to disk. This is the importable core shared by the CLI and the FCS
+    viewer's live-recalculation mode, so trials can be excluded without having to
+    regenerate the static aggregate/selectivity sheets.
+
+    exclude_dates: iterable of 'YYYYMMDD' strings to skip.
+    exclude_dirs:  iterable of trial directory names or full paths to skip,
+                   e.g. 'MMP2_20240510_Analysis'.
+    """
+    exclude_dates = set(exclude_dates or [])
+    exclude_dirs = set(os.path.basename(str(d).rstrip("/\\")) for d in (exclude_dirs or []))
+
+    local_dir = get_local_dir(local_dir)
+    analysis_dirs = get_analysis_dirs(local_dir)
+    if verbose:
+        print(f"Found {len(analysis_dirs)} analysis directories.", flush=True)
+
+    all_data = []
+    for d in analysis_dirs:
+        dir_name = os.path.basename(d)
+
+        if dir_name in exclude_dirs:
+            if verbose:
+                print(f"  Skipping {dir_name}: excluded by user selection.", flush=True)
+            continue
+
+        if verbose:
+            print(f"Processing {d}...", flush=True)
+
+        # Parse target and date from directory name
+        match = re.match(r'^([^_]+)_(\d{8})', dir_name)
+        if not match:
+            match_dt = re.match(r'^(\d{8})_(\d{6})_Analysis$', dir_name)
+            if match_dt:
+                date = match_dt.group(1)
+                target = None
+            else:
+                if verbose:
+                    print(f"  Skipping {dir_name}: Could not parse target and date.", flush=True)
+                continue
+        else:
+            target = match.group(1).upper()
+            date = match.group(2)
+
+        if date in exclude_dates:
+            if verbose:
+                print(f"  Skipping {dir_name}: Date {date} is in exclude list.", flush=True)
+            continue
+
+        csv_path = os.path.join(d, "summary_stats.csv")
+        if not os.path.exists(csv_path):
+            if verbose:
+                print(f"  Skipping {dir_name}: summary_stats.csv not found.", flush=True)
+            continue
+
+        all_data.extend(_parse_summary_stats(csv_path, target, date, verbose=verbose))
+
+    return all_data
+
+
+def build_selectivity_summary(df, metric):
+    """Build the per-(Construct, Target) selectivity summary for a single metric.
+
+    Limited to constructs tested against more than one target. Mirrors
+    perform_selectivity_analysis so the viewer can compute selectivity live
+    (with exclusions applied) instead of reading selectivity_summary.csv.
+    Returns columns: Construct, Target, Mean, StdDev, Count, SEM, 95% CI, ANOVA_p.
+    """
+    import pandas as pd
+
+    cols = ['Construct', 'Target', 'Mean', 'StdDev', 'Count', 'SEM', '95% CI', 'ANOVA_p']
+    if df is None or df.empty or metric not in df.columns:
+        return pd.DataFrame(columns=cols)
+
+    stats_df = df.groupby(['Construct', 'Target'])[metric].agg(['mean', 'std', 'count']).reset_index()
+    stats_df.columns = ['Construct', 'Target', 'Mean', 'StdDev', 'Count']
+    stats_df['SEM'] = stats_df.apply(lambda r: r['StdDev'] / (r['Count'] ** 0.5) if r['Count'] > 1 else 0, axis=1)
+    stats_df['95% CI'] = stats_df['SEM'] * 1.96
+
+    anova_results = []
+    for construct in stats_df['Construct'].unique():
+        c_df = df[df['Construct'] == construct]
+        anova_results.append({'Construct': construct, 'ANOVA_p': run_anova_p(c_df, 'Target', metric)})
+    stats_df = stats_df.merge(pd.DataFrame(anova_results), on='Construct', how='left')
+
+    target_counts = stats_df.groupby('Construct')['Target'].count()
+    multi_target_constructs = target_counts[target_counts > 1].index.tolist()
+    return stats_df[stats_df['Construct'].isin(multi_target_constructs)].copy()
+
+
 def plot_stats(df, title, output_path, y_col='Binding Ratio', y_label='Binding Efficiency (Bind/Expr)', color_col=None, color_label=None):
     """Helper to generate a bar plot with optional color-coding."""
     if df.empty:
@@ -251,8 +499,6 @@ def main():
         }
     ]
 
-    POS_CTRL_PATTERNS = ["POSITIVE CONTROL", "TIMP 3"]
-    NEG_CTRL_PATTERNS = ["NC", "NEGATIVE CONTROL"]
 
     # Ensure output directory exists
     if not os.path.exists(output_dir):
@@ -276,163 +522,8 @@ def main():
         except Exception as e:
             print(f"Warning: Could not load reference CSV: {e}", flush=True)
 
-    # Find all *_Analysis directories
-    analysis_dirs = sorted([d for d in glob.glob(os.path.join(local_dir, "*_Analysis")) if os.path.isdir(d)])
-    print(f"Found {len(analysis_dirs)} analysis directories.", flush=True)
-    
-    if not analysis_dirs:
-        print(f"No analysis directories found in {local_dir}", flush=True)
-        return
-
-    all_data = []
-
-    for d in analysis_dirs:
-        print(f"Processing {d}...", flush=True)
-        dir_name = os.path.basename(d)
-        
-        # Parse target and date from directory name
-        match = re.match(r'^([^_]+)_(\d{8})', dir_name)
-        if not match:
-            # Check if it matches YYYYMMDD_HHMMSS_Analysis format
-            match_dt = re.match(r'^(\d{8})_(\d{6})_Analysis$', dir_name)
-            if match_dt:
-                date = match_dt.group(1)
-                target = None
-            else:
-                print(f"  Skipping {dir_name}: Could not parse target and date.", flush=True)
-                continue
-        else:
-            target = match.group(1).upper()
-            date = match.group(2)
-        
-        if date in exclude_dates:
-            print(f"  Skipping {dir_name}: Date {date} is in exclude list.", flush=True)
-            continue
-            
-        csv_path = os.path.join(d, "summary_stats.csv")
-        if not os.path.exists(csv_path):
-            print(f"  Skipping {dir_name}: summary_stats.csv not found.", flush=True)
-            continue
-            
-        trial_failed = False
-        trial_failed_reason = ""
-        try:
-            with open(csv_path, 'r') as f:
-                reader = csv.DictReader(f)
-                pos_ctrl_dps = []
-                for row in reader:
-                    raw_name = row['Filename']
-                    # Strict PC identification using patterns
-                    is_pc = any(ctrl in raw_name.upper() for ctrl in POS_CTRL_PATTERNS)
-                    
-                    if is_pc:
-                        pos_ctrl_dps.append(float(row.get('Double+ %', 0)))
-                
-                # If no positive controls exist or max is < 2.0%, fail trial
-                if not pos_ctrl_dps:
-                    trial_failed = True
-                    trial_failed_reason = "No Positive Control found"
-                elif max(pos_ctrl_dps) < 2.0:
-                    trial_failed = True
-                    trial_failed_reason = f"Pos Ctrl Double+ % too low ({max(pos_ctrl_dps):.1f}%)"
-        except Exception as e:
-            print(f"  Error checking Pos Ctrls for {csv_path}: {e}", flush=True)
-            trial_failed = True
-            trial_failed_reason = f"Error reading stats: {e}"
-            
-        try:
-            with open(csv_path, 'r') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    raw_name = row['Filename']
-                    # Filter out negative controls, keep constructs and positive controls
-                    is_nc = any(ctrl in raw_name.upper() for ctrl in NEG_CTRL_PATTERNS)
-                    is_pc = any(ctrl in raw_name.upper() for ctrl in POS_CTRL_PATTERNS)
-                    
-                    if is_nc:
-                        continue
-                    
-                    standard_name = standardize_construct(raw_name)
-                    
-                    # If it's a positive control but not a variant, use its raw name as the identifier
-                    if not standard_name and is_pc:
-                        standard_name = raw_name
-                    
-                    if standard_name:
-                        try:
-                            # Extract number for expectation mapping
-                            num_match = re.search(r'(\d+)', standard_name)
-                            construct_num = num_match.group(1) if num_match else None
-                            
-                            # Determine target for this row
-                            row_target = row.get('Target', '').strip().upper()
-                            if not row_target and target:
-                                row_target = target
-                            elif not row_target:
-                                row_target = "UNKNOWN"
-
-                            # Extract required metrics
-                            pos_med_ratio = float(row.get('Pos Med Ratio', 0))
-                            norm_med_ratio = float(row.get('Norm Pos Med Ratio', 0))
-                            pos_mean_ratio = float(row.get('Pos Mean Ratio', 0))
-                            norm_mean_ratio = float(row.get('Norm Pos Mean Ratio', 0))
-                            double_pos = float(row.get('Double+ %', 0))
-                            expr_pos = float(row.get('Expr+ %', 0))
-                            gated_events = int(float(row.get('Gated Events', 0)))
-                            
-                            # QC Flags
-                            low_expression = expr_pos < 1.0
-                            low_events = gated_events < 500
-                            
-                            # New Filtered Metrics
-                            bind_med_expr = float(row.get('Bind Med (Expr+)', 0))
-                            norm_bind_med_expr = float(row.get('Norm Bind Med (Expr+)', 0))
-                            bind_mean_expr = float(row.get('Bind Mean (Expr+)', 0))
-                            norm_bind_mean_expr = float(row.get('Norm Bind Mean (Expr+)', 0))
-                            expr_med_bind = float(row.get('Expr Med (Bind+)', 0))
-                            norm_expr_med_bind = float(row.get('Norm Expr Med (Bind+)', 0))
-                            
-                            # New Refined Metrics
-                            bind_eff = 0
-                            for col in row:
-                                if "Binding Efficiency (DP/" in col:
-                                    bind_eff = float(row.get(col, 0))
-                                    break
-                            iwb_index = float(row.get('Intensity-Weighted Binding Index', 0))
-                            norm_iwb_index = float(row.get('Norm Intensity-Weighted Binding Index', 0))
-
-                            
-                            all_data.append({
-                                'Target': row_target,
-                                'Date': date,
-                                'Construct': standard_name,
-                                'Construct Num': construct_num,
-                                'Raw Name': raw_name,
-                                'Pos Med Ratio': pos_med_ratio,
-                                'Norm Median Ratio': norm_med_ratio,
-                                'Pos Mean Ratio': pos_mean_ratio,
-                                'Norm Mean Ratio': norm_mean_ratio,
-                                'Double+ %': double_pos,
-                                'Bind Med (Expr+)': bind_med_expr,
-                                'Norm Bind Med (Expr+)': norm_bind_med_expr,
-                                'Bind Mean (Expr+)': bind_mean_expr,
-                                'Norm Bind Mean (Expr+)': norm_bind_mean_expr,
-                                'Expr Med (Bind+)': expr_med_bind,
-                                'Norm Expr Med (Bind+)': norm_expr_med_bind,
-                                'Binding Efficiency': bind_eff,
-                                'Intensity-Weighted Binding Index': iwb_index,
-                                'Norm Intensity-Weighted Binding Index': norm_iwb_index,
-                                'Expr+ %': expr_pos,
-                                'Gated Events': gated_events,
-                                'Low Expression': low_expression,
-                                'Low Events': low_events,
-                                'Trial Failed': trial_failed,
-                                'Trial Failed Reason': trial_failed_reason
-                            })
-                        except (ValueError, KeyError):
-                            continue
-        except Exception as e:
-            print(f"  Error processing {csv_path}: {e}", flush=True)
+    # Build aggregate row data via the importable core (shared with the FCS viewer)
+    all_data = build_aggregate_data(exclude_dates=exclude_dates, local_dir=local_dir)
 
     if not all_data:
         print("No valid data points found.", flush=True)

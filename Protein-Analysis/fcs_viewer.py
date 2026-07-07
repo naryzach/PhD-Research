@@ -7,12 +7,26 @@ import fcsparser
 import s3fs
 import io
 import os
+import re
+import sys
 import glob
 from scipy import stats
 from scipy.stats import gaussian_kde
 from scipy.spatial import ConvexHull
 from matplotlib.path import Path
 import tempfile
+
+# Make the sibling aggregate_analysis module importable so the viewer can
+# recompute aggregate/selectivity data live instead of reading the static CSVs.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import aggregate_analysis
+    AGG_MODULE_OK = True
+    _AGG_IMPORT_ERROR = ""
+except Exception as _agg_err:  # noqa: BLE001 - surface any import failure in the UI
+    aggregate_analysis = None
+    AGG_MODULE_OK = False
+    _AGG_IMPORT_ERROR = str(_agg_err)
 
 # ---- PAGE CONFIGURATION ----
 st.set_page_config(
@@ -224,6 +238,185 @@ def cloud_read_csv(path):
             return pd.read_csv(f)
     return pd.read_csv(path)
 
+# Control-identification patterns for on-the-fly summary-stat computation
+# (mirrors analyze_fcs.py so recalculated stats match the saved sheets).
+RECALC_NEG_PATTERNS = ["NC", "Negative Control"]
+RECALC_POS_PATTERNS = ["Positive Control", "TIMP 3"]
+
+@st.cache_data(show_spinner=False)
+def discover_trial_folders(base_path):
+    """Trial folders (local OR R2) containing .fcs files whose names look like a
+    trial, e.g. the *_Renamed folders (Target_Date...). Works for both sources."""
+    try:
+        folders = get_fcs_folders(base_path)
+    except Exception:
+        folders = []
+    out = [f for f in folders if re.match(r'^([^_]+)_(\d{8})', os.path.basename(f.rstrip("/")))]
+    return sorted(out)
+
+@st.cache_data(show_spinner=False)
+def compute_folder_summary_records(directory, expr_ch, bind_ch, nc_pct, min_fsc, min_ssc, upper_pct, gate_frac):
+    """Compute analyze_fcs-equivalent per-file summary_stats records for one raw
+    trial folder (local or R2), on the fly from the FCS files.
+
+    Returns a list of dict records in the summary_stats.csv schema (the subset
+    consumed by aggregate_analysis). A negative control is required in the folder
+    for gating/thresholds; returns [] otherwise, matching analyze_fcs.py.
+    """
+    files = get_files(directory)
+    if not files:
+        return []
+
+    neg_files = [f for f in files if any(os.path.basename(f).startswith(p) for p in RECALC_NEG_PATTERNS)]
+    if not neg_files:
+        return []
+
+    # Learn the pentagon gate from the first NC
+    _, d_nc = load_fcs(neg_files[0])
+    if d_nc is None or "FSC-A" not in d_nc.columns or "SSC-A" not in d_nc.columns:
+        return []
+    if expr_ch not in d_nc.columns or bind_ch not in d_nc.columns:
+        return []
+    pent_path, _ = learn_pentagon_gate(d_nc, "FSC-A", "SSC-A", gate_frac, min_fsc, min_ssc, upper_pct)
+
+    # Concatenate gated negative controls to derive thresholds
+    neg_dfs = []
+    for f in neg_files:
+        _, d = load_fcs(f)
+        if d is None:
+            continue
+        dg = apply_polygon_gate(d, pent_path, "FSC-A", "SSC-A", min_fsc, min_ssc)
+        if expr_ch in dg.columns and bind_ch in dg.columns:
+            dg = dg[(dg[expr_ch] > 0) & (dg[bind_ch] > 0)]
+            if len(dg) > 0:
+                neg_dfs.append(dg)
+    if not neg_dfs:
+        return []
+    neg_concat = pd.concat(neg_dfs)
+    thresh_expr = np.percentile(neg_concat[expr_ch], nc_pct)
+    thresh_bind = np.percentile(neg_concat[bind_ch], nc_pct)
+
+    # Per-file metrics (subset of analyze_fcs.py needed for aggregation)
+    records = []
+    lbl_expr = expr_ch.replace("-A", "")
+    for f in files:
+        _, df = load_fcs(f)
+        if df is None or expr_ch not in df.columns or bind_ch not in df.columns:
+            continue
+        dg = apply_polygon_gate(df, pent_path, "FSC-A", "SSC-A", min_fsc, min_ssc)
+        dg = dg[(dg[expr_ch] > 0) & (dg[bind_ch] > 0)]
+        count_gated = len(dg)
+        if count_gated == 0:
+            continue
+
+        expr_pos = dg[expr_ch] > thresh_expr
+        bind_pos = dg[bind_ch] > thresh_bind
+        double_pos = expr_pos & bind_pos
+        pct_expr = expr_pos.mean() * 100
+        pct_double = double_pos.mean() * 100
+
+        d_pe = dg[expr_pos]
+        d_pb = dg[bind_pos]
+        pos_mean_expr = d_pe[expr_ch].mean() if len(d_pe) > 0 else 0
+        pos_med_expr = d_pe[expr_ch].median() if len(d_pe) > 0 else 0
+        pos_mean_bind = d_pb[bind_ch].mean() if len(d_pb) > 0 else 0
+        pos_med_bind = d_pb[bind_ch].median() if len(d_pb) > 0 else 0
+        pos_mean_ratio = pos_mean_bind / pos_mean_expr if pos_mean_expr > 0 else 0
+        pos_med_ratio = pos_med_bind / pos_med_expr if pos_med_expr > 0 else 0
+
+        bind_mean_expr_pos = d_pe[bind_ch].mean() if len(d_pe) > 0 else 0
+        bind_med_expr_pos = d_pe[bind_ch].median() if len(d_pe) > 0 else 0
+        expr_mean_bind_pos = d_pb[expr_ch].mean() if len(d_pb) > 0 else 0
+        expr_med_bind_pos = d_pb[expr_ch].median() if len(d_pb) > 0 else 0
+
+        bind_eff_ratio = pct_double / pct_expr if pct_expr > 0 else 0
+
+        d_dp = dg[double_pos]
+        if len(d_dp) > 0:
+            sig_bind = (d_dp[bind_ch] - thresh_bind).clip(lower=0.1)
+            sig_expr = (d_dp[expr_ch] - thresh_expr).clip(lower=0.1)
+            iwb_index = (sig_bind / sig_expr).median()
+        else:
+            iwb_index = 0
+
+        records.append({
+            "Filename": os.path.splitext(os.path.basename(f))[0],
+            "Gated Events": count_gated,
+            "Expr+ %": pct_expr,
+            "Double+ %": pct_double,
+            "Pos Mean Ratio": pos_mean_ratio,
+            "Pos Med Ratio": pos_med_ratio,
+            "Bind Mean (Expr+)": bind_mean_expr_pos,
+            "Bind Med (Expr+)": bind_med_expr_pos,
+            "Expr Mean (Bind+)": expr_mean_bind_pos,
+            "Expr Med (Bind+)": expr_med_bind_pos,
+            f"Binding Efficiency (DP/{lbl_expr}+)": bind_eff_ratio,
+            "Intensity-Weighted Binding Index": iwb_index,
+        })
+
+    # Raw per-file records only (no Norm columns). Normalization is applied
+    # separately so it can respond to the PC-keyword setting without reloading FCS.
+    return records
+
+def _normalize_folder_records(records, pos_patterns):
+    """Add the Norm* columns to one folder's records, normalized to the positive
+    control (median of PC rows, else max). Cheap; recomputed whenever the PC
+    keyword setting changes, so it need not reload the FCS files."""
+    if not records:
+        return records
+    pos_list = [str(p).upper() for p in pos_patterns] if pos_patterns else [p.upper() for p in RECALC_POS_PATTERNS]
+    df_stats = pd.DataFrame(records)
+    pos_mask = df_stats["Filename"].apply(lambda x: any(p in str(x).upper() for p in pos_list))
+
+    def _norm(col):
+        ref = df_stats.loc[pos_mask, col].median() if pos_mask.any() else df_stats[col].max()
+        ref = max(float(ref) if pd.notna(ref) else 0.0, 1e-9)
+        return df_stats[col] / ref
+
+    df_stats["Norm Pos Mean Ratio"] = _norm("Pos Mean Ratio")
+    df_stats["Norm Pos Med Ratio"] = _norm("Pos Med Ratio")
+    df_stats["Norm Bind Mean (Expr+)"] = _norm("Bind Mean (Expr+)")
+    df_stats["Norm Bind Med (Expr+)"] = _norm("Bind Med (Expr+)")
+    df_stats["Norm Expr Mean (Bind+)"] = _norm("Expr Mean (Bind+)")
+    df_stats["Norm Expr Med (Bind+)"] = _norm("Expr Med (Bind+)")
+    df_stats["Norm Intensity-Weighted Binding Index"] = _norm("Intensity-Weighted Binding Index")
+    return df_stats.to_dict("records")
+
+def recalc_global_aggregate(base_path, excluded_trials_tuple, expr_ch, bind_ch,
+                            nc_pct, min_fsc, min_ssc, upper_pct, gate_frac,
+                            pos_patterns=None, progress_cb=None):
+    """Recompute the global aggregate trial table on the fly from raw FCS in the
+    selected data source (Local or R2). Summary stats are computed per trial
+    folder, normalized to the positive control (using the PC-keyword setting),
+    then aggregated via aggregate_analysis. Excluded folders are skipped.
+    Returns a DataFrame equivalent to Aggregate_FCS_Analysis/aggregate_summary.csv."""
+    if not AGG_MODULE_OK:
+        return pd.DataFrame()
+
+    folders = discover_trial_folders(base_path)
+    excluded = set(excluded_trials_tuple)
+    rows = []
+    total = len(folders)
+    for i, folder in enumerate(folders):
+        name = os.path.basename(folder.rstrip("/"))
+        if name in excluded:
+            continue
+        m = re.match(r'^([^_]+)_(\d{8})', name)
+        if not m:
+            continue
+        tgt, date = m.group(1).upper(), m.group(2)
+        if progress_cb:
+            progress_cb(i, total, name)
+        # Raw stats are cached on gating+channels; normalization + aggregation
+        # are cheap and re-run each time so PC-keyword changes take effect.
+        recs = compute_folder_summary_records(folder, expr_ch, bind_ch, nc_pct, min_fsc, min_ssc, upper_pct, gate_frac)
+        recs = _normalize_folder_records(recs, pos_patterns)
+        if recs:
+            rows.extend(aggregate_analysis.aggregate_records(recs, tgt, date, pos_patterns=pos_patterns))
+    if progress_cb:
+        progress_cb(total, total, "")
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
 def simplify_polygon_vw(points, num_points=5):
     pts = list(points)
     if np.allclose(pts[0], pts[-1]):
@@ -347,7 +540,7 @@ def apply_polygon_gate(df, path, fsc_col="FSC-A", ssc_col="SSC-A", min_fsc=50000
 def analyze_folder_controls(directory, fsc_col="FSC-A", ssc_col="SSC-A", expr_col="FITC-A", bind_col="APC-A", nc_percentile=99.5, min_fsc=500000, min_ssc=20000, upper_pct=95, gate_fraction=0.9):
     all_files = get_files(directory)
     neg_files = [f for f in all_files if any(os.path.basename(f).startswith(p) for p in ["NC", "Negative Control"])]
-    pos_files = [f for f in all_files if any(os.path.basename(f).startswith(p) for p in ["Positive Control", "TIMP"])]
+    pos_files = [f for f in all_files if any(os.path.basename(f).startswith(p) for p in ["Positive Control", "TIMP 3"])]
     
     results = {
         "has_nc": False,
@@ -486,7 +679,7 @@ def get_folder_aggregate_stats(directory, _ctrls, fsc_col="FSC-A", ssc_col="SSC-
     df_ridge = pd.DataFrame(ridge_data)
     
     if _ctrls["has_pc"] and not df_stats.empty:
-        pos_mask = df_stats['Filename'].apply(lambda x: any(p in x for p in ["Positive Control", "TIMP"]))
+        pos_mask = df_stats['Filename'].apply(lambda x: any(p in x for p in ["Positive Control", "TIMP 3"]))
         if pos_mask.any():
             p_med_rat_ref = df_stats.loc[pos_mask, "Pos Med Ratio"].median()
             p_mean_rat_ref = df_stats.loc[pos_mask, "Pos Mean Ratio"].median()
@@ -698,7 +891,7 @@ else:
 
 # --- GLOBAL QC & METRIC SETTINGS ---
 with st.sidebar.expander("🛠️ Global QC & Metric Settings", expanded=False):
-    pc_keywords = st.text_input("PC Keywords (Comma separated)", value="Positive Control, TIMP", help="Keywords to identify which rows are positive controls.", key="sidebar_pc_keywords")
+    pc_keywords = st.text_input("PC Keywords (Comma separated)", value="Positive Control, TIMP 3", help="Keywords to identify which rows are positive controls.", key="sidebar_pc_keywords")
     pc_pattern = "|".join([k.strip().upper() for k in pc_keywords.split(",") if k.strip()])
     pc_thresh = st.slider("QC Threshold: Min PC Double+ %", 0.0, 10.0, 2.0, step=0.1, help="Exclude trials where the identified positive control performed poorly.", key="sidebar_pc_thresh")
     
@@ -832,6 +1025,54 @@ if fs and st.session_state["data_mode"] == "Cloud (R2)":
 else:
     st.sidebar.info("📂 Using Local Data")
 
+# --- AGGREGATE / SELECTIVITY SOURCE & TRIAL EXCLUSION ---
+st.sidebar.divider()
+st.sidebar.subheader("♻️ Aggregate & Selectivity")
+
+agg_source_mode = st.sidebar.radio(
+    "Data Source",
+    ["Load from CSVs", "Recalculate (live)"],
+    index=0,
+    key="agg_source_mode",
+    help=(
+        "'Load from CSVs' reads the pre-computed sheets in Aggregate_FCS_Analysis. "
+        "'Recalculate (live)' computes summary stats on the fly from the raw FCS "
+        "files in the selected data source (Local folder or Cloud R2), using the "
+        "*_Renamed trial folders — so trial exclusions apply without editing the "
+        "saved sheets, and it works even where no *_Analysis folders exist (cloud)."
+    ),
+)
+recalc_mode = (agg_source_mode == "Recalculate (live)")
+
+# Trial folders live under the currently selected Data Root (Local path or bucket).
+_all_trial_dirs = [os.path.basename(f.rstrip("/")) for f in discover_trial_folders(base_path)]
+excluded_trials = st.sidebar.multiselect(
+    "Exclude Trials (folders)",
+    _all_trial_dirs,
+    default=[],
+    key="excluded_trials",
+    help=(
+        "Trial folders (e.g. *_Renamed) removed here are dropped from BOTH the "
+        "aggregate and selectivity analyses. Use for days/trials you know were "
+        "unreliable. Applies to the live recalculation; also honored as a "
+        "Target+Date filter when loading from CSVs."
+    ),
+)
+if recalc_mode:
+    if not AGG_MODULE_OK:
+        st.sidebar.warning(f"Live recalculation unavailable: {_AGG_IMPORT_ERROR}")
+    elif not _all_trial_dirs:
+        st.sidebar.warning("No trial folders (with .fcs) found under the current Data Root.")
+    else:
+        st.sidebar.caption(f"♻️ Recalculating from {len(_all_trial_dirs) - len(excluded_trials)} trial folder(s).")
+        st.sidebar.caption(
+            "Updates automatically (like Channel Config): **Advanced Gating**, "
+            "**Channel Config**, and **PC Keywords** re-run the recalculation "
+            "(gating/channel changes reload FCS — may take a moment; PC-keyword "
+            "changes are quick). **QC Threshold** and **Analysis Metric** apply "
+            "instantly with no recalculation."
+        )
+
 # --- R2 Migration Debug ---
 with st.sidebar.expander("🛠️ Debug R2 Connection"):
     st.write(f"**FS Status**: {fs_status}")
@@ -901,8 +1142,41 @@ if selected_file and df is not None:
     
     g_agg_csv = os.path.join(global_agg_dir, "aggregate_summary.csv")
     df_global_trials = None
-    if cloud_exists(g_agg_csv):
-        df_global_trials = cloud_read_csv(g_agg_csv)
+    if recalc_mode and AGG_MODULE_OK:
+        _prog = st.progress(0.0, text="♻️ Recalculating summary stats from raw FCS...")
+
+        def _prog_cb(i, total, name):
+            frac = (i / total) if total else 1.0
+            label = f"♻️ Recalculating ({i}/{total}) {name}" if name else "♻️ Aggregating..."
+            _prog.progress(min(frac, 1.0), text=label)
+
+        _pc_keyword_list = [k.strip() for k in pc_keywords.split(",") if k.strip()]
+        df_global_trials = recalc_global_aggregate(
+            base_path, tuple(sorted(excluded_trials)),
+            expr_col, bind_col, g_nc_pct, g_min_fsc, g_min_ssc, g_upper_pct, g_gate_frac,
+            pos_patterns=_pc_keyword_list, progress_cb=_prog_cb,
+        )
+        _prog.empty()
+        if df_global_trials is not None and df_global_trials.empty:
+            df_global_trials = None
+            st.warning("Live recalculation produced no data (no valid trial folders with a "
+                       "negative control in the selected data source).")
+    else:
+        if recalc_mode and not AGG_MODULE_OK:
+            st.warning(f"Live recalculation unavailable: {_AGG_IMPORT_ERROR}. Loading CSVs instead.")
+        if cloud_exists(g_agg_csv):
+            df_global_trials = cloud_read_csv(g_agg_csv)
+        # In CSV mode, still honor the trial-exclusion selection as a post-filter.
+        if df_global_trials is not None and excluded_trials:
+            excl_td = set()
+            for _name in excluded_trials:
+                _m = re.match(r'^([^_]+)_(\d{8})', _name)
+                if _m:
+                    excl_td.add((_m.group(1).upper(), _m.group(2)))
+            if excl_td and {"Target", "Date"}.issubset(df_global_trials.columns):
+                df_global_trials = df_global_trials[~df_global_trials.apply(
+                    lambda r: (str(r["Target"]).upper(), str(r["Date"])) in excl_td, axis=1
+                )].copy()
 
     # --- GLOBAL DATA FILTERING ---
     df_global_filtered = None
@@ -1408,6 +1682,10 @@ if selected_file and df is not None:
     with tab_agg:
         if df_global_filtered is not None:
             st.subheader("📊 Global Aggregate Analysis")
+            if recalc_mode:
+                _src_lbl = "Cloud R2" if (fs and BUCKET and str(base_path).startswith(BUCKET)) else "Local"
+                _excl_note = f" ({len(excluded_trials)} trial(s) excluded)" if excluded_trials else ""
+                st.caption(f"♻️ Live recalculation from raw FCS in {_src_lbl}{_excl_note} — computed on the fly, not read from saved CSVs.")
 
             g_cross_csv = os.path.join(global_agg_dir, "cross_target_summary.csv")
             
@@ -1550,12 +1828,15 @@ if selected_file and df is not None:
             st.markdown("---")
 
 
-            if cloud_exists(g_cross_csv):
+            if recalc_mode:
+                st.caption("ℹ️ The static Cross-Target Summary sheet is not shown in live "
+                           "recalculation mode (it would not reflect your exclusions).")
+            elif cloud_exists(g_cross_csv):
                 found_g = True
                 st.markdown("**Global Cross-Target Summary (Experimental Mapping)**")
                 st.dataframe(cloud_read_csv(g_cross_csv), width='stretch', hide_index=True)
-                
-            if not found_g:
+
+            if not recalc_mode and not found_g:
                 st.info(f"Global directory found at '{global_agg_dir}', but no summary CSVs were detected.")
         else:
             st.info(f"Global aggregate directory not found at: {global_agg_dir}")
@@ -1564,7 +1845,17 @@ if selected_file and df is not None:
         if st.button("🔄 Refresh Selectivity Data", key="refresh_selectivity"):
              st.rerun()
 
-             
+        # Raw metric column backing each selectivity folder (used for live recalc).
+        SEL_METRIC_COLS = {
+            "Median_Ratio": "Pos Med Ratio",
+            "Bind_Med_Expr_Positive": "Bind Med (Expr+)",
+            "Binding_Efficiency": "Binding Efficiency",
+            "IWB_Index": "Intensity-Weighted Binding Index",
+        }
+        if recalc_mode:
+            _excl_note = f" ({len(excluded_trials)} trial(s) excluded)" if excluded_trials else ""
+            st.caption(f"♻️ Live recalculation{_excl_note} — computed in-memory, not read from saved CSVs.")
+
         if st.session_state.get("data_mode") == "Cloud (R2)" and fs and BUCKET:
             global_agg_dir = os.path.join(BUCKET, "Aggregate_FCS_Analysis")
         else:
@@ -1581,24 +1872,30 @@ if selected_file and df is not None:
                     break
             
         selectivity_dir = os.path.join(global_agg_dir, "Selectivity_Analysis")
-        
-        # Robust cloud_exists for prefixes
-        dir_exists = cloud_exists(selectivity_dir)
-        if not dir_exists and fs and BUCKET and selectivity_dir.startswith(BUCKET):
-            # In S3, a prefix exists if there are keys under it
-            try:
-                test_ls = fs.ls(selectivity_dir, detail=False)
-                if test_ls:
-                    dir_exists = True
-            except:
-                pass
+
+        if recalc_mode:
+            # In live mode selectivity is derived from the recalculated trial table.
+            dir_exists = df_global_filtered is not None and not df_global_filtered.empty
+        else:
+            # Robust cloud_exists for prefixes
+            dir_exists = cloud_exists(selectivity_dir)
+            if not dir_exists and fs and BUCKET and selectivity_dir.startswith(BUCKET):
+                # In S3, a prefix exists if there are keys under it
+                try:
+                    test_ls = fs.ls(selectivity_dir, detail=False)
+                    if test_ls:
+                        dir_exists = True
+                except:
+                    pass
 
         if dir_exists:
             st.subheader("🎯 Selectivity Analysis")
             
             # Find available metrics (subdirectories)
             metric_dirs = []
-            if fs and selectivity_dir.startswith(BUCKET):
+            if recalc_mode:
+                metric_dirs = list(SEL_METRIC_COLS.keys())
+            elif fs and selectivity_dir.startswith(BUCKET):
                 try:
                     # Robust listing for R2/S3
                     items = fs.ls(selectivity_dir, detail=False)
@@ -1642,9 +1939,16 @@ if selected_file and df is not None:
                 sum_csv = os.path.join(metric_subdir, "selectivity_summary.csv")
                 all_comp_plot = os.path.join(metric_subdir, "selectivity_comparison_all.png")
                 
-                # --- NEW: Read CSV data first to drive the individual viewer ---
+                # --- Read data (live recalc or saved CSV) to drive the viewer ---
                 df_sel = None
-                if cloud_exists(sum_csv):
+                if recalc_mode:
+                    raw_col = SEL_METRIC_COLS.get(selected_metric)
+                    if raw_col and AGG_MODULE_OK and df_global_filtered is not None \
+                            and raw_col in df_global_filtered.columns:
+                        df_sel = aggregate_analysis.build_selectivity_summary(df_global_filtered, raw_col)
+                        if df_sel is not None and df_sel.empty:
+                            df_sel = None
+                elif cloud_exists(sum_csv):
                     df_sel = cloud_read_csv(sum_csv)
                 
                 # Visualizations
@@ -1818,6 +2122,9 @@ if selected_file and df is not None:
                              st.json(raw_items)
                          except Exception as e:
                              st.write(f"Listing Error: {e}")
+        elif recalc_mode:
+            st.info("No recalculated trials available for selectivity. "
+                    "Check that Local/*_Analysis folders exist and are not all excluded.")
         else:
             st.info(f"Selectivity directory not found: {selectivity_dir}")
             with st.expander("🛠️ Debug Info"):
