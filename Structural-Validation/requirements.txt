@@ -1,0 +1,13 @@
+# Prep + analysis stages (base env): pure-Python metrics, no external binaries.
+biopython>=1.81
+numpy>=1.24
+scipy>=1.10
+pandas>=2.0
+openpyxl>=3.1
+matplotlib>=3.7
+seaborn>=0.12
+
+# Compute stages run in their own environments (not installed here):
+#   ESMFold2  -> conda env `esmfold2` (python>=3.12): transformers, torch, esm
+#   HADDOCK3  -> conda env `haddock`: haddock3
+#   AF3       -> web server (no local install)
