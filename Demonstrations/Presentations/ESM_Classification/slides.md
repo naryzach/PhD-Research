@@ -228,6 +228,41 @@ transition: fade-out
 </div>
 
 ---
+layout: default
+transition: fade-out
+---
+
+# ESM-C vs. FCS Binding Validation (July 8)
+
+<div class="grid grid-cols-2 gap-8 mt-6 items-start">
+  <div class="space-y-4">
+    <div class="p-4 bg-white/5 rounded border border-white/10">
+      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-3">Experimental Binding Validation</h4>
+      <p class="text-[11px] leading-relaxed opacity-75">
+        Evaluation of ESM-C predicted probabilities against actual flow-cytometry binding measurements for 11 matched constructs.
+      </p>
+      <ul class="text-[10px] list-disc pl-4 space-y-1.5 opacity-70 mt-3">
+        <li><b>Strong Positive Correlation:</b> ESM-C predicted probability correlates positively with raw binding (ADAM17 Pos Med Ratio: $\rho = 0.86^*$ on AB-loops; MMP9 Double+ %: $\rho = 0.62^*$ overall).</li>
+        <li><b>Robust Out-of-Distribution Generalization:</b> Even though the model was trained exclusively on C-loop sequence grafts, it successfully predicts binding for AB-loop insertions ($\rho=0.86^*$ for ADAM17, $\rho=0.75$ for MMP9).</li>
+        <li><b>Contrast with Structure:</b> Unlike AF3 and ESMFold2 structural metrics (which showed weak/unstable correlations with raw binding), ESM-C is a robust binding ranker.</li>
+      </ul>
+    </div>
+    <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
+      <b class="text-amber-400">Design Implications:</b> Treat structural confidence scores as foldability/developability checks; use ESM-C P(bind) as the primary ranker for ordering new candidates.
+    </div>
+  </div>
+  <div class="space-y-3 flex flex-col items-center">
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/fig6_esmc_vs_fcs.png"
+         alt="ESM-C vs FCS Binding Validation"
+         class="w-full rounded-lg border border-white/10 shadow-sm"
+         style="max-height: 280px; object-fit: contain;">
+    <p class="text-[9px] opacity-40 italic text-center">
+      ESM-C predicted probability vs. measured binding ratios (July 8).
+    </p>
+  </div>
+</div>
+
+---
 
 # Conclusions
 
