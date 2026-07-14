@@ -424,8 +424,7 @@ def recalc_global_aggregate(base_path, excluded_trials_tuple, expr_ch, bind_ch,
         recs = _normalize_folder_records(recs, pos_patterns)
         if recs:
             rows.extend(aggregate_analysis.aggregate_records(
-                recs, tgt, date, pos_patterns=pos_patterns,
-                source=aggregate_analysis.folder_source(name)))
+                recs, tgt, date, pos_patterns=pos_patterns, folder_name=name))
     if progress_cb:
         progress_cb(total, total, "")
     return pd.DataFrame(rows) if rows else pd.DataFrame()

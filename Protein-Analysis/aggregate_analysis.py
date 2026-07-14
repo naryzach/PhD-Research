@@ -186,6 +186,68 @@ def derive_source(raw_name, folder_source=None):
     return canonical_vendor(tok) or "Unknown"
 
 
+# ---- FOLDER -> VENDOR MANIFEST ----
+# Authoritative per-folder vendor/provenance (each trial folder is one target prep
+# from one vendor), sourced from folder_vendor_manifest.csv. This wins over the
+# per-sample token guess because it captures RG-confirmed overrides & notebook rules.
+_FOLDER_MAP_CACHE = None
+
+
+def _folder_manifest_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "folder_vendor_manifest.csv")
+
+
+def _norm_folder_name(name):
+    """Normalize a trial-folder name to match the manifest's Folder column: drop a
+    trailing '_Analysis' (analysis dirs) so both raw and analysis folders map."""
+    n = os.path.basename(str(name or '').rstrip("/\\"))
+    if n.endswith("_Analysis"):
+        n = n[:-len("_Analysis")]
+    return n
+
+
+def load_folder_map(path=None, force=False):
+    """Load the folder -> {Vendor, Provenance} manifest (cached)."""
+    global _FOLDER_MAP_CACHE
+    if _FOLDER_MAP_CACHE is not None and path is None and not force:
+        return _FOLDER_MAP_CACHE
+    mapping = {}
+    p = path or _folder_manifest_path()
+    try:
+        with open(p, newline='') as f:
+            for row in csv.DictReader(f):
+                folder = _norm_folder_name(row.get('Folder', ''))
+                vendor = (row.get('Vendor', '') or '').strip()
+                if folder and vendor:
+                    mapping[folder] = {
+                        'Vendor': vendor,
+                        'Provenance': (row.get('Provenance', '') or '').strip() or 'Unknown',
+                    }
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+    if path is None:
+        _FOLDER_MAP_CACHE = mapping
+    return mapping
+
+
+def folder_vendor(folder_name):
+    """Authoritative canonical vendor for a trial folder, or None if not listed."""
+    entry = load_folder_map().get(_norm_folder_name(folder_name))
+    return entry['Vendor'] if entry else None
+
+
+def resolve_vendor(folder_name=None, raw_name=None):
+    """Resolve a sample's vendor: the folder manifest is authoritative; otherwise
+    fall back to the per-sample token / folder token via vendor_manifest.csv."""
+    if folder_name:
+        v = folder_vendor(folder_name)
+        if v:
+            return v
+    return derive_source(raw_name, folder_source(folder_name) if folder_name else None)
+
+
 def folder_source(dir_name):
     """Extract the manufacturer/source token from a trial directory name, e.g.
     'MMP9_20260701_Sino_T1_Renamed' -> 'Sino'. Returns None when absent."""
@@ -211,7 +273,7 @@ def get_analysis_dirs(local_dir=None):
     return sorted([d for d in glob.glob(os.path.join(local_dir, "*_Analysis")) if os.path.isdir(d)])
 
 
-def aggregate_records(records, target, date, pos_patterns=None, neg_patterns=None, source=None):
+def aggregate_records(records, target, date, pos_patterns=None, neg_patterns=None, folder_name=None):
     """Aggregate a trial's per-file summary_stats records into aggregate rows.
 
     `records` is an iterable of dict rows matching the summary_stats.csv schema
@@ -302,7 +364,7 @@ def aggregate_records(records, target, date, pos_patterns=None, neg_patterns=Non
             rows.append({
                 'Target': row_target,
                 'Date': date,
-                'Source': derive_source(raw_name, source),
+                'Source': resolve_vendor(folder_name, raw_name),
                 'Construct': standard_name,
                 'Construct Num': construct_num,
                 'Raw Name': raw_name,
@@ -333,7 +395,7 @@ def aggregate_records(records, target, date, pos_patterns=None, neg_patterns=Non
     return rows
 
 
-def _parse_summary_stats(csv_path, target, date, verbose=True, source=None):
+def _parse_summary_stats(csv_path, target, date, verbose=True, folder_name=None):
     """Read one summary_stats.csv and aggregate it (CLI/Local path)."""
     try:
         with open(csv_path, 'r') as f:
@@ -342,7 +404,7 @@ def _parse_summary_stats(csv_path, target, date, verbose=True, source=None):
         if verbose:
             print(f"  Error reading {csv_path}: {e}", flush=True)
         return []
-    return aggregate_records(records, target, date, source=source)
+    return aggregate_records(records, target, date, folder_name=folder_name)
 
     return rows
 
@@ -406,7 +468,7 @@ def build_aggregate_data(exclude_dates=None, exclude_dirs=None, local_dir=None, 
             continue
 
         all_data.extend(_parse_summary_stats(csv_path, target, date, verbose=verbose,
-                                             source=folder_source(dir_name)))
+                                             folder_name=dir_name))
 
     return all_data
 
@@ -534,6 +596,10 @@ def main():
     # Paths
     parser = argparse.ArgumentParser(description="Aggregate FCS Analysis Results")
     parser.add_argument("--exclude_dates", help="Comma-separated list of dates to exclude (e.g., 20240510,20240511)")
+    parser.add_argument("--data_dir", help="Directory containing the *_Analysis trial folders "
+                                           "(default: ../Local). Point this at the raw flow-data root.")
+    parser.add_argument("--output_dir", help="Where to write aggregate outputs "
+                                            "(default: ../Local/Aggregate_FCS_Analysis).")
     args = parser.parse_args()
 
     exclude_dates = []
@@ -541,8 +607,9 @@ def main():
         exclude_dates = [d.strip() for d in args.exclude_dates.split(",")]
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    local_dir = os.path.abspath(os.path.join(base_dir, "../Local"))
-    output_dir = os.path.join(local_dir, "Aggregate_FCS_Analysis")
+    default_local = os.path.abspath(os.path.join(base_dir, "../Local"))
+    local_dir = os.path.abspath(args.data_dir) if args.data_dir else default_local
+    output_dir = os.path.abspath(args.output_dir) if args.output_dir else os.path.join(default_local, "Aggregate_FCS_Analysis")
     reference_csv = os.path.join(base_dir, "TIMP3_variants_names.csv")
     
     # 0. Define metrics and control patterns

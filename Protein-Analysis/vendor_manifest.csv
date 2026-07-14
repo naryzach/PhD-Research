@@ -1,0 +1,13 @@
+Token,Vendor,Provenance,Notes
+Sino,Sino,Purchased,Sino Biological recombinant target
+SinoThaw,Sino,Purchased,Sino aliquot re-thawed
+Enzo,Enzo,Purchased,Enzo Life Sciences recombinant target
+Abcam,Abcam,Purchased,Abcam recombinant target
+AbC,Abcam,Purchased,Abbreviation of Abcam seen in sample/folder tokens
+Masoud,Masoud,In-house,In-house prep (Masoud)
+Mas,Masoud,In-house,Abbreviation of Masoud seen in sample/folder tokens
+Sam,Sam,In-house,In-house prep (Sam)
+Arley,Arley,In-house,In-house prep (Arley)
+Arly,Arley,In-house,Abbreviation of Arley seen in folder tokens (e.g. Arly-FLAG)
+F6,FPLC-fraction,In-house,In-house FPLC fraction 6
+F9,FPLC-fraction,In-house,In-house FPLC fraction 9
