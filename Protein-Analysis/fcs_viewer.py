@@ -28,6 +28,17 @@ except Exception as _agg_err:  # noqa: BLE001 - surface any import failure in th
     AGG_MODULE_OK = False
     _AGG_IMPORT_ERROR = str(_agg_err)
 
+# Shared explanation for the Tukey HSD post-hoc tables (shown under the dropdowns).
+TUKEY_NOTE = (
+    "These rows are **Tukey HSD post-hoc pairwise comparisons**, shown only when the "
+    "one-way **ANOVA** across the groups is significant (p < 0.05). "
+    "**Diff** (shown as *meandiff* in some tables) is the difference between the two "
+    "groups' mean values of the metric — specifically *mean(group 2) − mean(group 1)* "
+    "in that metric's own units, so the sign tells you which group is higher and the "
+    "magnitude is the effect size. **p-adj** is the multiple-comparison–adjusted "
+    "p-value for that specific pair (significant if < 0.05)."
+)
+
 # ---- PAGE CONFIGURATION ----
 st.set_page_config(
     page_title="FCS Viewer",
@@ -412,7 +423,9 @@ def recalc_global_aggregate(base_path, excluded_trials_tuple, expr_ch, bind_ch,
         recs = compute_folder_summary_records(folder, expr_ch, bind_ch, nc_pct, min_fsc, min_ssc, upper_pct, gate_frac)
         recs = _normalize_folder_records(recs, pos_patterns)
         if recs:
-            rows.extend(aggregate_analysis.aggregate_records(recs, tgt, date, pos_patterns=pos_patterns))
+            rows.extend(aggregate_analysis.aggregate_records(
+                recs, tgt, date, pos_patterns=pos_patterns,
+                source=aggregate_analysis.folder_source(name)))
     if progress_cb:
         progress_cb(total, total, "")
     return pd.DataFrame(rows) if rows else pd.DataFrame()
@@ -1178,6 +1191,14 @@ if selected_file and df is not None:
                     lambda r: (str(r["Target"]).upper(), str(r["Date"])) in excl_td, axis=1
                 )].copy()
 
+    # Ensure a manufacturer/source column exists (older CSVs predate it); derive
+    # it from the sample name so both modes support the manufacturer breakdown.
+    if df_global_trials is not None and "Source" not in df_global_trials.columns:
+        if "Raw Name" in df_global_trials.columns and AGG_MODULE_OK:
+            df_global_trials["Source"] = df_global_trials["Raw Name"].apply(aggregate_analysis.derive_source)
+        else:
+            df_global_trials["Source"] = "Unknown"
+
     # --- GLOBAL DATA FILTERING ---
     df_global_filtered = None
     df_pc_status = pd.DataFrame()
@@ -1755,6 +1776,7 @@ if selected_file and df is not None:
                         sig_pairs = run_tukey_summary(df_constructs, 'Construct', sel_metric_col)
                         if sig_pairs is not None and not sig_pairs.empty:
                             with st.expander("🔍 View Significant Pairwise Differences (Tukey HSD)"):
+                                st.caption(TUKEY_NOTE)
                                 st.dataframe(sig_pairs[['group1', 'group2', 'meandiff', 'p-adj']], hide_index=True, width='stretch')
                 else:
                     st.caption("ANOVA could not be calculated (requires multiple trials per construct).")
@@ -1769,7 +1791,8 @@ if selected_file and df is not None:
             # --- NEW: COMPREHENSIVE STATISTICAL SUMMARY (ALL METRICS) ---
             st.divider()
             with st.expander("📊 Comprehensive Statistical Summary (All Metrics)", expanded=False):
-                st.markdown(f"Running pairwise comparisons for **{target_choice}** across all metrics...")
+                st.markdown(f"ANOVA-gated **Tukey HSD** pairwise comparisons for **{target_choice}** across all metrics.")
+                st.caption(TUKEY_NOTE)
                 all_sig_findings = []
                 
                 for m_label, m_col in metric_options.items():
@@ -1842,299 +1865,201 @@ if selected_file and df is not None:
             st.info(f"Global aggregate directory not found at: {global_agg_dir}")
 
     with tab_selectivity:
+        st.subheader("🎯 Selectivity Analysis")
         if st.button("🔄 Refresh Selectivity Data", key="refresh_selectivity"):
-             st.rerun()
+            st.rerun()
 
-        # Raw metric column backing each selectivity folder (used for live recalc).
-        SEL_METRIC_COLS = {
-            "Median_Ratio": "Pos Med Ratio",
-            "Bind_Med_Expr_Positive": "Bind Med (Expr+)",
-            "Binding_Efficiency": "Binding Efficiency",
-            "IWB_Index": "Intensity-Weighted Binding Index",
+        # Metric options: raw column + normalized (vs Pos Ctrl) column where available.
+        SEL_METRICS = {
+            "Median Binding Ratio": {"raw": "Pos Med Ratio", "norm": "Norm Median Ratio"},
+            "Median of Expr+": {"raw": "Bind Med (Expr+)", "norm": "Norm Bind Med (Expr+)"},
+            "Binding Efficiency": {"raw": "Binding Efficiency", "norm": None},
+            "IWB Index": {"raw": "Intensity-Weighted Binding Index", "norm": "Norm Intensity-Weighted Binding Index"},
         }
-        if recalc_mode:
-            _excl_note = f" ({len(excluded_trials)} trial(s) excluded)" if excluded_trials else ""
-            st.caption(f"♻️ Live recalculation{_excl_note} — computed in-memory, not read from saved CSVs.")
 
-        if st.session_state.get("data_mode") == "Cloud (R2)" and fs and BUCKET:
-            global_agg_dir = os.path.join(BUCKET, "Aggregate_FCS_Analysis")
-        else:
-            # Try multiple relative paths to be safe
-            potential_paths = [
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Local", "Aggregate_FCS_Analysis")),
-                os.path.abspath(os.path.join(os.getcwd(), "..", "Local", "Aggregate_FCS_Analysis")),
-                os.path.abspath(os.path.join(os.getcwd(), "Local", "Aggregate_FCS_Analysis")),
-            ]
-            global_agg_dir = potential_paths[0]
-            for p in potential_paths:
-                if os.path.exists(p):
-                    global_agg_dir = p
-                    break
-            
-        selectivity_dir = os.path.join(global_agg_dir, "Selectivity_Analysis")
-
-        if recalc_mode:
-            # In live mode selectivity is derived from the recalculated trial table.
-            dir_exists = df_global_filtered is not None and not df_global_filtered.empty
-        else:
-            # Robust cloud_exists for prefixes
-            dir_exists = cloud_exists(selectivity_dir)
-            if not dir_exists and fs and BUCKET and selectivity_dir.startswith(BUCKET):
-                # In S3, a prefix exists if there are keys under it
-                try:
-                    test_ls = fs.ls(selectivity_dir, detail=False)
-                    if test_ls:
-                        dir_exists = True
-                except:
-                    pass
-
-        if dir_exists:
-            st.subheader("🎯 Selectivity Analysis")
-            
-            # Find available metrics (subdirectories)
-            metric_dirs = []
+        if df_global_filtered is None or df_global_filtered.empty:
             if recalc_mode:
-                metric_dirs = list(SEL_METRIC_COLS.keys())
-            elif fs and selectivity_dir.startswith(BUCKET):
-                try:
-                    # Robust listing for R2/S3
-                    items = fs.ls(selectivity_dir, detail=False)
-                    for i in items:
-                        # Normalize path by removing the parent prefix
-                        name = i.rstrip("/").split("/")[-1]
-                        # If it's a directory (no extension) and not empty
-                        if "." not in name and name != "Selectivity_Analysis":
-                            metric_dirs.append(name)
-                    metric_dirs = sorted(list(set(metric_dirs)))
-                except Exception as e:
-                    st.error(f"Error listing selectivity metrics: {e}")
+                st.info("No recalculated trials available for selectivity. Check that trial "
+                        "folders exist in the selected data source and are not all excluded.")
             else:
-                if os.path.exists(selectivity_dir):
-                    metric_dirs = sorted([d for d in os.listdir(selectivity_dir) if os.path.isdir(os.path.join(selectivity_dir, d))])
-            
-            if metric_dirs:
-                # Filter out legacy normalized folders from selectivity view
-                metric_dirs = [d for d in metric_dirs if not d.startswith("Norm_")]
-                
-                # Human readable mapping
-                display_map = {
-                    "Median_Ratio": "Median Binding Ratio (Raw)",
-                    "Bind_Med_Expr_Positive": "Median of Expr+ (Raw)",
-                    "Binding_Efficiency": "Binding Efficiency",
-                    "IWB_Index": "IWB Index (Raw)"
-                }
-                
-                selected_display = st.selectbox(
-                    "Select Metric to View", 
-                    [display_map.get(d, d) for d in metric_dirs], 
-                    key="selectivity_tab_metric_sel_display"
-                )
-                
-                # Reverse map to get the actual folder name
-                rev_map = {v: k for k, v in display_map.items()}
-                selected_metric = rev_map.get(selected_display, selected_display)
-                
-                metric_subdir = os.path.join(selectivity_dir, selected_metric)
-                
-                sum_csv = os.path.join(metric_subdir, "selectivity_summary.csv")
-                all_comp_plot = os.path.join(metric_subdir, "selectivity_comparison_all.png")
-                
-                # --- Read data (live recalc or saved CSV) to drive the viewer ---
-                df_sel = None
-                if recalc_mode:
-                    raw_col = SEL_METRIC_COLS.get(selected_metric)
-                    if raw_col and AGG_MODULE_OK and df_global_filtered is not None \
-                            and raw_col in df_global_filtered.columns:
-                        df_sel = aggregate_analysis.build_selectivity_summary(df_global_filtered, raw_col)
-                        if df_sel is not None and df_sel.empty:
-                            df_sel = None
-                elif cloud_exists(sum_csv):
-                    df_sel = cloud_read_csv(sum_csv)
-                
-                # Visualizations
-                if df_sel is not None:
-                    st.markdown(f"### Selectivity Comparison: {selected_metric}")
-                    
-                    # Create Dynamic Plotly Chart
-                    import plotly.express as px
-                    
-                    # Sort by construct for consistent viewing
-                    df_plot = df_sel.sort_values(["Construct", "Target"])
-                    
-                    # Calculate 95% CI for display
-                    if '95% CI' not in df_plot.columns:
-                        df_plot['SEM'] = df_plot.apply(lambda row: row['StdDev'] / (row['Count']**0.5) if row['Count'] > 1 else 0, axis=1)
-                        df_plot['95% CI'] = df_plot['SEM'] * 1.96
+                st.info("No aggregate data available. Ensure aggregate_summary.csv exists "
+                        "(Load from CSVs) or switch the source to Recalculate (live).")
+        else:
+            _src_lbl = "♻️ Live recalculation" if recalc_mode else "📄 Loaded from CSV"
+            st.caption(f"{_src_lbl} — selectivity computed from the current aggregate data "
+                       "(honors data source, trial exclusions, gating & QC settings).")
 
+            csel1, csel2 = st.columns([2, 2])
+            with csel1:
+                selected_label = st.selectbox("Metric", list(SEL_METRICS.keys()),
+                                              key="selectivity_metric_sel")
+            with csel2:
+                view_mode = st.radio("Values", ["Raw", "Normalized (vs Pos Ctrl)"],
+                                     horizontal=True, key="selectivity_norm_toggle")
+
+            _m_info = SEL_METRICS[selected_label]
+            _use_norm = view_mode.startswith("Normalized")
+            metric_col = _m_info["norm"] if (_use_norm and _m_info["norm"]) else _m_info["raw"]
+            _is_norm = _use_norm and bool(_m_info["norm"])
+            if _use_norm and not _m_info["norm"]:
+                st.caption(f"ℹ️ '{selected_label}' has no normalized form (it is already a "
+                           "ratio); showing raw values.")
+
+            if metric_col not in df_global_filtered.columns:
+                st.error(f"Metric column '{metric_col}' not found in the current dataset.")
+            else:
+                y_label = f"{selected_label}" + (" (Norm)" if _is_norm else "")
+
+                # Ensure a Source (manufacturer) column exists.
+                df_src = df_global_filtered.copy()
+                if "Source" not in df_src.columns:
+                    if "Raw Name" in df_src.columns and AGG_MODULE_OK:
+                        df_src["Source"] = df_src["Raw Name"].apply(aggregate_analysis.derive_source)
+                    else:
+                        df_src["Source"] = "Unknown"
+
+                # Restrict to constructs tested against more than one target.
+                _tc = df_src.groupby("Construct")["Target"].nunique()
+                _multi = _tc[_tc > 1].index.tolist()
+                df_multi = df_src[df_src["Construct"].isin(_multi)].copy()
+
+                def _sel_summary(df_in, group_cols):
+                    g = df_in.groupby(group_cols)[metric_col].agg(["mean", "std", "count"]).reset_index()
+                    g.columns = list(group_cols) + ["Mean", "StdDev", "Count"]
+                    g["SEM"] = g.apply(lambda r: r["StdDev"] / (r["Count"] ** 0.5) if r["Count"] > 1 else 0, axis=1)
+                    g["95% CI"] = g["SEM"] * 1.96
+                    return g
+
+                if df_multi.empty:
+                    st.info("No constructs were tested against more than one target, so there "
+                            "is nothing to compare for selectivity.")
+                else:
+                    # ---- MAIN GRAPH: Construct x Target ----
+                    df_by_target = _sel_summary(df_multi, ["Construct", "Target"]).sort_values(["Construct", "Target"])
+                    st.markdown(f"### Selectivity by Target — {y_label}")
                     fig_sel = px.bar(
-                        df_plot, 
-                        x="Construct", 
-                        y="Mean", 
-                        color="Target",
-                        barmode="group",
-                        error_y="95% CI",
-                        template="plotly_dark",
-                        title=f"{selected_metric} Across Targets (Error Bars: 95% CI)",
-                        labels={"Mean": selected_metric},
-                        hover_data={"Count": True, "95% CI": ":.2f"}
+                        df_by_target, x="Construct", y="Mean", color="Target",
+                        barmode="group", error_y="95% CI", template="plotly_dark",
+                        title=f"{y_label} Across Targets (Error Bars: 95% CI)",
+                        labels={"Mean": y_label}, hover_data={"Count": True, "95% CI": ":.2f"},
                     )
-
-
+                    if _is_norm:
+                        fig_sel.add_hline(y=1, line_dash="dash", line_color="white", annotation_text="Pos Ctrl")
                     fig_sel.update_layout(height=600, xaxis_tickangle=-45)
                     st.plotly_chart(fig_sel, width='stretch', key="selectivity_main_plotly")
-                    
-                    # Data Table (Optional but helpful)
-                    with st.expander("📊 View Summary Data Table"):
-                        st.dataframe(df_sel, hide_index=True, width='stretch')
-                else:
-                    st.info(f"Selectivity summary CSV not found: {os.path.basename(sum_csv)}")
-                
-                # --- NEW: MASTER SELECTIVITY SUMMARY (ALL VARIANTS & METRICS) ---
-                if df_global_filtered is not None:
+
+                    # ---- SECOND GRAPH: Construct x Target (Manufacturer) ----
+                    df_by_src = _sel_summary(df_multi, ["Construct", "Target", "Source"])
+                    if AGG_MODULE_OK:
+                        df_by_src["Provenance"] = df_by_src["Source"].apply(aggregate_analysis.source_provenance)
+                    else:
+                        df_by_src["Provenance"] = "Unknown"
+                    df_by_src["Target / Source"] = df_by_src["Target"].astype(str) + " (" + df_by_src["Source"].astype(str) + ")"
+                    df_by_src = df_by_src.sort_values(["Construct", "Target", "Source"])
+                    st.markdown(f"### Selectivity by Target & Manufacturer — {y_label}")
+                    st.caption("Each target split by manufacturer/vendor, canonicalized via "
+                               "`Protein-Analysis/vendor_manifest.csv` (e.g. MMP9 (Sino, Purchased) "
+                               "vs MMP9 (Masoud, In-house)). Source is parsed from the sample name, "
+                               "falling back to the trial-folder token.")
+                    fig_src = px.bar(
+                        df_by_src, x="Construct", y="Mean", color="Target / Source",
+                        barmode="group", error_y="95% CI", template="plotly_dark",
+                        title=f"{y_label} Across Targets x Manufacturer (Error Bars: 95% CI)",
+                        labels={"Mean": y_label},
+                        hover_data={"Target": True, "Source": True, "Provenance": True, "Count": True, "95% CI": ":.2f"},
+                    )
+                    if _is_norm:
+                        fig_src.add_hline(y=1, line_dash="dash", line_color="white", annotation_text="Pos Ctrl")
+                    fig_src.update_layout(height=600, xaxis_tickangle=-45)
+                    st.plotly_chart(fig_src, width='stretch', key="selectivity_source_plotly")
+
+                    with st.expander("📊 View Summary Data Tables"):
+                        st.markdown("**By Target**")
+                        st.dataframe(df_by_target, hide_index=True, width='stretch')
+                        st.markdown("**By Target & Manufacturer**")
+                        st.dataframe(df_by_src.drop(columns=["Target / Source"]), hide_index=True, width='stretch')
+
+                    # ---- MASTER SELECTIVITY SUMMARY (ALL VARIANTS & METRICS) ----
                     st.divider()
-                    with st.expander("📜 Master Selectivity Summary (All Variants & Metrics)", expanded=False):
-                        st.markdown("Scanning all constructs tested against multiple targets for significant selectivity findings...")
+                    with st.expander("📜 Master Selectivity Summary — ANOVA + Tukey HSD (All Variants & Metrics)", expanded=False):
+                        st.markdown("For every multi-target construct, a one-way **ANOVA** compares its targets; "
+                                    "when significant (p < 0.05), the significant **Tukey HSD** target pairs are listed below.")
+                        st.caption(TUKEY_NOTE)
                         master_sel_findings = []
-                        
-                        # Identify constructs with multiple targets
-                        c_target_counts = df_global_filtered.groupby('Construct')['Target'].nunique()
-                        multi_target_vars = sorted(c_target_counts[c_target_counts > 1].index.tolist())
-                        
-                        # Define the raw metrics for selectivity summary
-                        sel_summary_metrics = {
-                            "Median Binding Ratio (Raw)": "Pos Med Ratio",
-                            "Median of Expr+ (Raw)": "Bind Med (Expr+)",
-                            "Binding Efficiency": "Binding Efficiency",
-                            "IWB Index (Raw)": "Intensity-Weighted Binding Index"
-                        }
-                        
-                        for construct in multi_target_vars:
-                            c_trials = df_global_filtered[df_global_filtered['Construct'] == construct]
-                            for m_label, m_col in sel_summary_metrics.items():
-                                if m_col not in c_trials.columns: continue
-                                
-                                p_val = run_anova_p(c_trials, 'Target', m_col)
+                        for _construct in sorted(_multi):
+                            c_trials = df_multi[df_multi["Construct"] == _construct]
+                            for _lbl, _info in SEL_METRICS.items():
+                                _col = _info["norm"] if (_is_norm and _info["norm"]) else _info["raw"]
+                                if _col not in c_trials.columns:
+                                    continue
+                                p_val = run_anova_p(c_trials, "Target", _col)
                                 if not np.isnan(p_val) and p_val < 0.05:
-                                    sig_targets = run_tukey_summary(c_trials, 'Target', m_col)
+                                    sig_targets = run_tukey_summary(c_trials, "Target", _col)
                                     if sig_targets is not None and not sig_targets.empty:
                                         for _, row in sig_targets.iterrows():
                                             master_sel_findings.append({
-                                                "Construct": construct,
-                                                "Metric": m_label,
+                                                "Construct": _construct,
+                                                "Metric": _lbl,
                                                 "Targets": f"{row['group1']} vs {row['group2']}",
                                                 "Diff": f"{row['meandiff']:.4f}",
-                                                "p-adj": f"{row['p-adj']:.4f}"
+                                                "p-adj": f"{row['p-adj']:.4f}",
                                             })
-                        
                         if master_sel_findings:
                             st.dataframe(pd.DataFrame(master_sel_findings), hide_index=True, width='stretch')
                         else:
-                            st.info("No significant selectivity findings discovered across any constructs/metrics.")
+                            st.info("No significant selectivity findings across any constructs/metrics.")
 
-                # Individual Comparisons (Driven by CSV Variants)
-                st.divider()
-                st.subheader("🔍 Individual Construct Selectivity")
+                    # ---- INDIVIDUAL CONSTRUCT ----
+                    st.divider()
+                    st.subheader("🔍 Individual Construct Selectivity")
+                    selected_variant = st.selectbox("Select Construct", sorted(_multi),
+                                                    key="selectivity_variant_sel")
 
-                
-                if df_sel is not None:
-                    available_variants = sorted(list(df_sel['Construct'].unique()))
-                    if available_variants:
-                        selected_variant = st.selectbox("Select Construct", available_variants, 
-                                                       key="selectivity_tab_variant_sel")
-                        
-                        # Filter data for this variant
-                        df_var = df_sel[df_sel['Construct'] == selected_variant].sort_values("Target")
-                        
-                        # Ensure 95% CI is available
-                        if '95% CI' not in df_var.columns:
-                            df_var['SEM'] = df_var.apply(lambda row: row['StdDev'] / (row['Count']**0.5) if row['Count'] > 1 else 0, axis=1)
-                            df_var['95% CI'] = df_var['SEM'] * 1.96
+                    df_var = df_by_target[df_by_target["Construct"] == selected_variant].sort_values("Target")
+                    fig_var = px.bar(
+                        df_var, x="Target", y="Mean", color="Target", error_y="95% CI",
+                        template="plotly_dark", title=f"Selectivity Profile: {selected_variant}",
+                        labels={"Mean": y_label}, hover_data={"Count": True, "95% CI": ":.2f"},
+                    )
+                    if _is_norm:
+                        fig_var.add_hline(y=1, line_dash="dash", line_color="white", annotation_text="Pos Ctrl")
+                    fig_var.update_layout(height=450, showlegend=False)
+                    st.plotly_chart(fig_var, width='stretch', key="selectivity_variant_plotly")
 
-                        # Create individual bar chart
-                        fig_var = px.bar(
-                            df_var,
-                            x="Target",
-                            y="Mean",
-                            color="Target",
-                            error_y="95% CI",
-                            template="plotly_dark",
-                            title=f"Selectivity Profile: {selected_variant} (Error Bars: 95% CI)",
-                            labels={"Mean": selected_metric},
-                            hover_data={"Count": True, "95% CI": ":.2f"}
+                    # Manufacturer breakdown for this construct
+                    df_var_src = df_by_src[df_by_src["Construct"] == selected_variant].sort_values(["Target", "Source"])
+                    if not df_var_src.empty and df_var_src["Source"].nunique() > 1:
+                        fig_var_src = px.bar(
+                            df_var_src, x="Target", y="Mean", color="Source", barmode="group",
+                            error_y="95% CI", template="plotly_dark",
+                            title=f"{selected_variant}: by Manufacturer",
+                            labels={"Mean": y_label}, hover_data={"Count": True, "95% CI": ":.2f"},
                         )
+                        if _is_norm:
+                            fig_var_src.add_hline(y=1, line_dash="dash", line_color="white", annotation_text="Pos Ctrl")
+                        fig_var_src.update_layout(height=450)
+                        st.plotly_chart(fig_var_src, width='stretch', key="selectivity_variant_src_plotly")
 
-
-                        fig_var.update_layout(height=450, showlegend=False)
-                        st.plotly_chart(fig_var, width='stretch', key="selectivity_variant_plotly")
-                        
-                        # DYNAMIC ANOVA: For this construct across targets
-                        if df_global_filtered is not None:
-                            # Use the metric mapping to get the correct column
-                            metric_map = {
-                                "Median_Ratio": "Pos Med Ratio",
-                                "Bind_Med_Expr_Positive": "Bind Med (Expr+)",
-                                "Binding_Efficiency": "Binding Efficiency",
-                                "IWB_Index": "Intensity-Weighted Binding Index"
-                            }
-                            raw_metric_col = metric_map.get(selected_metric, selected_metric)
-                            
-                            if raw_metric_col not in df_global_filtered.columns:
-                                st.warning(f"Metric '{raw_metric_col}' not found in raw trials. ANOVA skipped.")
-                                p_val_sel = np.nan
-                            else:
-                                # USE FILTERED DATA (QC Applied)
-                                c_trials = df_global_filtered[df_global_filtered['Construct'] == selected_variant]
-                                p_val_sel = run_anova_p(c_trials, 'Target', raw_metric_col)
-
-                            
-                            if not np.isnan(p_val_sel):
-                                 msg_sel = f"📊 **Selectivity ANOVA**: Comparing **{selected_variant}** across targets using **{raw_metric_col}**.  \n**p-value**: `{p_val_sel:.4e}` ({'Significant' if p_val_sel < 0.05 else 'Not Significant'})"
-                                 if p_val_sel < 0.05:
-                                     st.success(msg_sel)
-                                 else:
-                                     st.info(msg_sel)
-                                 
-                                 if p_val_sel < 0.05:
-
-                                     sig_targets = run_tukey_summary(c_trials, 'Target', raw_metric_col)
-                                     if sig_targets is not None and not sig_targets.empty:
-                                         with st.expander(f"🔍 Significant Target Differences for {selected_variant}"):
-                                             st.dataframe(sig_targets[['group1', 'group2', 'meandiff', 'p-adj']], hide_index=True, width='stretch')
-                            else:
-                                 st.caption("ANOVA could not be calculated for this variant across targets (requires multiple trials).")
-
+                    # ANOVA across targets for this construct
+                    c_trials = df_multi[df_multi["Construct"] == selected_variant]
+                    p_val_sel = run_anova_p(c_trials, "Target", metric_col)
+                    if not np.isnan(p_val_sel):
+                        msg_sel = (f"📊 **Selectivity ANOVA**: **{selected_variant}** across targets "
+                                   f"using **{y_label}**.  \n**p-value**: `{p_val_sel:.4e}` "
+                                   f"({'Significant' if p_val_sel < 0.05 else 'Not Significant'})")
+                        if p_val_sel < 0.05:
+                            st.success(msg_sel)
                         else:
-                             st.caption("Raw trial data missing; cannot calculate ANOVA.")
-
-
+                            st.info(msg_sel)
+                        if p_val_sel < 0.05:
+                            sig_targets = run_tukey_summary(c_trials, "Target", metric_col)
+                            if sig_targets is not None and not sig_targets.empty:
+                                with st.expander(f"🔍 Significant Target Differences for {selected_variant} (Tukey HSD)"):
+                                    st.caption(TUKEY_NOTE)
+                                    st.dataframe(sig_targets[['group1', 'group2', 'meandiff', 'p-adj']], hide_index=True, width='stretch')
                     else:
-                        st.info("No unique constructs found in the summary CSV.")
-                else:
-                    st.info("Summary CSV missing; cannot load individual variant list.")
-            else:
-                st.warning("No metric directories found in Selectivity_Analysis.")
-                with st.expander("🛠️ Debug Info"):
-                    st.write(f"Looking in: `{selectivity_dir}`")
-                    if fs and selectivity_dir.startswith(BUCKET):
-                         try:
-                             raw_items = fs.ls(selectivity_dir, detail=False)
-                             st.write(f"Raw items found ({len(raw_items)}):")
-                             st.json(raw_items)
-                         except Exception as e:
-                             st.write(f"Listing Error: {e}")
-        elif recalc_mode:
-            st.info("No recalculated trials available for selectivity. "
-                    "Check that Local/*_Analysis folders exist and are not all excluded.")
-        else:
-            st.info(f"Selectivity directory not found: {selectivity_dir}")
-            with st.expander("🛠️ Debug Info"):
-                 mode = st.session_state.get("data_mode", "Unknown")
-                 st.write(f"Mode: {mode}")
-                 st.write(f"Path searched: `{selectivity_dir}`")
-                 st.write(f"Bucket: `{BUCKET}`")
-                 st.write(f"FS Connected: `{fs is not None}`")
-
-
+                        st.caption("ANOVA could not be calculated for this construct across targets "
+                                   "(requires multiple trials).")
 
 
 else:

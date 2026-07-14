@@ -95,6 +95,108 @@ POS_CTRL_PATTERNS = ["POSITIVE CONTROL", "TIMP 3"]
 NEG_CTRL_PATTERNS = ["NC", "NEGATIVE CONTROL"]
 
 
+# ---- VENDOR / SOURCE MANIFEST ----
+# Maps the short source tokens that show up in sample names and trial-folder names
+# (e.g. 'Sino', 'AbC', 'Mas', 'F6') onto a canonical vendor + provenance. Edit
+# Protein-Analysis/vendor_manifest.csv to add or correct mappings.
+_VENDOR_MAP_CACHE = None
+
+
+def _vendor_manifest_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor_manifest.csv")
+
+
+def _norm_token(token):
+    """Normalize a raw source token to a lookup key: leading chunk, uppercased.
+    'Mas_G' -> 'MAS', 'Arly-FLAG' -> 'ARLY', 'Sino' -> 'SINO'."""
+    parts = re.split(r'[\s_\-()]+', str(token or '').strip())
+    return (parts[0] if parts and parts[0] else '').upper()
+
+
+def load_vendor_map(path=None, force=False):
+    """Load the token -> {Vendor, Provenance} manifest (cached)."""
+    global _VENDOR_MAP_CACHE
+    if _VENDOR_MAP_CACHE is not None and path is None and not force:
+        return _VENDOR_MAP_CACHE
+    mapping = {}
+    p = path or _vendor_manifest_path()
+    try:
+        with open(p, newline='') as f:
+            for row in csv.DictReader(f):
+                key = _norm_token(row.get('Token', ''))
+                vendor = (row.get('Vendor', '') or '').strip()
+                if key and vendor:
+                    mapping[key] = {
+                        'Vendor': vendor,
+                        'Provenance': (row.get('Provenance', '') or '').strip() or 'Unknown',
+                    }
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+    if path is None:
+        _VENDOR_MAP_CACHE = mapping
+    return mapping
+
+
+def canonical_vendor(token):
+    """Canonical vendor name for a raw token, or None if it is not a usable source
+    (empty or purely numeric). Unmapped tokens fall back to their leading chunk so
+    new vendors still surface (add them to vendor_manifest.csv to canonicalize)."""
+    key = _norm_token(token)
+    if not key or key.isdigit():
+        return None
+    vm = load_vendor_map()
+    if key in vm:
+        return vm[key]['Vendor']
+    parts = re.split(r'[\s_\-()]+', str(token).strip())
+    return parts[0] if parts and parts[0] else None
+
+
+def source_provenance(vendor):
+    """Return 'Purchased' / 'In-house' / 'Unknown' for a canonical vendor or token."""
+    vm = load_vendor_map()
+    key = _norm_token(vendor)
+    if key in vm:
+        return vm[key]['Provenance']
+    for entry in vm.values():
+        if entry['Vendor'].upper() == str(vendor or '').upper():
+            return entry['Provenance']
+    return 'Unknown'
+
+
+def derive_source(raw_name, folder_source=None):
+    """Best-effort canonical vendor for a sample.
+
+    Prefers the parenthetical in the sample name (e.g. 'AB 6-MMP9(Sino)' -> 'Sino'),
+    falling back to the folder-derived token, canonicalized via vendor_manifest.csv.
+    Purely numeric parentheticals (replicate labels like '(1)') are ignored; returns
+    'Unknown' when no usable source is found.
+    """
+    tok = None
+    m = re.search(r'\(([^)]+)\)', str(raw_name or ''))
+    if m:
+        s = m.group(1).strip()
+        if s and not s.isdigit():
+            tok = s
+    if tok is None and folder_source:
+        tok = str(folder_source).strip()
+    if not tok:
+        return "Unknown"
+    return canonical_vendor(tok) or "Unknown"
+
+
+def folder_source(dir_name):
+    """Extract the manufacturer/source token from a trial directory name, e.g.
+    'MMP9_20260701_Sino_T1_Renamed' -> 'Sino'. Returns None when absent."""
+    parts = str(dir_name).split("_")
+    if len(parts) >= 3:
+        cand = parts[2]
+        if cand and cand not in ("Renamed", "Analysis") and not re.match(r'^T\d+$', cand):
+            return cand
+    return None
+
+
 def get_local_dir(local_dir=None):
     """Resolve the ../Local data directory relative to this script unless given."""
     if local_dir is not None:
@@ -109,7 +211,7 @@ def get_analysis_dirs(local_dir=None):
     return sorted([d for d in glob.glob(os.path.join(local_dir, "*_Analysis")) if os.path.isdir(d)])
 
 
-def aggregate_records(records, target, date, pos_patterns=None, neg_patterns=None):
+def aggregate_records(records, target, date, pos_patterns=None, neg_patterns=None, source=None):
     """Aggregate a trial's per-file summary_stats records into aggregate rows.
 
     `records` is an iterable of dict rows matching the summary_stats.csv schema
@@ -200,6 +302,7 @@ def aggregate_records(records, target, date, pos_patterns=None, neg_patterns=Non
             rows.append({
                 'Target': row_target,
                 'Date': date,
+                'Source': derive_source(raw_name, source),
                 'Construct': standard_name,
                 'Construct Num': construct_num,
                 'Raw Name': raw_name,
@@ -230,7 +333,7 @@ def aggregate_records(records, target, date, pos_patterns=None, neg_patterns=Non
     return rows
 
 
-def _parse_summary_stats(csv_path, target, date, verbose=True):
+def _parse_summary_stats(csv_path, target, date, verbose=True, source=None):
     """Read one summary_stats.csv and aggregate it (CLI/Local path)."""
     try:
         with open(csv_path, 'r') as f:
@@ -239,7 +342,7 @@ def _parse_summary_stats(csv_path, target, date, verbose=True):
         if verbose:
             print(f"  Error reading {csv_path}: {e}", flush=True)
         return []
-    return aggregate_records(records, target, date)
+    return aggregate_records(records, target, date, source=source)
 
     return rows
 
@@ -302,7 +405,8 @@ def build_aggregate_data(exclude_dates=None, exclude_dirs=None, local_dir=None, 
                 print(f"  Skipping {dir_name}: summary_stats.csv not found.", flush=True)
             continue
 
-        all_data.extend(_parse_summary_stats(csv_path, target, date, verbose=verbose))
+        all_data.extend(_parse_summary_stats(csv_path, target, date, verbose=verbose,
+                                             source=folder_source(dir_name)))
 
     return all_data
 
@@ -534,7 +638,7 @@ def main():
 
     # Save aggregate CSV
     output_csv = os.path.join(output_dir, "aggregate_summary.csv")
-    fieldnames = ['Target', 'Date', 'Construct', 'Raw Name', 'Pos Med Ratio', 'Norm Median Ratio', 'Pos Mean Ratio', 'Norm Mean Ratio', 'Double+ %', 'Expr+ %', 'Gated Events', 'Bind Med (Expr+)', 'Norm Bind Med (Expr+)', 'Bind Mean (Expr+)', 'Norm Bind Mean (Expr+)', 'Expr Med (Bind+)', 'Norm Expr Med (Bind+)', 'Binding Efficiency', 'Intensity-Weighted Binding Index', 'Norm Intensity-Weighted Binding Index', 'Low Expression', 'Low Events', 'Trial Failed', 'Trial Failed Reason']
+    fieldnames = ['Target', 'Date', 'Source', 'Construct', 'Raw Name', 'Pos Med Ratio', 'Norm Median Ratio', 'Pos Mean Ratio', 'Norm Mean Ratio', 'Double+ %', 'Expr+ %', 'Gated Events', 'Bind Med (Expr+)', 'Norm Bind Med (Expr+)', 'Bind Mean (Expr+)', 'Norm Bind Mean (Expr+)', 'Expr Med (Bind+)', 'Norm Expr Med (Bind+)', 'Binding Efficiency', 'Intensity-Weighted Binding Index', 'Norm Intensity-Weighted Binding Index', 'Low Expression', 'Low Events', 'Trial Failed', 'Trial Failed Reason']
     with open(output_csv, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
