@@ -180,38 +180,48 @@ HADDOCK_CMD = os.environ.get("HADDOCK3_CMD", "haddock3")  # run inside the env
 FORCE = False   # set from --force; when False, existing best models are skipped
 
 
-def run_one(pair: str, cfg: Path, run_dir: Path, best_dir: Path) -> None:
+def run_one(pair: str, cfg: Path, run_dir: Path, best_dir: Path,
+            clean_runs: bool = False) -> None:
     log = cfg.with_suffix(".log")
     with open(log, "w") as lf:
         subprocess.run(f"{HADDOCK_CMD} {cfg}",
                        shell=True, stdout=lf, stderr=subprocess.STDOUT)
     import glob
-    import os
     capri = sorted(glob.glob(os.path.join(str(run_dir), "*_caprieval")))
-    if not capri:
-        print(f"  {pair}: no caprieval output"); return
-    ranking = Path(capri[-1]) / "capri_ss.tsv"
-    if not ranking.exists():
-        print(f"  {pair}: no capri_ss.tsv"); return
-    lines = ranking.read_text().splitlines()
-    if len(lines) < 2:
-        print(f"  {pair}: no models ranked"); return
-    best_rel = lines[1].split("\t")[0].strip()
-    best = (Path(capri[-1]) / best_rel).resolve()
-    if best.exists():
-        best_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy(best, best_dir / f"{pair}_HADDOCK.pdb")
-        print(f"  {pair}: best model -> {pair}_HADDOCK.pdb")
+    saved = False
+    if capri:
+        ranking = Path(capri[-1]) / "capri_ss.tsv"
+        lines = ranking.read_text().splitlines() if ranking.exists() else []
+        if len(lines) >= 2:
+            best = (Path(capri[-1]) / lines[1].split("\t")[0].strip()).resolve()
+            if best.exists():
+                best_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy(best, best_dir / f"{pair}_HADDOCK.pdb")
+                print(f"  {pair}: best model -> {pair}_HADDOCK.pdb")
+                saved = True
+    if not saved:
+        print(f"  {pair}: no ranked model produced")
+    # free the (large) intermediate run directory when working on scratch
+    if clean_runs and run_dir.exists():
+        shutil.rmtree(run_dir, ignore_errors=True)
 
 
 def run_track(construct_src, target_src, constructs, targets, want,
-              jobs, dry_run) -> tuple[int, int]:
-    """Prepare (and optionally run) every pair for one docking track."""
+              jobs, dry_run, work_root=None, clean_runs=False) -> tuple[int, int]:
+    """Prepare (and optionally run) every pair for one docking track.
+
+    Best models always go to OUT_DOCK/<track>/best_models (the D: output). When
+    `work_root` is given, the HADDOCK inputs + run directories live there instead
+    (use a fast, WSL-native, space-free path to avoid the slow /mnt/d 9P mount and
+    the space in the project path, which CNS/HADDOCK dislike)."""
     track = MR.dock_track(construct_src, target_src)
-    base = C.OUT_DOCK / track
-    input_dir, run_root, best_dir = base / "inputs", base / "runs", base / "best_models"
+    out_base = C.OUT_DOCK / track
+    work_base = (Path(work_root) / track) if work_root else out_base
+    input_dir, run_root = work_base / "inputs", work_base / "runs"
+    best_dir = out_base / "best_models"
     for d in (input_dir, run_root, best_dir):
         d.mkdir(parents=True, exist_ok=True)
+    base = out_base  # prep_manifest stays with the outputs on D:
 
     print(f"\n### TRACK {track}  (construct={construct_src}, target={target_src})")
     prep_rows = []
@@ -237,7 +247,7 @@ def run_track(construct_src, target_src, constructs, targets, want,
                 if run_dir.exists():
                     shutil.rmtree(run_dir)
                 print(f"  RUN  {pair} ...")
-                run_one(pair, cfg, run_dir, best_dir)
+                run_one(pair, cfg, run_dir, best_dir, clean_runs)
 
     with open(base / "prep_manifest.csv", "w", newline="") as fh:
         keys = sorted({k for r in prep_rows for k in r})
@@ -262,9 +272,15 @@ def main() -> None:
                     help="build inputs/restraints/configs only; do not run HADDOCK")
     ap.add_argument("--force", action="store_true",
                     help="re-dock pairs even if a best model already exists")
+    ap.add_argument("--work-root", default="",
+                    help="fast scratch dir for HADDOCK inputs/runs (e.g. a WSL-native "
+                         "space-free path); best models still go to the D: output")
+    ap.add_argument("--clean-runs", action="store_true",
+                    help="delete each pair's run directory after saving its best model")
     args = ap.parse_args()
     global FORCE
     FORCE = args.force
+    work_root = args.work_root or None
 
     reg = {r["id"]: r for r in MR.load_registry()}
     constructs = [r for r in reg.values() if r["kind"] == "construct"]
@@ -280,7 +296,8 @@ def main() -> None:
           f"{len(constructs)*len(targets)} pairs)")
     total_ready = total = 0
     for cs, ts in tracks:
-        r, n = run_track(cs, ts, constructs, targets, want, args.jobs, args.dry_run)
+        r, n = run_track(cs, ts, constructs, targets, want, args.jobs, args.dry_run,
+                         work_root, args.clean_runs)
         total_ready += r; total += n
 
     print(f"\n{total_ready}/{total} pairs prepared across {len(tracks)} track(s) "

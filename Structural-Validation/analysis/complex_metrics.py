@@ -60,23 +60,37 @@ def _min_ca_ca(chain_a, resids_a, chain_b, resids_b) -> float:
     return float(np.min(np.linalg.norm(ca[:, None] - cb[None], axis=2)))
 
 
-_REMARK = {
-    "haddock_score": r"HADDOCK score:\s*([-\d.]+)",
-    "vdw": r"Van der Waals energy:\s*([-\d.]+)",
-    "elec": r"Electrostatic energy:\s*([-\d.]+)",
-    "desolv": r"Desolvation energy:\s*([-\d.]+)",
-    "air": r"Restraints energy:\s*([-\d.]+)",
-    "haddock_bsa": r"Buried Surface Area:\s*([-\d.]+)",
-    "violations": r"[Vv]iolations.*:\s*([-\d.]+)",
-}
-
-
 def parse_haddock_remarks(path: Path) -> dict:
+    """Parse HADDOCK3 emref REMARK header.
+
+    Real format (HADDOCK3):
+        REMARK HADDOCK score: -84.66
+        REMARK   total,bonds,angles,improper,dihe,vdw,elec,air,cdih,...
+        REMARK energies: -47.2, 40.4, 193.5, 61.5, 1537.3, -66.8, -90.5, 110.1, ...
+    vdW/elec/AIR are positional (indices 5/6/7). BSA/desolv/violations are not in
+    the PDB header (BSA is computed independently as the `bsa` column), so they
+    stay blank unless a workflow injects them.
+    """
     text = path.read_text(errors="ignore")
-    out = {}
-    for key, pat in _REMARK.items():
-        m = re.search(pat, text)
-        out[key] = float(m.group(1)) if m else ""
+    out = {"haddock_score": "", "vdw": "", "elec": "", "desolv": "",
+           "air": "", "haddock_bsa": "", "violations": ""}
+    m = re.search(r"HADDOCK score:\s*([-\d.eE+]+)", text)
+    if m:
+        out["haddock_score"] = float(m.group(1))
+    m = re.search(r"energies:\s*([-\d.eE+,\s]+)", text)
+    if m:
+        vals = [v.strip() for v in m.group(1).split(",")]
+        try:
+            out["vdw"], out["elec"], out["air"] = (
+                float(vals[5]), float(vals[6]), float(vals[7]))
+        except (IndexError, ValueError):
+            pass
+    b = re.search(r"[Bb]uried [Ss]urface [Aa]rea:\s*([-\d.]+)", text)
+    if b:
+        out["haddock_bsa"] = float(b.group(1))
+    v = re.search(r"[Vv]iolations[^:]*:\s*([-\d.]+)", text)
+    if v:
+        out["violations"] = float(v.group(1))
     return out
 
 
