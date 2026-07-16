@@ -418,9 +418,12 @@ def recalc_global_aggregate(base_path, excluded_trials_tuple, expr_ch, bind_ch,
         tgt, date = m.group(1).upper(), m.group(2)
         if progress_cb:
             progress_cb(i, total, name)
+        # Per-folder channels from the manifest (His default); ensures FLAG-tagged
+        # folders are analyzed on their correct expression/binding channels.
+        f_expr, f_bind, _f_tag = aggregate_analysis.channels_for_folder(name)
         # Raw stats are cached on gating+channels; normalization + aggregation
         # are cheap and re-run each time so PC-keyword changes take effect.
-        recs = compute_folder_summary_records(folder, expr_ch, bind_ch, nc_pct, min_fsc, min_ssc, upper_pct, gate_frac)
+        recs = compute_folder_summary_records(folder, f_expr, f_bind, nc_pct, min_fsc, min_ssc, upper_pct, gate_frac)
         recs = _normalize_folder_records(recs, pos_patterns)
         if recs:
             rows.extend(aggregate_analysis.aggregate_records(
@@ -885,19 +888,27 @@ base_path = st.sidebar.text_input("Data Root (Path or Bucket)", value=default_pa
 # (Rest of the sidebar and processing logic...)
 # (Skipping identical lines to reach the TABS section correctly)
 with st.sidebar.expander("🧬 Channel Configuration", expanded=False):
-    tag_type = st.selectbox("Protein Tag Type", ["His (FITC/APC)", "FLAG (APC/PE)", "Custom"], index=0)
+    tag_type = st.selectbox(
+        "Protein Tag Type",
+        ["Auto (from manifest)", "His (FITC/APC)", "FLAG (APC/PE)", "Custom"],
+        index=0,
+        help="Auto uses channel_manifest.csv for the selected folder (default His "
+             "when the folder isn't listed). His/FLAG/Custom force the channels.",
+    )
 
     # Placeholders for custom channels if tag_type is Custom
     custom_expr_placeholder = st.empty()
     custom_bind_placeholder = st.empty()
 
+# Default channels for the manual tag choices. "Auto" is resolved from the channel
+# manifest once the selected folder is known (see below).
 if tag_type == "His (FITC/APC)":
     def_expr_ch = "FITC-A"
     def_bind_ch = "APC-A"
 elif tag_type == "FLAG (APC/PE)":
     def_expr_ch = "APC-A"
     def_bind_ch = "PE-A"
-else:
+else:  # Auto or Custom start from His defaults
     def_expr_ch = "FITC-A"
     def_bind_ch = "APC-A"
 
@@ -974,14 +985,26 @@ if selected_file:
     meta, df = load_fcs(selected_file)
     
     if df is not None:
+        # Auto mode: pull channels from channel_manifest.csv for the selected folder
+        # (defaults to His when the folder isn't listed). His/FLAG/Custom override.
+        _channel_source = tag_type
+        if tag_type == "Auto (from manifest)" and AGG_MODULE_OK:
+            _fold_name = os.path.basename(str(search_path).rstrip("/")) if search_path else ""
+            _m_expr, _m_bind, _m_tag = aggregate_analysis.channels_for_folder(_fold_name)
+            def_expr_ch, def_bind_ch = _m_expr, _m_bind
+            _in_manifest = _fold_name and aggregate_analysis._norm_folder_name(_fold_name) in aggregate_analysis.load_channel_map()
+            _channel_source = f"manifest → {_m_tag}" if _in_manifest else f"default → {_m_tag}"
+
         expr_col = def_expr_ch if def_expr_ch in df.columns else df.columns[0]
         bind_col = def_bind_ch if def_bind_ch in df.columns else df.columns[1]
-        
+
         if tag_type == "Custom":
             with custom_expr_placeholder:
                 expr_col = st.selectbox("Expression Channel (Y-Axis)", df.columns, index=list(df.columns).index(expr_col) if expr_col in df.columns else 0)
             with custom_bind_placeholder:
                 bind_col = st.selectbox("Binding Channel (X-Axis)", df.columns, index=list(df.columns).index(bind_col) if bind_col in df.columns else 1)
+
+        st.sidebar.caption(f"Channels — Expr: **{expr_col}** · Bind: **{bind_col}**  ({_channel_source})")
 
     with st.spinner("Analyzing folder controls..."):
         # CRITICAL: Pass the actual channels to ensure correct NC thresholds

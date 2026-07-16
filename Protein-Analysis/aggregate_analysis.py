@@ -248,6 +248,67 @@ def resolve_vendor(folder_name=None, raw_name=None):
     return derive_source(raw_name, folder_source(folder_name) if folder_name else None)
 
 
+# ---- CHANNEL / TAG MANIFEST ----
+# Which expression/binding channels a trial folder should be analyzed with.
+# Some targets use a FLAG tag (different detection channels) instead of His.
+# Defaults to His (FITC-A expression / APC-A binding) when a folder is not listed
+# in channel_manifest.csv. Edit that file to add or correct per-folder channels.
+DEFAULT_EXPR_CHANNEL = "FITC-A"
+DEFAULT_BIND_CHANNEL = "APC-A"
+DEFAULT_TAG = "His"
+# Fallback channels per tag when a manifest row gives a Tag but leaves channels blank.
+TAG_CHANNEL_DEFAULTS = {
+    "HIS": ("FITC-A", "APC-A"),
+    "FLAG": ("APC-A", "PE-A"),
+}
+_CHANNEL_MAP_CACHE = None
+
+
+def _channel_manifest_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "channel_manifest.csv")
+
+
+def load_channel_map(path=None, force=False):
+    """Load the folder -> {Tag, Expr, Bind} channel manifest (cached)."""
+    global _CHANNEL_MAP_CACHE
+    if _CHANNEL_MAP_CACHE is not None and path is None and not force:
+        return _CHANNEL_MAP_CACHE
+    mapping = {}
+    p = path or _channel_manifest_path()
+    try:
+        with open(p, newline='') as f:
+            for row in csv.DictReader(f):
+                folder = _norm_folder_name(row.get('Folder', ''))
+                if not folder:
+                    continue
+                tag = (row.get('Tag', '') or '').strip() or DEFAULT_TAG
+                expr = (row.get('Expr_Channel', '') or '').strip()
+                bind = (row.get('Bind_Channel', '') or '').strip()
+                # Fill missing channels from the tag default.
+                d_expr, d_bind = TAG_CHANNEL_DEFAULTS.get(tag.upper(), (DEFAULT_EXPR_CHANNEL, DEFAULT_BIND_CHANNEL))
+                mapping[folder] = {
+                    'Tag': tag,
+                    'Expr': expr or d_expr,
+                    'Bind': bind or d_bind,
+                }
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+    if path is None:
+        _CHANNEL_MAP_CACHE = mapping
+    return mapping
+
+
+def channels_for_folder(folder_name):
+    """Return (expr_channel, bind_channel, tag) for a trial folder, from
+    channel_manifest.csv. Falls back to His (FITC-A / APC-A) when not listed."""
+    entry = load_channel_map().get(_norm_folder_name(folder_name)) if folder_name else None
+    if entry:
+        return entry['Expr'], entry['Bind'], entry['Tag']
+    return DEFAULT_EXPR_CHANNEL, DEFAULT_BIND_CHANNEL, DEFAULT_TAG
+
+
 def folder_source(dir_name):
     """Extract the manufacturer/source token from a trial directory name, e.g.
     'MMP9_20260701_Sino_T1_Renamed' -> 'Sino'. Returns None when absent."""
