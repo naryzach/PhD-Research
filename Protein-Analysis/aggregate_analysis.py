@@ -938,160 +938,184 @@ def main():
     print(f"Saved cross-target summary to {output_cross_csv}", flush=True)
 
     # 3. Selectivity Analysis
-    # Pass the filtered global dataframe (valid trials only) and the selectivity metrics list (Raw)
+    # (a) Pooled across vendors (default): compare each construct across Targets.
     perform_selectivity_analysis(global_df_filtered, output_dir, selectivity_metrics, master_sig_log)
 
+    # (b) Un-pooled by vendor: each Target split by manufacturer/vendor
+    #     (e.g. MMP9 (Sino) vs MMP9 (Masoud)). Written to Selectivity_Analysis_ByVendor/.
+    master_sig_log_vendor = []
+    perform_selectivity_analysis(
+        global_df_filtered, output_dir, selectivity_metrics, master_sig_log_vendor,
+        group_field="Target / Source", group_label="Target / Vendor",
+        base_dir_name="Selectivity_Analysis_ByVendor",
+        master_log_name="significant_tukey_summary_by_vendor.txt")
 
-def perform_selectivity_analysis(df, output_dir, metrics, master_sig_log):
+
+def perform_selectivity_analysis(df, output_dir, metrics, master_sig_log,
+                                 group_field="Target", group_label="Target",
+                                 base_dir_name="Selectivity_Analysis",
+                                 master_log_name="significant_tukey_summary.txt"):
     """
-    Identifies constructs tested against multiple targets and generates
-
+    Identifies constructs tested against multiple groups and generates
     comparison plots and summaries for each specified metric.
+
+    group_field controls the comparison axis:
+      - "Target"          -> pooled across vendors (default).
+      - "Target / Source" -> un-pooled, each target split by manufacturer/vendor
+                             (e.g. MMP9 (Sino) vs MMP9 (Masoud) are separate groups).
+    When group_field == "Target / Source" and the column is absent it is derived
+    from the Target + Source columns.
     """
-    print("Performing selectivity analysis...", flush=True)
-    
-    base_selectivity_dir = os.path.join(output_dir, "Selectivity_Analysis")
+    print(f"Performing selectivity analysis (grouped by {group_field})...", flush=True)
+
+    df = df.copy()
+    if group_field == "Target / Source" and group_field not in df.columns:
+        src = df["Source"] if "Source" in df.columns else "Unknown"
+        df[group_field] = df["Target"].astype(str) + " (" + pd.Series(src, index=df.index).astype(str) + ")"
+
+    base_selectivity_dir = os.path.join(output_dir, base_dir_name)
     if not os.path.exists(base_selectivity_dir):
         os.makedirs(base_selectivity_dir)
         print(f"  Created selectivity directory: {base_selectivity_dir}", flush=True)
-        
+
     for metric_info in metrics:
         metric = metric_info["y_col"]
         folder = metric_info["folder"]
         label = metric_info.get("y_label", metric)
         title_prefix = metric_info.get("title_prefix", "Selectivity Analysis")
-        
+
         print(f"  Analyzing selectivity for: {metric}...", flush=True)
-        
+
         metric_dir = os.path.join(base_selectivity_dir, folder)
         if not os.path.exists(metric_dir):
             os.makedirs(metric_dir)
 
-        # 1. Aggregate data by Construct and Target
-        # Calculate Mean, StdDev, and Count for each (Construct, Target) pair
-        stats_df = df.groupby(['Construct', 'Target'])[metric].agg(['mean', 'std', 'count']).reset_index()
-        stats_df.columns = ['Construct', 'Target', 'Mean', 'StdDev', 'Count']
-        
+        # 1. Aggregate data by Construct and the grouping field
+        # Calculate Mean, StdDev, and Count for each (Construct, group) pair
+        stats_df = df.groupby(['Construct', group_field])[metric].agg(['mean', 'std', 'count']).reset_index()
+        stats_df.columns = ['Construct', group_field, 'Mean', 'StdDev', 'Count']
+
         # Calculate SEM and 95% CI
         stats_df['SEM'] = stats_df.apply(lambda row: row['StdDev'] / (row['Count']**0.5) if row['Count'] > 1 else 0, axis=1)
         stats_df['95% CI'] = stats_df['SEM'] * 1.96
 
-        
-        # Calculate ANOVA p-value for each construct across targets
+
+        # Calculate ANOVA p-value for each construct across groups
         anova_results = []
         for construct in stats_df['Construct'].unique():
             c_df = df[df['Construct'] == construct]
-            p = run_anova_p(c_df, 'Target', metric)
+            p = run_anova_p(c_df, group_field, metric)
             anova_results.append({'Construct': construct, 'ANOVA_p': p})
-        
+
         anova_df = pd.DataFrame(anova_results)
         stats_df = stats_df.merge(anova_df, on='Construct', how='left')
 
-        
-        # 2. Identify multi-target constructs
-        target_counts = stats_df.groupby('Construct')['Target'].count()
+
+        # 2. Identify constructs compared across multiple groups
+        target_counts = stats_df.groupby('Construct')[group_field].count()
         multi_target_constructs = target_counts[target_counts > 1].index.tolist()
-        
+
         if not multi_target_constructs:
-            print(f"    No constructs found with multiple targets for {metric} comparison.", flush=True)
+            print(f"    No constructs found with multiple {group_label} groups for {metric} comparison.", flush=True)
             continue
 
         # Filter stats for these constructs
         selectivity_df = stats_df[stats_df['Construct'].isin(multi_target_constructs)].copy()
-        
+
         # Save CSV
         csv_path = os.path.join(metric_dir, "selectivity_summary.csv")
         selectivity_df.to_csv(csv_path, index=False)
         print(f"    Saved selectivity summary to {csv_path}", flush=True)
-        
+
         # 3. Plotting - Grouped Bar Chart
         # Use pandas plotting for grouped bars
-        pivot_df = selectivity_df.pivot(index='Construct', columns='Target', values='Mean')
-        pivot_std = selectivity_df.pivot(index='Construct', columns='Target', values='StdDev').fillna(0)
-        
+        pivot_df = selectivity_df.pivot(index='Construct', columns=group_field, values='Mean')
+        pivot_std = selectivity_df.pivot(index='Construct', columns=group_field, values='StdDev').fillna(0)
+
         if not pivot_df.empty:
-            pivot_ci = selectivity_df.pivot(index='Construct', columns='Target', values='95% CI').fillna(0)
+            pivot_ci = selectivity_df.pivot(index='Construct', columns=group_field, values='95% CI').fillna(0)
             plt.figure(figsize=(16, 10))
             ax = pivot_df.plot(kind='bar', yerr=pivot_ci, figsize=(16, 10), capsize=4, edgecolor='black', alpha=0.8)
-            
-            plt.title(f"{title_prefix}: Across Targets (Mean ± 95% CI)", fontsize=22, pad=20)
+
+            plt.title(f"{title_prefix}: Across {group_label} (Mean ± 95% CI)", fontsize=22, pad=20)
 
             plt.xlabel("Construct", fontsize=18)
             plt.ylabel(f"Mean {label}", fontsize=18)
             plt.xticks(rotation=45, ha='right')
-            plt.legend(title="Target", fontsize=12, title_fontsize=14, loc='upper left', bbox_to_anchor=(1, 1))
+            plt.legend(title=group_label, fontsize=12, title_fontsize=14, loc='upper left', bbox_to_anchor=(1, 1))
             plt.grid(axis='y', linestyle='--', alpha=0.7)
             plt.tight_layout()
-            
+
             plot_path = os.path.join(metric_dir, "selectivity_comparison_all.png")
             plt.savefig(plot_path, dpi=300)
             plt.close()
             print(f"    Saved grouped comparison plot to {plot_path}", flush=True)
-        
-        # 4. Individual plots for each multi-target construct
+
+        # 4. Individual plots for each multi-group construct
         indiv_dir = os.path.join(metric_dir, "Individual_Comparisons")
         if not os.path.exists(indiv_dir):
             os.makedirs(indiv_dir)
-            
+
         for construct in multi_target_constructs:
             c_df = selectivity_df[selectivity_df['Construct'] == construct]
-            
+
             plt.figure(figsize=(10, 6))
-            # Use a consistent color map for targets
+            # Use a consistent color map for groups
             colors = plt.cm.viridis(np.linspace(0, 0.8, len(c_df)))
-            bars = plt.bar(c_df['Target'], c_df['Mean'], yerr=c_df['95% CI'], capsize=5, 
+            bars = plt.bar(c_df[group_field], c_df['Mean'], yerr=c_df['95% CI'], capsize=5,
                            color=colors, edgecolor='black', alpha=0.9)
-            
+
             plt.title(f"{title_prefix}: {construct}\n(Error Bars: 95% CI)", fontsize=20, pad=15)
 
-            plt.xlabel("Target", fontsize=16)
+            plt.xlabel(group_label, fontsize=16)
             plt.ylabel(f"Mean {label}", fontsize=16)
+            plt.xticks(rotation=45, ha='right')
             plt.grid(axis='y', linestyle='--', alpha=0.5)
-            
+
             # Add value labels on top of bars
             for bar in bars:
                 height = bar.get_height()
                 plt.text(bar.get_x() + bar.get_width()/2., height + (max(c_df['Mean']) * 0.02),
                         f'{height:.2f}', ha='center', va='bottom', fontsize=11, fontweight='bold')
-                
+
             plt.tight_layout()
             safe_name = construct.replace(" ", "_").replace("/", "-")
             plt.savefig(os.path.join(indiv_dir, f"selectivity_{safe_name}.png"), dpi=200)
             plt.close()
 
-            
+
             # SAVE ANOVA + Tukey HSD text output for this construct
             anova_dir = os.path.join(metric_dir, "ANOVA_Results")
             if not os.path.exists(anova_dir):
                 os.makedirs(anova_dir)
-            
+
             p_val = c_df['ANOVA_p'].iloc[0]
             anova_txt_path = os.path.join(anova_dir, f"anova_{safe_name}.txt")
             with open(anova_txt_path, 'w') as f:
                 f.write(f"Construct: {construct}\n")
                 f.write(f"Metric: {metric}\n")
-                f.write(f"ANOVA p-value (Across Targets): {p_val:.4e}\n")
-                
+                f.write(f"ANOVA p-value (Across {group_label}): {p_val:.4e}\n")
+
                 if not np.isnan(p_val) and p_val < 0.05:
-                    f.write("\nPost-hoc (Tukey HSD) Analysis across Targets:\n")
+                    f.write(f"\nPost-hoc (Tukey HSD) Analysis across {group_label}:\n")
                     # Get raw trials for this construct
                     c_trials = df[df['Construct'] == construct]
-                    tukey_res = run_tukey_posthoc(c_trials, 'Target', metric)
+                    tukey_res = run_tukey_posthoc(c_trials, group_field, metric)
                     if tukey_res:
                         f.write(str(tukey_res))
-                        sig_str = format_tukey_sig_only(tukey_res, f"Construct: {construct} | Metric: {metric}")
+                        sig_str = format_tukey_sig_only(tukey_res, f"Construct: {construct} | Metric: {metric} | By: {group_label}")
                         if sig_str:
                             master_sig_log.append(sig_str)
 
 
-        
+
         print(f"    Saved {len(multi_target_constructs)} individual comparison plots to {indiv_dir}", flush=True)
 
     # 4. Save Master Significant Results
-    master_log_path = os.path.join(output_dir, "significant_tukey_summary.txt")
+    master_log_path = os.path.join(output_dir, master_log_name)
     with open(master_log_path, 'w') as f:
         f.write("==================================================\n")
-        f.write("   MASTER SUMMARY OF SIGNIFICANT DIFFERENCES\n")
+        f.write(f"   MASTER SUMMARY OF SIGNIFICANT DIFFERENCES (by {group_label})\n")
         f.write("==================================================\n\n")
         if master_sig_log:
             f.write("\n".join(master_sig_log))

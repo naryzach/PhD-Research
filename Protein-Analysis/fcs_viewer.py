@@ -2088,6 +2088,47 @@ if selected_file and df is not None:
                         else:
                             st.info("No significant selectivity findings across any constructs/metrics.")
 
+                    # ---- MASTER SELECTIVITY SUMMARY (UN-POOLED BY VENDOR) ----
+                    with st.expander("📜 Master Selectivity Summary (Un-pooled by Vendor) — ANOVA + Tukey HSD (All Variants & Metrics)", expanded=False):
+                        _mode_txt2 = "Normalized (vs Pos Ctrl)" if _use_norm else "Raw"
+                        st.info(f"📐 Same as the summary above, but each target is **split by manufacturer/vendor** "
+                                f"(e.g. MMP9 (Sino) vs MMP9 (Masoud) are separate groups) instead of pooled. "
+                                f"Uses **{_mode_txt2}** values — follows the **Values** toggle (currently *{view_mode}*)."
+                                + ("  \n_(Binding Efficiency has no normalized form, so it always uses raw values.)_"
+                                   if _use_norm else ""))
+                        st.caption("⚠️ Vendor-separated groups are often **n=1** (a single trial per target×vendor); "
+                                   "ANOVA/Tukey need replicates, so findings here are sparser than the pooled summary "
+                                   "and appear only where a target×vendor prep was run more than once.")
+                        st.caption(TUKEY_NOTE)
+                        _df_vendor = df_multi.copy()
+                        _df_vendor["Target / Source"] = _df_vendor["Target"].astype(str) + " (" + _df_vendor["Source"].astype(str) + ")"
+                        master_vendor_findings = []
+                        for _construct in sorted(_multi):
+                            c_trials = _df_vendor[_df_vendor["Construct"] == _construct]
+                            if c_trials["Target / Source"].nunique() < 2:
+                                continue
+                            for _lbl, _info in SEL_METRICS.items():
+                                _col = _info["norm"] if (_is_norm and _info["norm"]) else _info["raw"]
+                                if _col not in c_trials.columns:
+                                    continue
+                                p_val = run_anova_p(c_trials, "Target / Source", _col)
+                                if not np.isnan(p_val) and p_val < 0.05:
+                                    sig_vend = run_tukey_summary(c_trials, "Target / Source", _col)
+                                    if sig_vend is not None and not sig_vend.empty:
+                                        for _, row in sig_vend.iterrows():
+                                            master_vendor_findings.append({
+                                                "Construct": _construct,
+                                                "Metric": _lbl,
+                                                "Target / Vendor Pair": f"{row['group1']} vs {row['group2']}",
+                                                "Diff": f"{row['meandiff']:.4f}",
+                                                "p-adj": f"{row['p-adj']:.4f}",
+                                            })
+                        if master_vendor_findings:
+                            st.dataframe(pd.DataFrame(master_vendor_findings), hide_index=True, width='stretch')
+                        else:
+                            st.info("No significant vendor-separated selectivity findings "
+                                    "(typically because each target×vendor prep is a single trial).")
+
                     # ---- INDIVIDUAL CONSTRUCT ----
                     st.divider()
                     st.subheader("🔍 Individual Construct Selectivity")
