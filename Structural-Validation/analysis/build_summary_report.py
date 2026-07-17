@@ -205,8 +205,46 @@ def _b64(png: Path) -> str:
     return base64.b64encode(png.read_bytes()).decode()
 
 
+def build_fcs_section() -> str:
+    """A 'does structure predict binding?' block folded in from the FCS correlation
+    layer (fcs_correlation.py). Returns '' if that analysis hasn't been run."""
+    corr_csv = C.OUT_ANALYSIS / "fcs" / "correlations_long.csv"
+    split_png = C.OUT_FIG / "fcs" / "readout_metric_split.png"
+    if not corr_csv.exists():
+        return ""
+    corr = pd.read_csv(corr_csv)
+    av = corr[corr.variant == "all_valid"].dropna(subset=["within_target_rho"]).copy()
+    if av.empty:
+        return ""
+    av["abs"] = av["within_target_rho"].abs()
+    headline = av.groupby("readout")["abs"].max().sort_values(ascending=False).index[0]
+    top = av[av.readout == headline].sort_values("abs", ascending=False).iloc[0]
+    best_auc = corr.dropna(subset=["auc_oriented"]).sort_values(
+        "auc_oriented", ascending=False)
+    auc_txt = (f" As a binder/non-binder classifier the best structural metric reaches "
+               f"oriented AUC ≈ {best_auc.iloc[0].auc_oriented:.2f} (prior best ≈ 0.68) — "
+               f"still not a usable ranker." if not best_auc.empty else "")
+    img = (f'<img src="data:image/png;base64,{_b64(split_png)}" '
+           f'alt="readout x metric split">' if split_png.exists() else "")
+    return f"""
+<h2>Does structure predict binding? (flow-cytometry correlation)</h2>
+<div class="key"><b>No usable predictor — and a caution.</b> Joining the metric
+battery to the aggregate FCS data (within-target Spearman), the signal is
+<b>readout-specific</b>: for intensity/ratio readouts, confidence &amp; native-
+similarity metrics <b>anti</b>-correlate with binding (best |ρ| ≈
+{top['abs']:.2f}, e.g. <code>{top.metric}</code>), driven by a promiscuous sticky
+construct that scores low in-silico; for efficiency/fraction readouts there is
+<b>no correlation</b>.{auc_txt} The negative slope is most likely a
+range-restriction / collider artifact (only folding, expressing constructs are
+observed) — it must <b>not</b> be used to reward low confidence in design.</div>
+{img}
+<p style="font-size:.85rem;color:#555">Full analysis, per-target breakdowns and the
+purchased-only sensitivity check: <code>reports/fcs_correlation_report.html</code>.</p>
+"""
+
+
 def build_html(tbl: pd.DataFrame, png: Path, ext_png: Path, contact_png: Path,
-               cx, out_html):
+               cx, out_html, fcs_html: str = ""):
     n_dock = (cx.source.str.startswith("HADDOCK") & (cx.status == "ok")).sum()
 
     def cell(v, fmt="{:.2f}"):
@@ -288,7 +326,7 @@ edge and each target's catalytic zinc motif, for the best construct per target
 matrix, generalised across sources; raw matrices for every pair are in
 <code>analysis/contact_matrices/</code>.</p>
 {img(contact_png, "contact matrix gallery")}
-
+{fcs_html}
 <h2>What this supports</h2>
 <ul>
 <li><b>Use co-folds for binding-mode / interface questions.</b> AF3 and ESMFold2
@@ -326,8 +364,9 @@ def main():
     make_figure(cx, mono, agree, png)
     make_extended_figure(cx, ext_png)
     contact_png = C.OUT_FIG / "contact_matrices" / "contact_matrix_gallery_AF3_cofold.png"
+    fcs_html = build_fcs_section()
     html = C.OUT_REPORT / "summary_report.html"
-    build_html(tbl, png, ext_png, contact_png, cx, html)
+    build_html(tbl, png, ext_png, contact_png, cx, html, fcs_html)
     print("Summary table:\n", tbl.to_string(index=False))
     print(f"\nFigure   -> {png.relative_to(C.REPO_ROOT)}")
     print(f"Extended -> {ext_png.relative_to(C.REPO_ROOT)}")

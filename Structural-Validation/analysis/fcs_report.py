@@ -191,6 +191,12 @@ def build_figures_and_report(binding, merged, merged_p, corr, corr_p, headline):
         if "TIMP3_WT" in tb.index else None
     strength = ("moderate" if max_rho >= 0.5 else "weak" if max_rho >= 0.35 else "no")
 
+    # binder/non-binder AUC (within-target median split) — lines up with prior ~0.68
+    auc_tbl = (corr.dropna(subset=["auc_oriented"])
+               .sort_values("auc_oriented", ascending=False))
+    best_auc_row = auc_tbl.iloc[0] if len(auc_tbl) else None
+    PRIOR_AUC = 0.68
+
     html = f"""<!doctype html><meta charset=utf-8>
 <title>TIMP3 Structure → Binding Correlation</title>
 <style>
@@ -227,7 +233,8 @@ efficiency / fraction-of-cells readouts ({', '.join(flat) or '—'}) show
 <b>essentially no correlation</b> — reproducing the lab's prior "no predictive
 power" result. So: structure does not tell you <i>what fraction</i> of cells bind,
 and mildly <i>anti</i>-predicts <i>how much</i> signal the stickiest construct
-throws.</div>
+throws — though whether that anti-prediction is causal is doubtful (see the
+collider caveat below).</div>
 
 <h2>Which readout is most predictable, and by what?</h2>
 <p class="sub">Only some readouts respond at all — and the ones that do, respond
@@ -243,6 +250,32 @@ over {int(top.n_targets)} targets ({int(top.n_targets_sig)} with p&lt;0.10). Pan
 shows why pooling misleads: colored by target, any trend lives within a target, not
 across the cloud.</p>
 <img src="data:image/png;base64,{bp_b64}" alt="best predictor detail">
+
+<div class="caveat"><b>Is the negative signal causal? Probably not — read it as a
+warning, not a design rule.</b> The lab's exact-sequence calibration
+(<code>Generation/calibrated_scoring.py</code>) saw the same negative ESMFold2↔binding
+slope and attributed it to <b>range restriction / collider bias</b>: we only ever
+observe constructs that were made and that fold and express, so the non-folding
+non-binders that would anchor the other end are missing. The mechanistic driver
+here ({top_binder} stickiness) is real, but "low confidence → binds more" should
+<b>not</b> be turned into a design objective — rewarding low ipTM/pDockQ on new
+designs would be selecting on a spurious in-sample slope. This is consistent with
+the existing pipeline decision to use ESMFold2 only as a foldability <i>filter</i>,
+never a directional ranker.</div>
+
+<h2>As a binder / non-binder classifier (vs the prior AUC ≈ 0.68)</h2>
+<p class="sub">Binder = binding above the per-target median; AUC pooled across targets.
+Reported direction-agnostic (anti-predictors flipped onto the 0.5–1 scale), so it is
+directly comparable to the calibration's best single-metric AUC ≈ {PRIOR_AUC:.2f}.</p>
+{f'''<p>Best structural classifier: <b>{best_auc_row.metric}</b>
+({SRC_LABEL.get(best_auc_row.source, best_auc_row.source)}) on
+<b>{best_auc_row.readout}</b> — oriented AUC = <b>{best_auc_row.auc_oriented:.2f}</b>
+(raw AUC {best_auc_row.auc:.2f}, {'anti-directional' if best_auc_row.auc < 0.5 else 'positive'},
+n={int(best_auc_row.auc_n)}).
+That is {'essentially the same weak ballpark as' if best_auc_row.auc_oriented <= PRIOR_AUC + 0.08 else 'somewhat above'}
+the prior best (~{PRIOR_AUC:.2f}) — and the strongest ones are anti-directional
+confidence metrics, so the richer battery still yields <b>no usable binder ranker</b>,
+only the same weak signal pointing the wrong way.</p>''' if best_auc_row is not None else ''}
 
 <h2>Top predictors — within-target vs pooled</h2>
 <table><tr><th>Source</th><th>Metric</th><th>within-target ρ</th><th>n targets</th>

@@ -109,8 +109,39 @@ def _spear(x, y):
     return float(rho), float(p), int(m.sum())
 
 
+def _auc(scores, labels):
+    """AUROC of `scores` (metric) discriminating binder (label 1) from non-binder,
+    via the Mann-Whitney U rank statistic. AUC>0.5: higher metric -> binder;
+    <0.5: metric anti-predicts. NaN if a class is empty."""
+    from scipy.stats import rankdata
+    s = np.asarray(scores, float)
+    y = np.asarray(labels, int)
+    m = np.isfinite(s)
+    s, y = s[m], y[m]
+    n1, n0 = int((y == 1).sum()), int((y == 0).sum())
+    if n1 == 0 or n0 == 0 or len(s) < MIN_WITHIN:
+        return np.nan, n1 + n0
+    r = rankdata(s)
+    return float((r[y == 1].sum() - n1 * (n1 + 1) / 2) / (n1 * n0)), n1 + n0
+
+
+def _within_target_auc(sub, metric, readout):
+    """Binder = binding above the per-target median; pool across targets, one AUC.
+    This is the binary-classification framing that lines up with the lab's prior
+    calibration (best in-silico AUC ~0.68)."""
+    scores, labels = [], []
+    for _, g in sub.groupby("target_id"):
+        yb = pd.to_numeric(g[readout], errors="coerce")
+        med = yb.median()
+        for xv, yv in zip(pd.to_numeric(g[metric], errors="coerce"), yb):
+            if np.isfinite(xv) and np.isfinite(yv):
+                scores.append(xv)
+                labels.append(1 if yv > med else 0)
+    return _auc(scores, labels)
+
+
 def correlate(merged: pd.DataFrame) -> pd.DataFrame:
-    """Long table: source × readout × metric × {within-target pooled, pooled-all}."""
+    """Long table: source × readout × metric × {within-target ρ, pooled ρ, AUC}."""
     rows = []
     for source in SOURCE_ORDER:
         sub = merged[merged.source == source]
@@ -130,12 +161,20 @@ def correlate(merged: pd.DataFrame) -> pd.DataFrame:
                 n_sig = int(np.sum(np.array(tps) < 0.10)) if trhos else 0
                 # pooled across all pairs
                 prho, pp, pn = _spear(sub[metric], sub[readout])
+                # binder/non-binder AUC (within-target median split), vs prior calibration.
+                # auc is signed (dir of the metric); auc_oriented flips anti-predictors
+                # to the 0.5-1 scale so it is directly comparable to the prior best ~0.68.
+                auc, n_auc = _within_target_auc(sub, metric, readout)
+                auc_oriented = max(auc, 1 - auc) if auc == auc else np.nan
                 rows.append({
                     "source": source, "readout": readout, "metric": metric,
                     "within_target_rho": round(within, 3) if within == within else np.nan,
                     "n_targets": len(trhos), "n_targets_sig": n_sig,
                     "pooled_rho": round(prho, 3) if prho == prho else np.nan,
                     "pooled_p": round(pp, 4) if pp == pp else np.nan, "pooled_n": pn,
+                    "auc": round(auc, 3) if auc == auc else np.nan,
+                    "auc_oriented": round(auc_oriented, 3) if auc_oriented == auc_oriented else np.nan,
+                    "auc_n": n_auc,
                 })
     return pd.DataFrame(rows)
 
@@ -187,12 +226,20 @@ def main():
     from fcs_report import build_figures_and_report  # noqa: E402
     build_figures_and_report(binding, merged, merged_p, corr, corr_p, headline)
 
+    # best binder/non-binder AUC across all readouts (direction-agnostic, vs prior ~0.68)
+    best_auc = (allcorr[allcorr.variant == "all_valid"]
+                .dropna(subset=["auc_oriented"])
+                .sort_values("auc_oriented", ascending=False))
+
     print(f"FCS binding pairs: {len(binding)} (all) / {len(binding_p)} (purchased)")
     print(f"Merged rows: {len(merged)}  |  headline readout: {headline!r}")
     print("\nTop 12 predictors (within-target rho vs headline readout):")
     cols = ["source", "metric", "within_target_rho", "n_targets", "n_targets_sig",
-            "pooled_rho", "pooled_p"]
+            "pooled_rho", "pooled_p", "auc"]
     print(best[cols].head(12).to_string(index=False))
+    print("\nBest binder/non-binder AUC, direction-agnostic (any readout; prior best ~0.68):")
+    acols = ["source", "metric", "readout", "auc", "auc_oriented", "auc_n"]
+    print(best_auc[acols].head(8).to_string(index=False))
     print(f"\n-> {OUT_FCS.relative_to(C.REPO_ROOT)}")
 
 
