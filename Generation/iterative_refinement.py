@@ -79,6 +79,13 @@ from mpnn.inference_engines.mpnn import MPNNInferenceEngine
 from rf3.inference_engines.rf3 import RF3InferenceEngine
 from rf3.utils.inference import InferenceInput
 
+# Calibrated in-silico -> binding priors (2026-07 exact-sequence, purchased-only
+# calibration; see calibrated_scoring.py). Lives alongside this file in
+# Generation/; make it importable whether run as a script or imported by
+# specificity_refinement.
+sys.path.insert(0, str(Path(__file__).parent.resolve()))
+import calibrated_scoring as cs
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -179,14 +186,24 @@ N_CONTACTS_NORM        = 60.0  # n_contacts above this saturates to 1.0
 #
 # Each formula returns a value in [0, 1].  The RF3-only fallback is capped at
 # RF3_COMPOSITE_CEILING so any model-scored entry outranks an unvalidated one.
-COMPOSITE_AF3 = {        # AF3-validated entries: full trust
+# NOTE (2026-07 recalibration): the AF3 and ESMFold2 composites below are
+# SUPERSEDED by calibrated_scoring.py and kept only as a legacy fallback for
+# entries missing the calibrated inputs. calc_composite now routes:
+#   AF3      -> cs.af3_binding_prior      (binder pLDDT + ApTM + interface size +
+#                                          interface pLDDT + small ipTM; BpTM/loop-PAE
+#                                          dropped — they don't predict binding)
+#   ESMFold2 -> cs.esmfold2_stage_score   (foldability FLOOR + interface contact
+#                                          density; esm_iptm NOT rewarded, to avoid
+#                                          the negative-correlation selection bias)
+# See calibrated_scoring.py for the evidence and the selection-bias rationale.
+COMPOSITE_AF3 = {        # legacy fallback only (used if calibrated terms absent)
     "iptm":  0.45,
     "plddt": 0.25,
     "ptm":   0.15,
     "rmsd":  0.05,
     "pae":   0.10,
 }
-COMPOSITE_ESMFOLD2 = {   # ESMFold2-scored: primary local ranker (equal ipTM + pLDDT)
+COMPOSITE_ESMFOLD2 = {   # legacy fallback only (superseded by cs.esmfold2_stage_score)
     "iptm":  0.50,
     "plddt": 0.50,
 }
@@ -416,6 +433,26 @@ def count_interface_contacts(atom_array, chain_a: str = "A", chain_b: str = "B",
     return int(len(np.unique(arr_a.res_id[contact_mask])))
 
 
+def _esm_iface_feats(cif_path) -> dict:
+    """
+    Interface geometry from an ESMFold2 predicted-complex CIF, keyed with the
+    esm_iface_* names calc_composite reads. Returns {} if the CIF is missing/
+    unreadable (composite then falls back to the pLDDT foldability floor only).
+    Uses the SAME extractor as the 2026-07 calibration (calibrated_scoring).
+    """
+    if not cif_path or not Path(cif_path).exists():
+        return {}
+    try:
+        f = cs.interface_features_from_cif(Path(cif_path).read_text(),
+                                           binder_chain=DESIGN_BINDER_CHAIN,
+                                           target_chain=DESIGN_TARGET_CHAIN)
+    except Exception:
+        return {}
+    return {"esm_iface_n_iface_res":     f.get("n_iface_res"),
+            "esm_iface_contact_density": f.get("contact_density"),
+            "esm_iface_iface_plddt":     f.get("iface_plddt")}
+
+
 def _safe(x, default=0.0):
     """Coerce to float, treating None / NaN / missing as `default`."""
     try:
@@ -465,9 +502,22 @@ def calc_composite(entry: dict) -> float:
     """
     src = entry.get("source", "RF3")
 
-    # ── AF3-validated ──
+    # ── AF3-validated → calibrated binding prior ──
+    # Positive foldability/interface terms only (binder pLDDT, ApTM, interface
+    # size + pLDDT, small ipTM). BpTM and loop-PAE are NOT used (calibration:
+    # BpTM is target-determined & didn't replicate; loop-PAE ~0). Falls back to
+    # the legacy blend only if no calibrated term is present.
     if src == "AF3":
-        w = COMPOSITE_AF3
+        prior = cs.af3_binding_prior({
+            "af3_plddt":               _normalize_plddt(entry.get("plddt")),  # binder-chain pLDDT (0-100)
+            "af3_aptm":                entry.get("af3_aptm"),
+            "af3_iptm":                entry.get("iptm"),
+            "af3_iface_n_iface_res":   entry.get("af3_iface_n_iface_res"),
+            "af3_iface_iface_plddt":   entry.get("af3_iface_iface_plddt"),
+        })
+        if prior == prior:   # not NaN
+            return prior
+        w = COMPOSITE_AF3    # legacy fallback
         return (
             w["iptm"]  * _safe(entry.get("iptm"))
             + w["plddt"] * (_normalize_plddt(entry.get("plddt")) / 100.0)
@@ -476,13 +526,17 @@ def calc_composite(entry: dict) -> float:
             + w["pae"]   * _pae_score(entry.get("interface_pae"))
         )
 
-    # ── ESMFold2-scored (primary local ranker: equal ipTM + binder pLDDT) ──
-    if entry.get("esm_iptm") is not None:
-        w = COMPOSITE_ESMFOLD2
-        return (
-            w["iptm"]  * _safe(entry.get("esm_iptm"))
-            + w["plddt"] * (_normalize_plddt(entry.get("esm_plddt")) / 100.0)
-        )
+    # ── ESMFold2-scored → foldability FILTER + contact-density prior ──
+    # esm_iptm/esm_lplddt are NOT rewarded: their negative in-sample correlation
+    # with binding is a selection-bias artifact (we never observe the non-folders
+    # that would score even lower). We gate on esm_plddt (binding-neutral) and rank
+    # by interface contact density (the one positive, mechanistic ESMFold2 feature).
+    if entry.get("esm_iptm") is not None or entry.get("esm_plddt") is not None:
+        return cs.esmfold2_stage_score({
+            "esm_plddt":                 _normalize_plddt(entry.get("esm_plddt")),
+            "esm_iface_contact_density": entry.get("esm_iface_contact_density"),
+            "esm_iface_n_iface_res":     entry.get("esm_iface_n_iface_res"),
+        })
 
     # ── Boltz-2-scored ──
     if entry.get("boltz_iptm") is not None:
@@ -907,6 +961,10 @@ class IterativeRefiner:
                 continue
             c.update({**m, "source": "ESMFold2",
                       "promising": _safe(m["esm_iptm"]) >= IPTM_PROMISING})
+            # Interface geometry from the ESMFold2 predicted complex (the one
+            # positive ESMFold2 binding-ish feature is contact density). Free when
+            # SAVE_ESMFOLD2_STRUCTURES wrote the CIF; skipped otherwise.
+            c.update(_esm_iface_feats(m.get("esm_cif")))
             c["composite_score"] = calc_composite(c)
             n_done += 1
 
@@ -1590,6 +1648,21 @@ class IterativeRefiner:
                     iptm  = float(sc.get("iptm", 0.0))
                     ptm   = float(sc.get("ptm",  0.0))
                     has_clash = float(sc.get("has_clash", 0.0))
+                    # ApTM = binder (chain A) pTM — a calibrated positive binding
+                    # prior. chain_ptm = [ApTM, BpTM]; we take [0] and DROP BpTM.
+                    cp    = sc.get("chain_ptm") or []
+                    aptm  = float(cp[0]) if len(cp) > 0 else float("nan")
+
+                    # Interface geometry from the AF3 complex CIF (same extractor
+                    # as calibration): interface size + interface-residue pLDDT are
+                    # calibrated positive priors.
+                    af3_iface = {}
+                    cif_name = prefix + "_model_0.cif"
+                    if cif_name in all_names:
+                        try:
+                            af3_iface = cs.interface_features_from_cif(zf.read(cif_name).decode())
+                        except Exception as exc:
+                            logger.debug(f"AF3 interface feats failed for {job_name}: {exc}")
 
                     plddt     = 0.0
                     iface_pae = float("nan")
@@ -1634,6 +1707,11 @@ class IterativeRefiner:
                         "interface_pae": iface_pae,
                         "rmsd_to_rfd3":  float("nan"),
                         "has_clash":     has_clash,
+                        # calibrated positive priors (BpTM intentionally omitted)
+                        "af3_aptm":                  aptm,
+                        "af3_iface_n_iface_res":     af3_iface.get("n_iface_res"),
+                        "af3_iface_iface_plddt":     af3_iface.get("iface_plddt"),
+                        "af3_iface_contact_density": af3_iface.get("contact_density"),
                         "source":        "AF3",
                         **loops,
                     }

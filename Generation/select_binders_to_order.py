@@ -47,6 +47,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+# Calibrated in-silico -> binding priors (2026-07 exact-sequence, purchased-only
+# calibration). calibrated_scoring.py sits alongside this file in Generation/.
+sys.path.insert(0, str(Path(__file__).parent.resolve()))
+import calibrated_scoring as cs
+
 
 def _seq_to_pipeline_id() -> dict:
     """Map binder sequence → the pipeline's real design_id (e.g. MMP9_it12_d3_s0)."""
@@ -102,9 +107,12 @@ IPTM_MIN  = 0.50   # minimum interface confidence to be "likely to bind"
 # Negative-control band: passes fold gate but binds weakly
 NEG_IPTM_LO, NEG_IPTM_HI = 0.30, 0.50
 
-# Composite weights for "best" ranking (interface + loop confidence dominate).
+# LEGACY composite weights (now computed as `composite_legacy` for comparison
+# only). Ranking uses the calibrated `binding_prior` from calibrated_scoring.py
+# (2026-07 recalibration): binder pLDDT + ApTM + interface size/pLDDT + small
+# ipTM; BpTM and loop-PAE were dropped because they don't predict binding.
 W = {"iptm": 0.45, "lplddt": 0.30, "loop_pae": 0.15, "ptm": 0.10}
-PAE_CLIP = 30.0    # Å; loop_PAE normalized against this
+PAE_CLIP = 30.0    # Å; loop_PAE normalized against this (for composite_legacy)
 
 
 # ── Structure / metric helpers ────────────────────────────────────────────────
@@ -220,12 +228,14 @@ def parse_af3_zip(zip_path: str) -> list:
                 scd = json.loads(zf.read(sc))
                 fdd = json.loads(zf.read(fd))
                 m = re.search(r"(?:fold_)?refine_it\d+_([A-Za-z0-9]+)_\d+", jd.get("name", ""), re.I)
+                cp = scd.get("chain_ptm") or []
                 recs.append({
                     "name": jd.get("name", ""),
                     "target": (m.group(1).upper() if m else "?"),
                     "binder_seq": binder_seq,
                     "iptm": float(scd.get("iptm", 0.0)),
                     "ptm": float(scd.get("ptm", 0.0)),
+                    "aptm": float(cp[0]) if len(cp) > 0 else float("nan"),  # binder-chain pTM (drop BpTM)
                     "pae": np.array(fdd["pae"]) if "pae" in fdd else None,
                     "token_chain_ids": fdd.get("token_chain_ids", []),
                     "token_res_ids": fdd.get("token_res_ids", []),
@@ -322,12 +332,22 @@ def build_table() -> pd.DataFrame:
     seq2id = _seq_to_pipeline_id()
     rows = []
     for rec in af3:
+        # Calibrated positive priors: binder-chain pLDDT, ApTM, interface geometry.
+        chainA_plddt = per_residue_plddt(rec["atoms"], "A")
+        af3_plddt = float(np.mean(list(chainA_plddt.values()))) if chainA_plddt else float("nan")
+        iface = cs.interface_features_from_atoms(rec["atoms"])
         rows.append({
             "binder_seq": rec["binder_seq"], "target": rec["target"], "source": "AF3",
             "iptm": rec["iptm"], "ptm": rec["ptm"],
             "lplddt": loop_plddt(rec["atoms"], rec["binder_seq"]),
             "loop_pae": loop_interface_pae(rec),
             "bb_rmsd": framework_rmsd_to_ref(rec["frame"], ref_frame),
+            # calibrated-prior inputs (BpTM intentionally omitted — debunked)
+            "af3_plddt": af3_plddt,
+            "af3_aptm": rec.get("aptm"),
+            "af3_iface_n_iface_res": iface.get("n_iface_res"),
+            "af3_iface_iface_plddt": iface.get("iface_plddt"),
+            "af3_iface_contact_density": iface.get("contact_density"),
             "af3_zip": rec["af3_zip"], "cif_member": rec["cif_member"],
         })
 
@@ -348,6 +368,9 @@ def build_table() -> pd.DataFrame:
                 "lplddt": pd.to_numeric(r.get("esm_plddt"), errors="coerce"),  # whole-binder pLDDT (no per-res parse)
                 "loop_pae": float("nan"),
                 "bb_rmsd": float("nan"),
+                # interface geometry (present in round_summary.csv from the retuned pipeline)
+                "esm_iface_contact_density": pd.to_numeric(r.get("esm_iface_contact_density"), errors="coerce"),
+                "esm_iface_n_iface_res": pd.to_numeric(r.get("esm_iface_n_iface_res"), errors="coerce"),
             })
 
     df = pd.DataFrame(rows)
@@ -358,10 +381,33 @@ def build_table() -> pd.DataFrame:
     df["design_id"] = [seq2id.get(s, _stable_id(t, s))
                        for t, s in zip(df["target"], df["binder_seq"])]
     df["pae_score"] = (1 - df["loop_pae"] / PAE_CLIP).clip(lower=0)
-    df["composite"] = (W["iptm"] * df["iptm"].fillna(0)
-                       + W["lplddt"] * (df["lplddt"].fillna(0) / 100.0)
-                       + W["loop_pae"] * df["pae_score"].fillna(0)
-                       + W["ptm"] * df["ptm"].fillna(0))
+    # Legacy blend kept for transparency/comparison only.
+    df["composite_legacy"] = (W["iptm"] * df["iptm"].fillna(0)
+                              + W["lplddt"] * (df["lplddt"].fillna(0) / 100.0)
+                              + W["loop_pae"] * df["pae_score"].fillna(0)
+                              + W["ptm"] * df["ptm"].fillna(0))
+
+    # Calibrated binding prior (2026-07). AF3 rows -> positive foldability/interface
+    # terms (binder pLDDT + ApTM + interface size + interface pLDDT + small ipTM;
+    # BpTM/loop-PAE dropped). ESMFold2-only rows -> foldability floor + interface
+    # contact density (esm_iptm never rewarded — selection-bias guard). This is
+    # what ranking now uses.
+    def _row_prior(r):
+        if r.get("source") == "AF3":
+            return cs.af3_binding_prior({
+                "af3_plddt": r.get("af3_plddt"),
+                "af3_aptm": r.get("af3_aptm"),
+                "af3_iptm": r.get("iptm"),
+                "af3_iface_n_iface_res": r.get("af3_iface_n_iface_res"),
+                "af3_iface_iface_plddt": r.get("af3_iface_iface_plddt"),
+            })
+        return cs.esmfold2_stage_score({
+            "esm_plddt": r.get("lplddt"),   # ESM fallback stored whole-binder pLDDT here
+            "esm_iface_contact_density": r.get("esm_iface_contact_density"),
+            "esm_iface_n_iface_res": r.get("esm_iface_n_iface_res"),
+        })
+    df["binding_prior"] = df.apply(_row_prior, axis=1)
+    df["composite"] = df["binding_prior"].fillna(0.0)
     # Fold gate: pTM ok AND backbone preserved. ESMFold2 (bb_rmsd=NaN) can't pass
     # the backbone check, so it is gated out of "orderable" by default — AF3 only.
     df["fold_ok"] = (df["ptm"].fillna(0) >= PTM_MIN) & (df["bb_rmsd"] <= RMSD_MAX)

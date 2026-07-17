@@ -64,9 +64,11 @@ from iterative_refinement import (
     ESMFOLD2_ENABLE,
     pdb_chain_seq,
     extract_loops,
+    _esm_iface_feats,
     _safe,
     _normalize_plddt,
 )
+import calibrated_scoring as cs  # calibrated priors + interface geometry (2026-07)
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -88,29 +90,47 @@ SPECIFICITY_PAIRS = {
     "ADAM": {"on_target": "ADAM10", "off_target": "ADAM17"},
 }
 
-# Specificity composite (ESMFold2 signals only).  Mirrors the main pipeline's
-# 0.5·ipTM + 0.5·pLDDT philosophy but reallocates weight to selectivity — the
-# whole point here.  Equal-ish on-target binding vs selectivity, no per-target
-# special-casing (avoids overfitting / systematic bias):
-#   binding (iptm_on 0.35 + plddt_on 0.25 = 0.60)   selectivity 0.40
-SPECIFICITY_COMPOSITE_WEIGHTS = {
-    "iptm_on":     0.35,   # on-target interface quality (ESMFold2 ipTM)
-    "plddt_on":    0.25,   # binder foldability in the on-target complex
-    "selectivity": 0.40,   # (ipTM_on - ipTM_off), rescaled to [0, 1]
-}
+# Specificity composite (2026-07 recalibration; see calibrated_scoring.py).
+#   on_quality  = the calibrated on-target score (ESMFold2 stage score, or the AF3
+#                 binding prior) — foldability floor + interface geometry. It does
+#                 NOT reward esm_iptm, whose negative in-sample correlation with
+#                 binding is a selection-bias artifact.
+#   selectivity = the normalized interface CONTACT-DENSITY gap (on - off). Contact
+#                 density is the one ESMFold2 feature that tracked binding, and a
+#                 within-design on/off contrast is the least bias-exposed way to
+#                 read selectivity. Neutral (0.5) when the geometry isn't available.
+SPECIFICITY_COMPOSITE_WEIGHTS = {"on_quality": 0.50, "selectivity": 0.50}
+CONTACT_DENSITY_GAP_SCALE = 20.0   # a contact-density gap of this magnitude ~ saturates selectivity
 HOF_SIZE = 75   # per specificity pair
 
 
-def calc_specificity_composite(iptm_on, iptm_off, plddt_on) -> float:
-    """Composite in [0, 1] rewarding on-target binding AND selectivity (ESMFold2)."""
-    w   = SPECIFICITY_COMPOSITE_WEIGHTS
-    io  = _safe(iptm_on)
-    off = _safe(iptm_off, 0.0)
-    if np.isnan(off):
-        off = 0.0
-    sel_norm = (io - off + 1.0) / 2.0                 # [-1,1] → [0,1]
-    pl = _normalize_plddt(plddt_on) / 100.0
-    return w["iptm_on"] * io + w["plddt_on"] * pl + w["selectivity"] * sel_norm
+def _cd_gap_norm(cd_on, cd_off) -> float:
+    """Normalize an on-minus-off contact-density gap to [0,1]; 0.5 = neutral/unknown."""
+    if not (cs._isnum(cd_on) and cs._isnum(cd_off)):
+        return 0.5
+    g = (float(cd_on) - float(cd_off)) / CONTACT_DENSITY_GAP_SCALE
+    return float(min(1.0, max(0.0, (g + 1.0) / 2.0)))
+
+
+def calc_specificity_composite(on_metrics: dict, off_metrics: dict = None,
+                               model: str = "esm") -> float:
+    """
+    Composite in [0,1] rewarding on-target QUALITY (calibrated prior) AND
+    SELECTIVITY (contact-density gap). `on_metrics`/`off_metrics` are metric dicts
+    keyed with af3_*/esm_* names (see calibrated_scoring). `model` picks the
+    on-quality scorer: "esm" -> esmfold2_stage_score, "af3" -> af3_binding_prior.
+    """
+    w = SPECIFICITY_COMPOSITE_WEIGHTS
+    off_metrics = off_metrics or {}
+    if model == "af3":
+        on_q = cs.af3_binding_prior(on_metrics)
+        cd_on, cd_off = on_metrics.get("af3_iface_contact_density"), off_metrics.get("af3_iface_contact_density")
+    else:
+        on_q = cs.esmfold2_stage_score(on_metrics)
+        cd_on, cd_off = on_metrics.get("esm_iface_contact_density"), off_metrics.get("esm_iface_contact_density")
+    if not (on_q == on_q):   # NaN guard
+        on_q = 0.0
+    return float(w["on_quality"] * on_q + w["selectivity"] * _cd_gap_norm(cd_on, cd_off))
 
 
 class SpecificityRefiner(IterativeRefiner):
@@ -190,25 +210,40 @@ class SpecificityRefiner(IterativeRefiner):
             iptm_off = off_m["esm_iptm"] if off_m else float("nan")
             sel = _safe(iptm_on) - (_safe(iptm_off) if not np.isnan(_safe(iptm_off, np.nan)) else 0.0)
 
+            # Interface geometry from the on- and off-target ESMFold2 complexes:
+            # contact density drives the (recalibrated) selectivity term.
+            on_feats  = _esm_iface_feats(on_m.get("esm_cif"))
+            off_feats = _esm_iface_feats(off_m.get("esm_cif")) if off_m else {}
+            cd_on  = on_feats.get("esm_iface_contact_density")
+            cd_off = off_feats.get("esm_iface_contact_density")
+
             c.update({
                 "esm_iptm_on":   iptm_on,
                 "esm_plddt_on":  plddt_on,
                 "esm_ptm_on":    on_m.get("esm_ptm"),
                 "esm_iptm_off":  iptm_off,
                 "esm_plddt_off": off_m.get("esm_plddt") if off_m else float("nan"),
-                "selectivity_score": sel,
-                "selectivity_ratio": (_safe(iptm_on) / max(_safe(iptm_off), 1e-3)
-                                      if not np.isnan(_safe(iptm_off, np.nan)) else float("inf")),
+                "selectivity_score": sel,                      # legacy ipTM gap (display only)
+                "cd_on": cd_on, "cd_off": cd_off,
+                "selectivity_cd": ((cd_on - cd_off) if (cs._isnum(cd_on) and cs._isnum(cd_off)) else float("nan")),
                 # esm_iptm/esm_plddt aliases = on-target (so inherited code/CSVs read sensibly)
                 "esm_iptm":   iptm_on,
                 "esm_plddt":  plddt_on,
+                "esm_iface_contact_density": cd_on,
+                "esm_iface_n_iface_res":     on_feats.get("esm_iface_n_iface_res"),
                 "esm_cif":    on_m.get("esm_cif"),
                 "specificity_pair": pk,
                 "on_target": on_t, "off_target": off_t,
                 "source": "ESMFold2",
-                "promising": (_safe(iptm_on) >= IPTM_PROMISING and sel > 0),
+                # "promising" now means: on-target folds+docks AND geometry prefers on-target
+                "promising": (cs.esm_passes_fold_gate({"esm_plddt": plddt_on,
+                                                       "esm_iface_n_iface_res": on_feats.get("esm_iface_n_iface_res")})
+                              and (_safe(c.get("selectivity_cd"), 0.0) > 0)),
             })
-            c["composite_score"] = calc_specificity_composite(iptm_on, iptm_off, plddt_on)
+            c["composite_score"] = calc_specificity_composite(
+                {"esm_plddt": plddt_on, "esm_iface_contact_density": cd_on,
+                 "esm_iface_n_iface_res": on_feats.get("esm_iface_n_iface_res")},
+                {"esm_iface_contact_density": cd_off}, model="esm")
             self.state["specificity_hof"].setdefault(pk, []).append(c)
             n_done += 1
 
@@ -327,6 +362,8 @@ class SpecificityRefiner(IterativeRefiner):
                     sc   = json.loads(zf.read(sc_name))
                     iptm = float(sc.get("iptm", 0.0))
                     ptm  = float(sc.get("ptm", 0.0))
+                    cp   = sc.get("chain_ptm") or []
+                    aptm = float(cp[0]) if len(cp) > 0 else float("nan")  # binder-chain pTM (drop BpTM)
 
                     plddt = float("nan")
                     fd_name = prefix + "_full_data_0.json"
@@ -339,8 +376,20 @@ class SpecificityRefiner(IterativeRefiner):
                             if mask.any():
                                 plddt = float(ap[mask].mean())
 
+                    # Interface geometry (same extractor as calibration)
+                    af3_iface = {}
+                    cif_name = prefix + "_model_0.cif"
+                    if cif_name in names:
+                        try:
+                            af3_iface = cs.interface_features_from_cif(zf.read(cif_name).decode())
+                        except Exception:
+                            af3_iface = {}
+
                     group.setdefault((pk, binder_seq), {})[side] = {
-                        "iptm": iptm, "ptm": ptm, "plddt": plddt,
+                        "iptm": iptm, "ptm": ptm, "plddt": plddt, "aptm": aptm,
+                        "n_iface_res":     af3_iface.get("n_iface_res"),
+                        "iface_plddt":     af3_iface.get("iface_plddt"),
+                        "contact_density": af3_iface.get("contact_density"),
                     }
                 except Exception as exc:
                     logger.error(f"Error parsing {jrf}: {exc}")
@@ -350,22 +399,34 @@ class SpecificityRefiner(IterativeRefiner):
             on_m = sides.get("on")
             if not on_m:
                 continue   # need at least the on-target result
+            off_m = sides.get("off", {})
             iptm_on  = on_m["iptm"]
             plddt_on = on_m["plddt"]
-            iptm_off = sides.get("off", {}).get("iptm", float("nan"))
+            iptm_off = off_m.get("iptm", float("nan"))
             sel  = _safe(iptm_on) - (_safe(iptm_off) if not np.isnan(_safe(iptm_off, np.nan)) else 0.0)
-            comp = calc_specificity_composite(iptm_on, iptm_off, plddt_on)
+            cd_on, cd_off = on_m.get("contact_density"), off_m.get("contact_density")
+            on_metrics = {
+                "af3_plddt": plddt_on, "af3_aptm": on_m.get("aptm"), "af3_iptm": iptm_on,
+                "af3_iface_n_iface_res": on_m.get("n_iface_res"),
+                "af3_iface_iface_plddt": on_m.get("iface_plddt"),
+                "af3_iface_contact_density": cd_on,
+            }
+            comp = calc_specificity_composite(on_metrics,
+                                              {"af3_iface_contact_density": cd_off}, model="af3")
+            sel_cd = (cd_on - cd_off) if (cs._isnum(cd_on) and cs._isnum(cd_off)) else float("nan")
             loops = extract_loops(bseq, self.selected_loops)
             entry = {
                 "design_id": f"AF3_{pk}_{abs(hash(bseq)) % 10**8}",
                 "target_name": self.pairs[pk]["on_target"],
                 "full_seq": bseq,
                 "esm_iptm_on": iptm_on, "esm_iptm_off": iptm_off, "esm_plddt_on": plddt_on,
-                "selectivity_score": sel,
+                "af3_aptm": on_m.get("aptm"),
+                "af3_iface_contact_density": cd_on, "af3_iface_n_iface_res": on_m.get("n_iface_res"),
+                "selectivity_score": sel, "selectivity_cd": sel_cd,
                 "specificity_pair": pk,
                 "on_target": self.pairs[pk]["on_target"], "off_target": self.pairs[pk]["off_target"],
                 "composite_score": comp, "source": "AF3",
-                "promising": (_safe(iptm_on) >= IPTM_PROMISING and sel > 0),
+                "promising": (comp >= 0.5 and _safe(sel_cd, 0.0) > 0),
                 **loops,
             }
             # Replace any existing specificity-HOF entry with the same sequence
