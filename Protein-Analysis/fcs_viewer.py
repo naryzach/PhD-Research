@@ -921,15 +921,31 @@ with st.sidebar.expander("🛠️ Global QC & Metric Settings", expanded=False):
     pc_thresh = st.slider("QC Threshold: Min PC Double+ %", 0.0, 10.0, 2.0, step=0.1, help="Exclude trials where the identified positive control performed poorly.", key="sidebar_pc_thresh")
     
     st.divider()
+    # Full metric set available in aggregate_summary (raw + normalized-vs-Pos-Ctrl).
+    # Drives the Aggregate tab's main chart, trial-by-trial plots, and the
+    # "All Metrics" comprehensive ANOVA/Tukey summary. All columns are emitted by
+    # aggregate_analysis.aggregate_records, so they exist in BOTH CSV and live modes.
     metric_options = {
         "Norm Median Ratio": "Norm Median Ratio",
+        "Median Ratio (raw)": "Pos Med Ratio",
+        "Norm Mean Ratio": "Norm Mean Ratio",
+        "Mean Ratio (raw)": "Pos Mean Ratio",
         "Binding Efficiency": "Binding Efficiency",
-        "Intensity-Weighted (IWB)": "Norm Intensity-Weighted Binding Index",
-        "Norm Median of Expr+": "Norm Bind Med (Expr+)"
+        "Norm IWB Index": "Norm Intensity-Weighted Binding Index",
+        "IWB Index (raw)": "Intensity-Weighted Binding Index",
+        "Norm Median of Expr+": "Norm Bind Med (Expr+)",
+        "Median of Expr+ (raw)": "Bind Med (Expr+)",
+        "Norm Mean of Expr+": "Norm Bind Mean (Expr+)",
+        "Mean of Expr+ (raw)": "Bind Mean (Expr+)",
+        "Norm Median of Bind+": "Norm Expr Med (Bind+)",
+        "Median of Bind+ (raw)": "Expr Med (Bind+)",
+        "Double+ %": "Double+ %",
+        "Expr+ %": "Expr+ %",
     }
 
-    sel_metric_label = st.radio("Select Analysis Metric", list(metric_options.keys()), horizontal=True, index=0, key="sidebar_metric_radio")
+    sel_metric_label = st.selectbox("Select Analysis Metric", list(metric_options.keys()), index=0, key="sidebar_metric_sel")
     sel_metric_col = metric_options[sel_metric_label]
+    st.caption("Metrics prefixed **Norm** are normalized to the positive control; **(raw)** are unnormalized. Feeds the Aggregate tab charts & the All-Metrics summary.")
 
 # --- MANUAL THRESHOLD SETTINGS ---
 # Note: Values will be populated later once file/controls are loaded
@@ -1783,15 +1799,24 @@ if selected_file and df is not None:
                 
                 # User requested alphabetical order
                 df_grouped = df_grouped.sort_values("Construct")
-                
+
+                # Flag single-trial constructs (n=1): keep them, but label the bar
+                # with its value + a ⚠️n=1 marker (no replicate → no error bar).
+                df_grouped["BarText"] = df_grouped.apply(
+                    lambda r: f"{r['Mean Val']:.2f}" + ("  ⚠️n=1" if r["n"] == 1 else ""), axis=1)
+                _n1_agg = int((df_grouped["n"] == 1).sum())
+                if _n1_agg:
+                    st.caption(f"⚠️ **{_n1_agg}** construct(s) marked **n=1** rest on a single trial "
+                               "(no replicate, so no error bar) — kept in, but interpret with caution.")
+
                 fig_sum = px.bar(
                     df_grouped, x="Construct", y="Mean Val", error_y="95% CI",
                     color="Avg Double+ %", color_continuous_scale="Viridis",
                     template="plotly_dark", title=f"{sel_metric_label} by Construct (Error Bars: 95% CI)",
-                    text_auto='.2f',
+                    text="BarText",
                     hover_data={"n": True, "95% CI": ":.2f"}
                 )
-
+                fig_sum.update_traces(textposition="outside", cliponaxis=False)
 
                 fig_sum.update_layout(height=550)
                 st.plotly_chart(fig_sum, width='stretch', key="agg_mean_sd_bar")
@@ -2030,6 +2055,12 @@ if selected_file and df is not None:
                     # ---- MASTER SELECTIVITY SUMMARY (ALL VARIANTS & METRICS) ----
                     st.divider()
                     with st.expander("📜 Master Selectivity Summary — ANOVA + Tukey HSD (All Variants & Metrics)", expanded=False):
+                        _mode_txt = "Normalized (vs Pos Ctrl)" if _use_norm else "Raw"
+                        st.info(f"📐 These ANOVAs/Tukey tests use **{_mode_txt}** values — they follow the "
+                                f"**Values** toggle (currently *{view_mode}*) at the top of this tab, so the "
+                                "results change when you switch Raw ↔ Normalized."
+                                + ("  \n_(Binding Efficiency has no normalized form, so it always uses raw values.)_"
+                                   if _use_norm else ""))
                         st.markdown("For every multi-target construct, a one-way **ANOVA** compares its targets; "
                                     "when significant (p < 0.05), the significant **Tukey HSD** target pairs are listed below.")
                         st.caption(TUKEY_NOTE)

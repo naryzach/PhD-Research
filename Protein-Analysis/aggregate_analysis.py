@@ -737,6 +737,26 @@ def main():
             "y_label": "IWB Index",
             "title_prefix": "IWB Index",
             "folder": "IWB_Index"
+        },
+        # --- Normalized (vs Pos Ctrl) counterparts, so the saved selectivity
+        #     CSVs/plots/ANOVAs mirror the viewer's "Normalized" toggle. ---
+        {
+            "y_col": "Norm Median Ratio",
+            "y_label": "Normalized Median Binding Ratio (vs Pos Ctrl)",
+            "title_prefix": "Binding to Expression Ratio (Normalized)",
+            "folder": "Norm_Median_Ratio"
+        },
+        {
+            "y_col": "Norm Bind Med (Expr+)",
+            "y_label": "Normalized Median APC for Expr+ Cells",
+            "title_prefix": "Binding of Expressed Cells (Normalized)",
+            "folder": "Norm_Bind_Med_Expr_Positive"
+        },
+        {
+            "y_col": "Norm Intensity-Weighted Binding Index",
+            "y_label": "Normalized IWB Index (vs Pos Ctrl)",
+            "title_prefix": "IWB Index (Normalized)",
+            "folder": "Norm_IWB_Index"
         }
     ]
 
