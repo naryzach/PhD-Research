@@ -495,6 +495,51 @@ def parse_crossfold(scores_csv: str, df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def write_rerank_delta(df: pd.DataFrame, n: int) -> str:
+    """
+    Compare the calibrated ranking (`composite` == binding_prior) against the
+    legacy blend (`composite_legacy`) among AF3 designs, so the effect of the
+    2026-07 retune is legible. Writes ordering/rerank_delta.csv and returns a
+    short text summary (also printed). No-op-safe if columns are missing.
+    """
+    if "composite_legacy" not in df.columns or "composite" not in df.columns:
+        return ""
+    a = df[df.get("source") == "AF3"].copy()
+    if a.empty:
+        return "_Rerank delta: no AF3 designs to compare._"
+    # Dense rank, 1 = best (highest score), for each scheme.
+    a["rank_new"] = a["composite"].rank(ascending=False, method="min").astype(int)
+    a["rank_old"] = a["composite_legacy"].rank(ascending=False, method="min").astype(int)
+    a["rank_delta"] = a["rank_old"] - a["rank_new"]        # + = moved UP under the retune
+    keep = ["design_id", "target", "orderable", "composite", "composite_legacy",
+            "rank_new", "rank_old", "rank_delta",
+            "af3_plddt", "af3_aptm", "af3_iface_n_iface_res", "iptm", "lplddt"]
+    keep = [c for c in keep if c in a.columns]
+    out = a.sort_values("rank_new")[keep]
+    out.to_csv(ORDER_DIR / "rerank_delta.csv", index=False)
+
+    rho = a["composite"].corr(a["composite_legacy"], method="spearman")
+    # Orderable top-N set churn (what you'd actually synthesize old vs new).
+    ord_a = a[a["orderable"]] if "orderable" in a.columns else a
+    new_top = set(ord_a.sort_values("composite", ascending=False).head(n)["design_id"])
+    old_top = set(ord_a.sort_values("composite_legacy", ascending=False).head(n)["design_id"])
+    entered = new_top - old_top
+    movers = out.reindex(out["rank_delta"].abs().sort_values(ascending=False).index).head(5)
+
+    lines = ["## Rerank: calibrated prior vs legacy blend\n",
+             f"- Spearman(new, legacy) over {len(a)} AF3 designs: **{rho:.2f}** "
+             f"(1.0 = identical order; lower = the retune changed more).",
+             f"- Orderable top-{n} churn: **{len(entered)}/{n}** designs entered the "
+             f"synthesize list that the legacy blend would not have picked.",
+             "- Biggest movers (|rank delta|):"]
+    for _, r in movers.iterrows():
+        lines.append(f"    - {r['design_id']} ({r.get('target','?')}): "
+                     f"#{int(r['rank_old'])} legacy -> #{int(r['rank_new'])} new "
+                     f"(delta {int(r['rank_delta']):+d})")
+    lines.append(f"\n_Full table: {ORDER_DIR/'rerank_delta.csv'}_")
+    return "\n".join(lines)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Select TIMP3 binders to synthesize/order.")
     ap.add_argument("--criteria", default="all",
@@ -520,6 +565,9 @@ def main():
 
     # Save the full scored table for transparency
     df.sort_values("composite", ascending=False).to_csv(ORDER_DIR / "all_candidates_scored.csv", index=False)
+
+    # Calibrated-vs-legacy rerank report (why the retune picked what it picked).
+    rerank_text = write_rerank_delta(df, args.n)
 
     if args.emit_crossfold_input:
         cand = df[df.orderable].sort_values("composite", ascending=False).head(args.n)
@@ -620,6 +668,8 @@ def main():
         report.append("\n_Specificity not computed (no cross-target folds). Run "
                       "`--emit-crossfold-input`, fold with ESMFold2, then `--specificity-scores`._")
 
+    if rerank_text:
+        report.append("\n" + rerank_text)
     text = "\n".join(report)
     (ORDER_DIR / "order_report.md").write_text(text)
     pd.DataFrame(out_rows).to_csv(ORDER_DIR / "order_list.csv", index=False)

@@ -1457,20 +1457,24 @@ class IterativeRefiner:
         print(f"  plddt, ptm, interface_pae, full_seq, target_name")
         print("=" * 60 + "\n")
 
-    def export_for_af3_stratified(self, n_total: int = 30, n_bands: int = 3) -> None:
+    def export_for_af3_stratified(self, n_total: int = 30, n_bands: int = 3,
+                                  strat_metric: str = None) -> None:
         """
-        One-time VALIDATION export: instead of sending the top-composite designs
-        (which all sit in a narrow high-Boltz band and cause range restriction),
-        sample evenly across Boltz-ipTM bands so the returned AF3 scores reveal
-        whether Boltz coarsely separates good binders from bad.
+        One-time VALIDATION / CALIBRATION-TRANCHE export: instead of sending the
+        top-scoring designs (which all sit in a narrow high band and cause range
+        restriction), sample evenly across LOCAL-SCORE bands so the returned AF3
+        scores span predicted-strong → predicted-weak. This is the deliberate way
+        to break the dynamic-range wall (docs/09): the next wet-lab calibration
+        finally gets variance to fit.
 
-        Pools ALL designs from every it_*/round_summary.csv (the unbiased pool,
-        not the range-restricted HOF).  Per target, bins designs into `n_bands`
-        equal-frequency Boltz-ipTM bands (low / mid / high) and samples evenly
-        from each.  Writes the AF3 submission JSON plus a sidecar manifest
-        (stratified_manifest.json) recording each job's band and boltz_iptm, so
-        the follow-up analysis can compute per-band AF3 hit-rates without relying
-        on fragile job-name parsing.
+        Stratifies on `strat_metric` (default: composite_score, the live ESMFold2
+        ranker; falls back to boltz_iptm if composite_score is absent). Pools ALL
+        designs from every it_*/round_summary.csv (the unbiased pool, not the
+        range-restricted HOF), bins each target into `n_bands` equal-frequency
+        bands (LO/MID/HI) and samples evenly. Writes the AF3 submission JSON plus a
+        sidecar manifest (stratified_manifest.json) recording each job's band and
+        score, so the follow-up analysis can compute per-band AF3 metrics without
+        fragile job-name parsing.
         """
         # Gather the full design pool from round summaries (unique by sequence)
         pool_frames = []
@@ -1483,8 +1487,17 @@ class IterativeRefiner:
             return
 
         pool = pd.concat(pool_frames, ignore_index=True)
-        pool["boltz_iptm"] = pd.to_numeric(pool.get("boltz_iptm"), errors="coerce")
-        pool = pool.dropna(subset=["boltz_iptm"]).drop_duplicates(subset=["full_seq"])
+        # Pick the stratification metric: explicit > composite_score > boltz_iptm.
+        sm = strat_metric
+        if sm is None:
+            sm = "composite_score" if pool.get("composite_score") is not None \
+                 and pd.to_numeric(pool["composite_score"], errors="coerce").notna().any() else "boltz_iptm"
+        if pool.get(sm) is None:
+            logger.warning(f"Stratify metric '{sm}' not in round_summary; cannot stratify.")
+            return
+        pool[sm] = pd.to_numeric(pool[sm], errors="coerce")
+        pool = pool.dropna(subset=[sm]).drop_duplicates(subset=["full_seq"])
+        logger.info(f"Stratifying AF3 tranche on '{sm}' over {len(pool)} pooled designs.")
 
         n_targets       = max(1, len(self.active_targets))
         per_target      = max(n_bands, n_total // n_targets)
@@ -1492,12 +1505,12 @@ class IterativeRefiner:
 
         jobs, manifest = [], []
         for tname in self.active_targets:
-            tpool = pool[pool["target_name"] == tname].sort_values("boltz_iptm")
+            tpool = pool[pool["target_name"] == tname].sort_values(sm)
             if len(tpool) < n_bands:
                 logger.warning(f"[{tname}] too few designs ({len(tpool)}) to stratify; skipping.")
                 continue
 
-            # Equal-frequency bands (low → high Boltz ipTM)
+            # Equal-frequency bands (low → high local score)
             band_labels = ["LO", "MID", "HI"][:n_bands]
             bands = np.array_split(tpool, n_bands)   # ascending, so [0]=low ... [-1]=high
             for label, band_df in zip(band_labels, bands):
@@ -1516,12 +1529,13 @@ class IterativeRefiner:
                         ],
                     })
                     manifest.append({
-                        "job_name":   name,
-                        "design_id":  e.get("design_id"),
-                        "target":     tname,
-                        "band":       label,
-                        "boltz_iptm": float(e["boltz_iptm"]),
-                        "full_seq":   e.get("full_seq", ""),
+                        "job_name":    name,
+                        "design_id":   e.get("design_id"),
+                        "target":      tname,
+                        "band":        label,
+                        "strat_metric": sm,
+                        "strat_score": float(e[sm]),
+                        "full_seq":    e.get("full_seq", ""),
                     })
             logger.info(f"[{tname}] stratified: "
                         + ", ".join(f"{lbl}={sum(1 for mm in manifest if mm['target']==tname and mm['band']==lbl)}"
