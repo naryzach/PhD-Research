@@ -1,9 +1,9 @@
 Folder,Tag,Expr_Channel,Bind_Channel,Notes
 ADAM10_20260509_Sam-FLAG_Renamed,FLAG,APC-A,PE-A,FLAG tag (Sam prep)
 MMP2_20260509_Arly-FLAG_Renamed,FLAG,APC-A,PE-A,FLAG tag (Arly prep)
-ADAM10_20260610_AbC_G_Renamed,FLAG,APC-A,PE-A,Gavin FLAG (_G): APC expr / PE bind
+ADAM10_20260610_AbC_G_Renamed,His,FITC-A,APC-A,Abcam His-tagged (purchased) — FITC expr / APC bind
 ADAM10_20260610_F6_G_Renamed,FLAG,APC-A,PE-A,Gavin FLAG (_G): APC expr / PE bind
 ADAM10_20260610_F9_G_Renamed,FLAG,APC-A,PE-A,Gavin FLAG (_G): APC expr / PE bind
-ADAM10_20260610_AbC_R_Renamed,FLAG,APC-A,FITC-A,Ryan FLAG (_R): APC expr / FITC bind
+ADAM10_20260610_AbC_R_Renamed,His,FITC-A,APC-A,Abcam His-tagged (purchased) — FITC expr / APC bind
 ADAM10_20260610_F6_R_Renamed,FLAG,APC-A,FITC-A,Ryan FLAG (_R): APC expr / FITC bind
 ADAM10_20260610_F9_R_Renamed,FLAG,APC-A,FITC-A,Ryan FLAG (_R): APC expr / FITC bind

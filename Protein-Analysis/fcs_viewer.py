@@ -1952,6 +1952,10 @@ if selected_file and df is not None:
                     else:
                         df_src["Source"] = "Unknown"
 
+                # NOTE: Unlike the Aggregate tab (which drops `~IsPC`), selectivity
+                # intentionally KEEPS positive controls so their cross-target profile
+                # can be compared alongside the constructs.
+
                 # Restrict to constructs tested against more than one target.
                 _tc = df_src.groupby("Construct")["Target"].nunique()
                 _multi = _tc[_tc > 1].index.tolist()
@@ -1970,15 +1974,22 @@ if selected_file and df is not None:
                 else:
                     # ---- MAIN GRAPH: Construct x Target ----
                     df_by_target = _sel_summary(df_multi, ["Construct", "Target"]).sort_values(["Construct", "Target"])
+                    df_by_target["NLabel"] = np.where(df_by_target["Count"] == 1, "n=1", "")
+                    _n1 = int((df_by_target["Count"] == 1).sum())
                     st.markdown(f"### Selectivity by Target — {y_label}")
+                    if _n1:
+                        st.caption(f"⚠️ **{_n1}** bar(s) marked **n=1** rest on a single trial "
+                                   "(no replicate, so no error bar) — kept in, but interpret with caution.")
                     fig_sel = px.bar(
                         df_by_target, x="Construct", y="Mean", color="Target",
                         barmode="group", error_y="95% CI", template="plotly_dark",
                         title=f"{y_label} Across Targets (Error Bars: 95% CI)",
                         labels={"Mean": y_label}, hover_data={"Count": True, "95% CI": ":.2f"},
+                        text="NLabel",
                     )
                     if _is_norm:
                         fig_sel.add_hline(y=1, line_dash="dash", line_color="white", annotation_text="Pos Ctrl")
+                    fig_sel.update_traces(textposition="outside", textfont_size=10, cliponaxis=False)
                     fig_sel.update_layout(height=600, xaxis_tickangle=-45)
                     st.plotly_chart(fig_sel, width='stretch', key="selectivity_main_plotly")
 
@@ -1989,6 +2000,7 @@ if selected_file and df is not None:
                     else:
                         df_by_src["Provenance"] = "Unknown"
                     df_by_src["Target / Source"] = df_by_src["Target"].astype(str) + " (" + df_by_src["Source"].astype(str) + ")"
+                    df_by_src["NLabel"] = np.where(df_by_src["Count"] == 1, "n=1", "")
                     df_by_src = df_by_src.sort_values(["Construct", "Target", "Source"])
                     st.markdown(f"### Selectivity by Target & Manufacturer — {y_label}")
                     st.caption("Each target split by manufacturer/vendor, canonicalized via "
@@ -2001,9 +2013,11 @@ if selected_file and df is not None:
                         title=f"{y_label} Across Targets x Manufacturer (Error Bars: 95% CI)",
                         labels={"Mean": y_label},
                         hover_data={"Target": True, "Source": True, "Provenance": True, "Count": True, "95% CI": ":.2f"},
+                        text="NLabel",
                     )
                     if _is_norm:
                         fig_src.add_hline(y=1, line_dash="dash", line_color="white", annotation_text="Pos Ctrl")
+                    fig_src.update_traces(textposition="outside", textfont_size=10, cliponaxis=False)
                     fig_src.update_layout(height=600, xaxis_tickangle=-45)
                     st.plotly_chart(fig_src, width='stretch', key="selectivity_source_plotly")
 
@@ -2054,9 +2068,11 @@ if selected_file and df is not None:
                         df_var, x="Target", y="Mean", color="Target", error_y="95% CI",
                         template="plotly_dark", title=f"Selectivity Profile: {selected_variant}",
                         labels={"Mean": y_label}, hover_data={"Count": True, "95% CI": ":.2f"},
+                        text="NLabel",
                     )
                     if _is_norm:
                         fig_var.add_hline(y=1, line_dash="dash", line_color="white", annotation_text="Pos Ctrl")
+                    fig_var.update_traces(textposition="outside", textfont_size=10, cliponaxis=False)
                     fig_var.update_layout(height=450, showlegend=False)
                     st.plotly_chart(fig_var, width='stretch', key="selectivity_variant_plotly")
 
@@ -2068,7 +2084,9 @@ if selected_file and df is not None:
                             error_y="95% CI", template="plotly_dark",
                             title=f"{selected_variant}: by Manufacturer",
                             labels={"Mean": y_label}, hover_data={"Count": True, "95% CI": ":.2f"},
+                            text="NLabel",
                         )
+                        fig_var_src.update_traces(textposition="outside", textfont_size=10, cliponaxis=False)
                         if _is_norm:
                             fig_var_src.add_hline(y=1, line_dash="dash", line_color="white", annotation_text="Pos Ctrl")
                         fig_var_src.update_layout(height=450)
