@@ -105,8 +105,9 @@ def fig_complex_heatmaps(figs: list[str]) -> None:
         return
     if "source" not in cplx:
         return
-    metrics = ["bsa", "n_hbonds", "n_salt_bridges", "contact_density",
-               "min_ca_ca_zincloop", "haddock_score", "iptm", "dockq"]
+    metrics = ["bsa", "n_hbonds", "contact_density", "sc_shape_complementarity",
+               "catalytic_occlusion", "min_ca_ca_zincloop", "haddock_score",
+               "iptm", "interface_pae", "pdockq2", "dockq", "complex_tm"]
     for source in sorted(cplx["source"].dropna().unique()):
         sub = cplx[cplx["source"] == source]
         present = [m for m in metrics if m in sub and _num(sub, m).notna().any()]

@@ -107,11 +107,24 @@ def af3_complex_conf(path: Path) -> dict:
 
 FIELDS = ["construct_id", "target_id", "source", "family", "construct_src",
           "target_src", "status",
-          "bsa", "n_iface_res_construct", "n_iface_res_target", "n_contacts_5A",
-          "n_hbonds", "n_salt_bridges", "n_hydrophobic", "contact_density",
-          "min_ca_ca_zincloop", "haddock_score", "vdw", "elec", "desolv", "air",
-          "haddock_bsa", "violations", "iptm", "ptm", "pae", "esm_lplddt",
-          "dockq", "fnat", "irms", "lrms", "capri", "dockq_ref_type",
+          # B — interface geometry & chemistry
+          "bsa", "bsa_polar", "bsa_apolar", "f_apolar_bsa",
+          "n_iface_res_construct", "n_iface_res_target", "n_contacts_5A",
+          "n_hbonds", "n_salt_bridges", "n_hydrophobic", "n_interface_clashes",
+          "contact_density", "n_buried_unsat_hbond",
+          "sc_shape_complementarity", "charge_complementarity",
+          # E — catalytic-cleft engagement
+          "min_ca_ca_zincloop", "zinc_bsa_buried", "catalytic_occlusion",
+          # F — docking energetics
+          "haddock_score", "vdw", "elec", "desolv", "air", "haddock_bsa", "violations",
+          # C — fold / interface confidence
+          "iptm", "ptm", "pae", "esm_lplddt", "interface_plddt", "interface_pae",
+          "pdockq", "pdockq2", "lis", "lia",
+          # D — complex accuracy vs native
+          "dockq", "fnat", "fnonnat", "irms", "lrms", "capri",
+          "complex_tm", "interface_tm", "dockq_ref_type",
+          # G — transparent composite
+          "iface_composite",
           "model_path", "ref_path"]
 
 TIMP3_ACTIVE_N = C.TIMP3_ACTIVE[1]  # first N residues of the construct = reactive edge
@@ -125,6 +138,48 @@ def _esm_complex_conf() -> dict[tuple[str, str], dict]:
         return {(r["construct_id"], r["target_id"]): r for r in csv.DictReader(fh)}
 
 
+def _num(x):
+    try:
+        v = float(x)
+        return v if v == v else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _composite(row: dict, family: str) -> float | str:
+    """Transparent interface composite (0-100), weights from config.
+
+    Confidence terms (ipTM, interface PAE) are only present for co-folds; for
+    docked poses the weights renormalise over the structural terms that exist,
+    so HADDOCK and co-fold scores stay on the same 0-100 scale.
+    """
+    w = C.COMPOSITE_WEIGHTS
+    bsa, hb = _num(row.get("bsa")), _num(row.get("n_hbonds"))
+    iptm = _num(row.get("iptm"))
+    ipae = _num(row.get("interface_pae"))
+    if ipae is None:
+        ipae = _num(row.get("pae"))          # ESM stores a whole-complex PAE scalar
+    sb = _num(row.get("n_salt_bridges")) or 0.0
+    hyd = _num(row.get("n_hydrophobic")) or 0.0
+
+    terms, wts = {}, {}
+    if bsa is not None:
+        terms["bsa"] = min(bsa, w["bsa_cap"]) / w["bsa_cap"]; wts["bsa"] = w["bsa"]
+    if hb is not None:
+        terms["hbond"] = min(hb, w["hbond_cap"]) / w["hbond_cap"]; wts["hbond"] = w["hbond"]
+    if iptm is not None:
+        terms["iptm"] = iptm; wts["iptm"] = w["iptm"]
+    if ipae is not None:
+        terms["pae"] = max(0.0, (w["pae_norm"] - ipae) / w["pae_norm"]); wts["pae"] = w["pae"]
+    if not wts:
+        return ""
+    tot = sum(wts.values())
+    base = sum(terms[k] * wts[k] / tot for k in wts)
+    bonus = min(sb * w["salt_bonus_per"], w["salt_bonus_max"]) \
+        + min(hyd * w["hydro_bonus_per"], w["hydro_bonus_max"])
+    return round(min((base + bonus) * 100.0, 100.0), 1)
+
+
 def score_complex(path, construct_seq, target_seq, family, ref_path,
                   ref_type=None, esm_conf=None) -> dict:
     chains = sio.get_chains(path)
@@ -133,35 +188,53 @@ def score_complex(path, construct_seq, target_seq, family, ref_path,
     cchain, tchain = assign_chains(chains, construct_seq, target_seq)
     cid_pdb, tid_pdb = cchain.cid, tchain.cid
 
-    im = M.interface_summary(path, cid_pdb, tid_pdb)
+    motif_res = sio.zinc_motif_resids(tchain)
+    im = M.interface_summary(path, cid_pdb, tid_pdb, motif_resids_b=motif_res)
     row = {
-        "bsa": im.bsa, "n_iface_res_construct": im.n_iface_res_A,
-        "n_iface_res_target": im.n_iface_res_B, "n_contacts_5A": im.n_contacts_5A,
-        "n_hbonds": im.n_hbonds, "n_salt_bridges": im.n_salt_bridges,
-        "n_hydrophobic": im.n_hydrophobic, "contact_density": im.contact_density,
+        "bsa": im.bsa, "bsa_polar": im.bsa_polar, "bsa_apolar": im.bsa_apolar,
+        "f_apolar_bsa": im.f_apolar_bsa,
+        "n_iface_res_construct": im.n_iface_res_A, "n_iface_res_target": im.n_iface_res_B,
+        "n_contacts_5A": im.n_contacts_5A, "n_hbonds": im.n_hbonds,
+        "n_salt_bridges": im.n_salt_bridges, "n_hydrophobic": im.n_hydrophobic,
+        "n_interface_clashes": im.n_interface_clashes,
+        "contact_density": im.contact_density,
+        "n_buried_unsat_hbond": im.n_buried_unsat_hbond,
+        "sc_shape_complementarity": im.sc_shape_complementarity,
+        "charge_complementarity": im.charge_complementarity,
+        "zinc_bsa_buried": im.zinc_bsa_buried, "catalytic_occlusion": im.catalytic_occlusion,
     }
 
     timp_edge = cchain.resids[:TIMP3_ACTIVE_N]
-    motif_res = sio.zinc_motif_resids(tchain)
     row["min_ca_ca_zincloop"] = round(_min_ca_ca(cchain, timp_edge, tchain, motif_res), 2)
 
     if family == "HADDOCK":
         row.update(parse_haddock_remarks(Path(path)))
     elif family == "AF3_cofold":
         row.update(af3_complex_conf(Path(path)))
-    elif family == "ESMFold2_cofold" and esm_conf:
-        row.update(iptm=esm_conf.get("esm_iptm", ""), ptm=esm_conf.get("esm_ptm", ""),
-                   pae=esm_conf.get("esm_pae", ""), esm_lplddt=esm_conf.get("esm_lplddt", ""))
+        row.update(M.confidence_metrics(cchain, tchain, model_path=str(path),
+                                        cid=cid_pdb, tid=tid_pdb))
+    elif family == "ESMFold2_cofold":
+        if esm_conf:
+            row.update(iptm=esm_conf.get("esm_iptm", ""), ptm=esm_conf.get("esm_ptm", ""),
+                       pae=esm_conf.get("esm_pae", ""), esm_lplddt=esm_conf.get("esm_lplddt", ""))
+        # pLDDT-based confidence (interface_plddt, pDockQ) from the model's B-factors;
+        # no PAE matrix for ESM so the PAE-derived columns stay blank.
+        row.update(M.confidence_metrics(cchain, tchain, model_path=None,
+                                        cid=cid_pdb, tid=tid_pdb))
 
     if ref_path:
         try:
             rc = sio.get_chains(ref_path)
             rcc, rtc = assign_chains(rc, construct_seq, target_seq)
             dq = M.dockq(path, ref_path, tid_pdb, cid_pdb, rtc.cid, rcc.cid)
-            row.update(dockq=dq.dockq, fnat=dq.fnat, irms=dq.irms,
+            row.update(dockq=dq.dockq, fnat=dq.fnat, fnonnat=dq.fnonnat, irms=dq.irms,
                        lrms=dq.lrms, capri=dq.capri, dockq_ref_type=ref_type)
+            ctm, itm = M.complex_tm(path, ref_path, tid_pdb, cid_pdb, rtc.cid, rcc.cid)
+            row["complex_tm"], row["interface_tm"] = ctm, itm
         except Exception as e:
             row["capri"] = f"dockq_error:{e}"
+
+    row["iface_composite"] = _composite(row, family)
     row["status"] = "ok"
     return row
 

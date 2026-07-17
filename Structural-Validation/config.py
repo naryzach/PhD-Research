@@ -154,6 +154,25 @@ HADDOCK_BSA_GOOD = 1200.0
 HADDOCK_DIST_GOOD = 9.0
 HADDOCK_VIOL_MAX = 3
 
+# --------------------------------------------------------------------------
+# Composite interface score (transparent, weights exposed — not buried)
+# --------------------------------------------------------------------------
+# Re-implements the AlphaFoldServer_SA.ipynb TIMP-tuned heuristic, but the raw
+# metrics are always reported alongside it so the composite is never a black box.
+# Confidence terms (ipTM, PAE) are only available for co-folds; for docked
+# (HADDOCK) poses those terms are dropped and the remaining weights renormalised.
+COMPOSITE_WEIGHTS = {
+    "iptm": 0.35,        # AF3/ESM interface confidence
+    "bsa": 0.25,         # buried surface area (critical for TIMP interfaces)
+    "pae": 0.20,         # interface PAE (low = good)
+    "hbond": 0.20,       # H-bond count
+    "bsa_cap": 1000.0,   # BSA saturates the score at this many Å²
+    "hbond_cap": 15.0,   # H-bonds saturate here (TIMP interfaces are large)
+    "pae_norm": 15.0,    # PAE normalised 0..this (Å)
+    "salt_bonus_per": 0.02, "salt_bonus_max": 0.10,
+    "hydro_bonus_per": 0.01, "hydro_bonus_max": 0.05,
+}
+
 
 def ensure_out_dirs() -> None:
     """Create every output subdirectory (idempotent)."""

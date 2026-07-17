@@ -77,15 +77,51 @@ DATA_DICTIONARY = {
     "dockq": ("DockQ quality vs native complex (fnat/iRMS/LRMS composite)",
               "0-1", "higher"),
     "fnat": ("fraction of native residue contacts recovered", "0-1", "higher"),
+    "fnonnat": ("fraction of the model's contacts that are NOT native", "0-1", "lower"),
     "irms": ("interface RMSD vs native", "Å", "lower"),
     "lrms": ("ligand RMSD vs native (receptor-fit)", "Å", "lower"),
     "capri": ("CAPRI class (high/medium/acceptable/incorrect)", "class", "higher"),
+    "complex_tm": ("TM-score of the whole complex vs native (joint superposition)",
+                   "0-1", "higher"),
+    "interface_tm": ("TM-score over native interface residues only", "0-1", "higher"),
+    "dockq_ref_type": ("native vs approximate (homologous) DockQ reference", "class", "context"),
+    # B — extended interface geometry & chemistry
+    "bsa_polar": ("Polar (N/O) fraction of buried surface area", "Å²", "context"),
+    "bsa_apolar": ("Apolar (C/S) fraction of buried surface area", "Å²", "context"),
+    "f_apolar_bsa": ("Apolar fraction of BSA (interface hydrophobicity)", "0-1", "context"),
+    "n_interface_clashes": ("Cross-chain heavy-atom pairs closer than 2 Å (steric clash)",
+                            "count", "lower"),
+    "n_buried_unsat_hbond": ("Buried interface polar donors/acceptors with no H-bond "
+                             "partner", "count", "lower"),
+    "sc_shape_complementarity": ("Lawrence-Colman shape complementarity Sc "
+                                 "(surface-dot approximation)", "-1..1", "higher"),
+    "charge_complementarity": ("(favorable-unfavorable)/charged interface pairs "
+                               "(CB-CB <8 Å)", "-1..1", "higher"),
+    # E — catalytic-cleft engagement
+    "zinc_bsa_buried": ("Target zinc-loop surface area buried by the construct", "Å²", "higher"),
+    "catalytic_occlusion": ("Fraction of the catalytic zinc-loop SASA buried by the "
+                            "construct", "0-1", "higher"),
+    # C — confidence-weighted interface metrics
+    "esm_lplddt": ("ESMFold2 loop-region pLDDT", "0-100", "higher"),
+    "interface_plddt": ("Mean pLDDT over interface residues (co-folds only)", "0-100", "higher"),
+    "interface_pae": ("Mean PAE across the construct-target block (AF3 co-folds)", "Å", "lower"),
+    "pdockq": ("Bryant 2022 pDockQ (pLDDT x log interface contacts)", "0-1", "higher"),
+    "pdockq2": ("Zhu 2023 pDockQ2 (PAE-weighted interface confidence, AF3)", "0-1", "higher"),
+    "lis": ("Kim 2024 Local Interaction Score (interface PAE strength, AF3)", "0-1", "higher"),
+    "lia": ("Kim 2024 Local Interaction Area (# residue pairs with PAE<12 Å, AF3)",
+            "count", "higher"),
+    # G — composite
+    "iface_composite": ("Transparent interface composite score (config weights; "
+                        "raw metrics reported alongside)", "0-100", "higher"),
 }
 
 MONOMER_KEY = ["rmsd_ca", "tm_score", "gdt_ts", "lddt", "plddt_mean"]
-COMPLEX_KEY = ["bsa", "n_contacts_5A", "n_hbonds", "n_salt_bridges",
-               "contact_density", "min_ca_ca_zincloop", "haddock_score",
-               "iptm", "dockq"]
+COMPLEX_KEY = ["bsa", "f_apolar_bsa", "n_contacts_5A", "n_hbonds", "n_salt_bridges",
+               "contact_density", "sc_shape_complementarity", "charge_complementarity",
+               "n_buried_unsat_hbond", "min_ca_ca_zincloop", "catalytic_occlusion",
+               "haddock_score", "iptm", "interface_plddt", "interface_pae",
+               "pdockq", "pdockq2", "lis", "dockq", "fnonnat", "complex_tm",
+               "iface_composite"]
 
 
 def _read(name):
