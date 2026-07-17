@@ -108,6 +108,19 @@ COMPLEX_REFERENCES = {
 TIMP3_CRYSTAL = CRYSTAL_DIR / "TIMP3_Xray.pdb"
 
 # --------------------------------------------------------------------------
+# FCS (flow-cytometry) aggregate binding data — structure→binding correlation
+# --------------------------------------------------------------------------
+FCS_AGG_CSV = REPO_ROOT / "Local/Aggregate_FCS_Analysis/aggregate_summary.csv"
+# Commercially purchased target vendors; the rest (Masoud/Sam/Arly) are in-house
+# preps (see target-vendor memory). Used for the purchased-only sensitivity variant.
+FCS_PURCHASED_VENDORS = ["Abcam", "Enzo", "Sino"]
+# FCS construct label -> structural construct id (the rest, e.g. ABC 21, TIMP 1,
+# are not in the structural panel and are dropped from the join).
+FCS_CONSTRUCT_MAP = {"TIMP 3": "TIMP3_WT",
+                     **{f"AB {i}": f"AB_{i}" for i in range(1, 8)},
+                     **{f"C {i}": f"C_{i}" for i in range(11, 17)}}
+
+# --------------------------------------------------------------------------
 # Interface / restraint definition
 # --------------------------------------------------------------------------
 # TIMP3 residues that coordinate the catalytic zinc (N-terminal ridge, mature
