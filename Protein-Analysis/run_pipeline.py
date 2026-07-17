@@ -36,6 +36,16 @@ renamed_folders = [
 if only:
     renamed_folders = [f for f in renamed_folders if os.path.basename(f) in only]
 
+# Persistent exclusions from excluded_folders.csv (skip without deleting).
+_excluded = aggregate_analysis.load_excluded_folders()
+_skipped = [f for f in renamed_folders if aggregate_analysis.is_excluded(os.path.basename(f))]
+renamed_folders = [f for f in renamed_folders if not aggregate_analysis.is_excluded(os.path.basename(f))]
+if _skipped:
+    print(f"Skipping {len(_skipped)} folder(s) listed in excluded_folders.csv:")
+    for f in _skipped:
+        name = aggregate_analysis._norm_folder_name(os.path.basename(f))
+        print(f"  - {os.path.basename(f)} ({_excluded.get(name, '')})")
+
 if not renamed_folders:
     print("No '_Renamed' folders found (matching filter)." if only else "No '_Renamed' folders found.")
     sys.exit(0)

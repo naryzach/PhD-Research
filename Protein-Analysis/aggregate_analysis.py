@@ -99,7 +99,29 @@ NEG_CTRL_PATTERNS = ["NC", "NEGATIVE CONTROL"]
 # Maps the short source tokens that show up in sample names and trial-folder names
 # (e.g. 'Sino', 'AbC', 'Mas', 'F6') onto a canonical vendor + provenance. Edit
 # Protein-Analysis/vendor_manifest.csv to add or correct mappings.
-_VENDOR_MAP_CACHE = None
+# All manifest CSVs are cached by file mtime, so edits are picked up automatically
+# (no app restart needed) while avoiding a re-read on every call.
+_MANIFEST_CACHE = {}
+
+
+def _read_manifest(path, row_handler, force=False):
+    """Read a CSV manifest into a dict via row_handler(row, out), cached by mtime."""
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return {}
+    hit = _MANIFEST_CACHE.get(path)
+    if hit is not None and hit[0] == mtime and not force:
+        return hit[1]
+    data = {}
+    try:
+        with open(path, newline='') as f:
+            for row in csv.DictReader(f):
+                row_handler(row, data)
+    except Exception:
+        pass
+    _MANIFEST_CACHE[path] = (mtime, data)
+    return data
 
 
 def _vendor_manifest_path():
@@ -114,29 +136,16 @@ def _norm_token(token):
 
 
 def load_vendor_map(path=None, force=False):
-    """Load the token -> {Vendor, Provenance} manifest (cached)."""
-    global _VENDOR_MAP_CACHE
-    if _VENDOR_MAP_CACHE is not None and path is None and not force:
-        return _VENDOR_MAP_CACHE
-    mapping = {}
-    p = path or _vendor_manifest_path()
-    try:
-        with open(p, newline='') as f:
-            for row in csv.DictReader(f):
-                key = _norm_token(row.get('Token', ''))
-                vendor = (row.get('Vendor', '') or '').strip()
-                if key and vendor:
-                    mapping[key] = {
-                        'Vendor': vendor,
-                        'Provenance': (row.get('Provenance', '') or '').strip() or 'Unknown',
-                    }
-    except FileNotFoundError:
-        pass
-    except Exception:
-        pass
-    if path is None:
-        _VENDOR_MAP_CACHE = mapping
-    return mapping
+    """Load the token -> {Vendor, Provenance} manifest (cached by mtime)."""
+    def handler(row, out):
+        key = _norm_token(row.get('Token', ''))
+        vendor = (row.get('Vendor', '') or '').strip()
+        if key and vendor:
+            out[key] = {
+                'Vendor': vendor,
+                'Provenance': (row.get('Provenance', '') or '').strip() or 'Unknown',
+            }
+    return _read_manifest(path or _vendor_manifest_path(), handler, force=force)
 
 
 def canonical_vendor(token):
@@ -190,7 +199,6 @@ def derive_source(raw_name, folder_source=None):
 # Authoritative per-folder vendor/provenance (each trial folder is one target prep
 # from one vendor), sourced from folder_vendor_manifest.csv. This wins over the
 # per-sample token guess because it captures RG-confirmed overrides & notebook rules.
-_FOLDER_MAP_CACHE = None
 
 
 def _folder_manifest_path():
@@ -207,29 +215,16 @@ def _norm_folder_name(name):
 
 
 def load_folder_map(path=None, force=False):
-    """Load the folder -> {Vendor, Provenance} manifest (cached)."""
-    global _FOLDER_MAP_CACHE
-    if _FOLDER_MAP_CACHE is not None and path is None and not force:
-        return _FOLDER_MAP_CACHE
-    mapping = {}
-    p = path or _folder_manifest_path()
-    try:
-        with open(p, newline='') as f:
-            for row in csv.DictReader(f):
-                folder = _norm_folder_name(row.get('Folder', ''))
-                vendor = (row.get('Vendor', '') or '').strip()
-                if folder and vendor:
-                    mapping[folder] = {
-                        'Vendor': vendor,
-                        'Provenance': (row.get('Provenance', '') or '').strip() or 'Unknown',
-                    }
-    except FileNotFoundError:
-        pass
-    except Exception:
-        pass
-    if path is None:
-        _FOLDER_MAP_CACHE = mapping
-    return mapping
+    """Load the folder -> {Vendor, Provenance} manifest (cached by mtime)."""
+    def handler(row, out):
+        folder = _norm_folder_name(row.get('Folder', ''))
+        vendor = (row.get('Vendor', '') or '').strip()
+        if folder and vendor:
+            out[folder] = {
+                'Vendor': vendor,
+                'Provenance': (row.get('Provenance', '') or '').strip() or 'Unknown',
+            }
+    return _read_manifest(path or _folder_manifest_path(), handler, force=force)
 
 
 def folder_vendor(folder_name):
@@ -261,7 +256,6 @@ TAG_CHANNEL_DEFAULTS = {
     "HIS": ("FITC-A", "APC-A"),
     "FLAG": ("APC-A", "PE-A"),
 }
-_CHANNEL_MAP_CACHE = None
 
 
 def _channel_manifest_path():
@@ -269,35 +263,18 @@ def _channel_manifest_path():
 
 
 def load_channel_map(path=None, force=False):
-    """Load the folder -> {Tag, Expr, Bind} channel manifest (cached)."""
-    global _CHANNEL_MAP_CACHE
-    if _CHANNEL_MAP_CACHE is not None and path is None and not force:
-        return _CHANNEL_MAP_CACHE
-    mapping = {}
-    p = path or _channel_manifest_path()
-    try:
-        with open(p, newline='') as f:
-            for row in csv.DictReader(f):
-                folder = _norm_folder_name(row.get('Folder', ''))
-                if not folder:
-                    continue
-                tag = (row.get('Tag', '') or '').strip() or DEFAULT_TAG
-                expr = (row.get('Expr_Channel', '') or '').strip()
-                bind = (row.get('Bind_Channel', '') or '').strip()
-                # Fill missing channels from the tag default.
-                d_expr, d_bind = TAG_CHANNEL_DEFAULTS.get(tag.upper(), (DEFAULT_EXPR_CHANNEL, DEFAULT_BIND_CHANNEL))
-                mapping[folder] = {
-                    'Tag': tag,
-                    'Expr': expr or d_expr,
-                    'Bind': bind or d_bind,
-                }
-    except FileNotFoundError:
-        pass
-    except Exception:
-        pass
-    if path is None:
-        _CHANNEL_MAP_CACHE = mapping
-    return mapping
+    """Load the folder -> {Tag, Expr, Bind} channel manifest (cached by mtime)."""
+    def handler(row, out):
+        folder = _norm_folder_name(row.get('Folder', ''))
+        if not folder:
+            return
+        tag = (row.get('Tag', '') or '').strip() or DEFAULT_TAG
+        expr = (row.get('Expr_Channel', '') or '').strip()
+        bind = (row.get('Bind_Channel', '') or '').strip()
+        # Fill missing channels from the tag default.
+        d_expr, d_bind = TAG_CHANNEL_DEFAULTS.get(tag.upper(), (DEFAULT_EXPR_CHANNEL, DEFAULT_BIND_CHANNEL))
+        out[folder] = {'Tag': tag, 'Expr': expr or d_expr, 'Bind': bind or d_bind}
+    return _read_manifest(path or _channel_manifest_path(), handler, force=force)
 
 
 def channels_for_folder(folder_name):
@@ -307,6 +284,32 @@ def channels_for_folder(folder_name):
     if entry:
         return entry['Expr'], entry['Bind'], entry['Tag']
     return DEFAULT_EXPR_CHANNEL, DEFAULT_BIND_CHANNEL, DEFAULT_TAG
+
+
+# ---- EXCLUDED-FOLDERS MANIFEST ----
+# Persistent list of trial folders to skip everywhere (pipeline + aggregate +
+# viewer live recalc) without deleting them. Edit excluded_folders.csv; rows whose
+# Folder starts with '#' are treated as comments.
+
+
+def _excluded_manifest_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "excluded_folders.csv")
+
+
+def load_excluded_folders(path=None, force=False):
+    """Load {normalized_folder_name: reason} of folders to skip everywhere
+    (cached by mtime, so edits apply without restarting the viewer)."""
+    def handler(row, out):
+        folder = (row.get('Folder', '') or '').strip()
+        if not folder or folder.startswith('#'):
+            return
+        out[_norm_folder_name(folder)] = (row.get('Reason', '') or '').strip()
+    return _read_manifest(path or _excluded_manifest_path(), handler, force=force)
+
+
+def is_excluded(folder_name):
+    """True if the folder is listed in excluded_folders.csv."""
+    return _norm_folder_name(folder_name) in load_excluded_folders()
 
 
 def folder_source(dir_name):
@@ -483,20 +486,26 @@ def build_aggregate_data(exclude_dates=None, exclude_dirs=None, local_dir=None, 
                    e.g. 'MMP2_20240510_Analysis'.
     """
     exclude_dates = set(exclude_dates or [])
-    exclude_dirs = set(os.path.basename(str(d).rstrip("/\\")) for d in (exclude_dirs or []))
+    # Normalize caller-supplied and manifest exclusions to the same key.
+    exclude_dirs = set(_norm_folder_name(d) for d in (exclude_dirs or []))
+    manifest_excluded = load_excluded_folders()
+    exclude_dirs |= set(manifest_excluded.keys())
 
     local_dir = get_local_dir(local_dir)
     analysis_dirs = get_analysis_dirs(local_dir)
     if verbose:
         print(f"Found {len(analysis_dirs)} analysis directories.", flush=True)
+        if manifest_excluded:
+            print(f"Excluding {len(manifest_excluded)} folder(s) from excluded_folders.csv.", flush=True)
 
     all_data = []
     for d in analysis_dirs:
         dir_name = os.path.basename(d)
 
-        if dir_name in exclude_dirs:
+        if _norm_folder_name(dir_name) in exclude_dirs:
             if verbose:
-                print(f"  Skipping {dir_name}: excluded by user selection.", flush=True)
+                reason = manifest_excluded.get(_norm_folder_name(dir_name), "user selection")
+                print(f"  Skipping {dir_name}: excluded ({reason}).", flush=True)
             continue
 
         if verbose:

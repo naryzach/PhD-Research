@@ -1,0 +1,11 @@
+Folder,Reason
+ADAM10_20260509_Sam-FLAG_Renamed, Unreliable in-house prep (Sam) — skip this folder in the pipeline and aggregate/selectivity analysis.
+ADAM10_20260610_AbC_G_Renamed, Unlabeled AbC_G sample — skip this folder in the pipeline and aggregate/selectivity analysis.
+ADAM10_20260610_F6_G_Renamed, Unlabeled F6_G sample — skip this folder in the pipeline and aggregate/selectivity analysis.
+ADAM10_20260610_F6_R_Renamed, Unreliable in-house prep (FPLC-fraction) — skip this folder in the pipeline and aggregate/selectivity analysis.
+ADAM10_20260610_F9_G_Renamed, Unlabeled F9_G sample — skip this folder in the pipeline and aggregate/selectivity analysis.
+ADAM10_20260610_F9_R_Renamed, Unreliable in-house prep (FPLC-fraction) — skip this folder in the pipeline and aggregate/selectivity analysis.
+ADAM10_20260701_Abcam_Renamed, duplicate Abcam sample — skip this folder in the pipeline and aggregate/selectivity analysis.
+MMP2_20260701_Sino_Renamed, duplicate Sino sample — skip this folder in the pipeline and aggregate/selectivity analysis.
+MMP9_20260701_Masoud_Renamed, Duplicate Masoud sample — skip this folder in the pipeline and aggregate/selectivity analysis.
+MMP9_20260701_Sino_Renamed, duplicate Sino sample — skip this folder in the pipeline and aggregate/selectivity analysis.

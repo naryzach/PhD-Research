@@ -1024,7 +1024,7 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
         vmax = max(vmax, 1.0) # Ensure no divide-by-zero
         
         norm = plt.Normalize(0, vmax)
-        cmap = plt.cm.get_cmap("viridis" if m_name == "Binding" else "magma")
+        cmap = plt.get_cmap("viridis" if m_name == "Binding" else "magma")
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
         
@@ -1059,7 +1059,7 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
         vmax = max(vmax, 1.0)
         
         norm = plt.Normalize(0, vmax)
-        cmap = plt.cm.get_cmap("viridis" if m_name == "Binding" else "magma")
+        cmap = plt.get_cmap("viridis" if m_name == "Binding" else "magma")
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
         
@@ -1086,7 +1086,7 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
     vmax_ratio = max(vmax_ratio, 1.0)
     
     norm = plt.Normalize(0, vmax_ratio)
-    cmap = plt.cm.get_cmap("viridis")
+    cmap = plt.get_cmap("viridis")
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     
@@ -1160,7 +1160,7 @@ def generate_aggregate_plots(df_stats, ridge_data, thresh_bind, thresh_expr, out
         
         # Color scale based on Double+ % to give more context than just height
         norm = plt.Normalize(0, vmax_dp)
-        cmap = plt.cm.get_cmap("viridis")
+        cmap = plt.get_cmap("viridis")
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
         

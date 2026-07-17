@@ -405,12 +405,14 @@ def recalc_global_aggregate(base_path, excluded_trials_tuple, expr_ch, bind_ch,
         return pd.DataFrame()
 
     folders = discover_trial_folders(base_path)
-    excluded = set(excluded_trials_tuple)
+    # Session exclusions (sidebar multiselect) unioned with the persistent manifest.
+    excluded = set(aggregate_analysis._norm_folder_name(n) for n in excluded_trials_tuple)
+    excluded |= set(aggregate_analysis.load_excluded_folders().keys())
     rows = []
     total = len(folders)
     for i, folder in enumerate(folders):
         name = os.path.basename(folder.rstrip("/"))
-        if name in excluded:
+        if aggregate_analysis._norm_folder_name(name) in excluded:
             continue
         m = re.match(r'^([^_]+)_(\d{8})', name)
         if not m:
@@ -1081,6 +1083,8 @@ recalc_mode = (agg_source_mode == "Recalculate (live)")
 
 # Trial folders live under the currently selected Data Root (Local path or bucket).
 _all_trial_dirs = [os.path.basename(f.rstrip("/")) for f in discover_trial_folders(base_path)]
+# Persistent exclusions from excluded_folders.csv always apply (session multiselect adds to them).
+_manifest_excluded = aggregate_analysis.load_excluded_folders() if AGG_MODULE_OK else {}
 excluded_trials = st.sidebar.multiselect(
     "Exclude Trials (folders)",
     _all_trial_dirs,
@@ -1088,11 +1092,19 @@ excluded_trials = st.sidebar.multiselect(
     key="excluded_trials",
     help=(
         "Trial folders (e.g. *_Renamed) removed here are dropped from BOTH the "
-        "aggregate and selectivity analyses. Use for days/trials you know were "
-        "unreliable. Applies to the live recalculation; also honored as a "
-        "Target+Date filter when loading from CSVs."
+        "aggregate and selectivity analyses (this session). For permanent "
+        "exclusions, add the folder to Protein-Analysis/excluded_folders.csv. "
+        "Applies to the live recalculation; also honored as a Target+Date filter "
+        "when loading from CSVs."
     ),
 )
+if _manifest_excluded:
+    _mode_note = ("applied now" if recalc_mode else
+                  "applied after re-running the pipeline/aggregate (CSV mode reads the saved sheet)")
+    st.sidebar.caption(
+        f"🚫 {len(_manifest_excluded)} folder(s) permanently excluded via "
+        f"`excluded_folders.csv` — {_mode_note}: {', '.join(sorted(_manifest_excluded.keys()))}"
+    )
 if recalc_mode:
     if not AGG_MODULE_OK:
         st.sidebar.warning(f"Live recalculation unavailable: {_AGG_IMPORT_ERROR}")
