@@ -466,10 +466,37 @@ def main():
                         help="AF3 results to import (.zip from the server, or legacy .json).")
     parser.add_argument("--esmfold2-gpus", default=None, metavar="N|auto",
                         help="Data-parallel ESMFold2 across GPUs (default 1; N free GPUs, or 'auto').")
+    # Anneal / throughput controls — mirror iterative_refinement so the specificity
+    # campaign can run the SAME hot->cold schedule. These set the inherited
+    # iterative_refinement module globals (the parent's methods read them at call time).
+    parser.add_argument("--backbones-per-target", type=int, default=None,
+                        help=f"RFd3 backbones per target per iteration (default {ir.BACKBONES_PER_TARGET}).")
+    parser.add_argument("--seqs-per-backbone", type=int, default=None,
+                        help=f"LMPNN sequences per backbone (default {ir.LMPNN_SEQS_PER_BACKBONE}).")
+    parser.add_argument("--init-temperature", type=float, default=None,
+                        help=f"Starting LMPNN temperature for a fresh run (default {ir.INIT_TEMPERATURE}).")
+    parser.add_argument("--min-temperature", type=float, default=None,
+                        help=f"Temperature floor (default {ir.MIN_TEMPERATURE}).")
+    parser.add_argument("--temp-decay", type=float, default=None,
+                        help=f"Per-iteration temperature multiplier (default {ir.TEMP_DECAY}).")
+    parser.add_argument("--no-adaptive-bias", action="store_true",
+                        help="Disable adaptive loop-length narrowing (keeps full diversity).")
     args = parser.parse_args()
 
     if args.esmfold2_gpus is not None:
         ir.ESMFOLD2_GPUS = args.esmfold2_gpus   # resolved at call time by the parent
+    if args.backbones_per_target is not None:
+        ir.BACKBONES_PER_TARGET = args.backbones_per_target
+    if args.seqs_per_backbone is not None:
+        ir.LMPNN_SEQS_PER_BACKBONE = args.seqs_per_backbone
+    if args.init_temperature is not None:
+        ir.INIT_TEMPERATURE = args.init_temperature
+    if args.min_temperature is not None:
+        ir.MIN_TEMPERATURE = args.min_temperature
+    if args.temp_decay is not None:
+        ir.TEMP_DECAY = args.temp_decay
+    if args.no_adaptive_bias:
+        ir.ADAPTIVE_BIAS_START = 10**9
 
     OUT_BASE.mkdir(parents=True, exist_ok=True)
     refiner = SpecificityRefiner(pair_keys=args.pair, active_loops=args.loops)

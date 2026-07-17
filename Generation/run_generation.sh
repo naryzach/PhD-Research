@@ -46,8 +46,21 @@ mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/gen_$(date +%Y%m%d_%H%M%S).log"
 
 # ── Preflight ────────────────────────────────────────────────────────────────
-if [[ "${ESMFOLD2_PYTHON:-}" == "" || ! -x "${ESMFOLD2_PYTHON:-/nonexistent}" ]]; then
-  echo "WARNING: ESMFOLD2_PYTHON is not set to a valid python. ESMFold2 ranking will be skipped." | tee -a "$LOG"
+# ESMFold2 runs as a subprocess under $ESMFOLD2_PYTHON. It does NOT need a separate
+# env — if your ACTIVE env (e.g. foundry) already has ESMFold2, just let it default
+# to the active interpreter. Only set ESMFOLD2_PYTHON yourself if ESMFold2 lives in
+# a different env than the one you launch this from.
+export ESMFOLD2_PYTHON="${ESMFOLD2_PYTHON:-$(command -v python)}"
+echo "ESMFOLD2_PYTHON=$ESMFOLD2_PYTHON" | tee -a "$LOG"
+if [[ ! -x "$ESMFOLD2_PYTHON" ]]; then
+  echo "WARNING: '$ESMFOLD2_PYTHON' is not an executable python — ESMFold2 ranking will be SKIPPED." | tee -a "$LOG"
+elif ! "$ESMFOLD2_PYTHON" -c "import esm" >/dev/null 2>&1; then
+  echo "WARNING: '$ESMFOLD2_PYTHON' cannot 'import esm' — ESMFold2 ranking will be SKIPPED" | tee -a "$LOG"
+  echo "         (designs would fall back to the foldability floor only)." | tee -a "$LOG"
+  echo "         Fix: run with your ESMFold2-capable env active, or set" | tee -a "$LOG"
+  echo "           export ESMFOLD2_PYTHON=/path/to/that/env/bin/python" | tee -a "$LOG"
+else
+  echo "ESMFold2 backend (esm) import OK." | tee -a "$LOG"
 fi
 
 if [[ "${FRESH:-0}" == "1" && -f "$STATE" ]]; then
