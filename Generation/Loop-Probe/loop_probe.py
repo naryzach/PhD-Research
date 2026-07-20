@@ -6,38 +6,51 @@ Probe the generative binder pipeline's *sequence preferences* per loop position.
 For a chosen target and set of TIMP3 loops, this runs the same two generative
 stages used in production —
 
-    RFd3 (build a loop backbone of a FIXED user-specified length)
-      -> LigandMPNN (design the loop sequence on that fixed scaffold)
+    RFd3 (build loop backbones of FIXED user-specified lengths)
+      -> LigandMPNN (design the loop sequences on that fixed scaffold)
 
 — many times, then tallies which amino acids (and which biochemical groups)
 LigandMPNN places at each loop position.  There is **no structure-validation
 stage** (no AF3 / RF3 / ESMFold2): we only care about the emitted sequences, so
-the funnel's scoring machinery is intentionally skipped.  The output is a set of
+the funnel's scoring machinery is intentionally skipped.  Output is a set of
 per-position frequency heatmaps (raw 20-AA + charge / size / type /
 hydrophobicity / polarity / aromaticity) written per loop.
 
-Starting structures are the AlphaFold complexes in
-    Data/TIMP_Complexes/AlphaFold_CIF/TIMP3_vs_<TARGET>_AF.cif
-where chain A is full-length TIMP3 (188 aa) and chain B is the target.  We trim
-TIMP3 to the N-terminal design construct (residues 1..scaffold_len, default 121)
-and relabel to the pipeline's canonical binder=A / target=B convention.
+All selected loops are designed **simultaneously** in one LigandMPNN pass, so
+loop-loop interactions are captured.  (The `loop_probe_sweep.py` wrapper adds
+joint *length* sweeping for loops grouped as e.g. `AB_C`.)
+
+Templates
+---------
+Any complex structure with a TIMP3-like chain and a target chain works — CIF or
+PDB.  **Chain order is auto-detected** by sequence (see `identify_chains`), so
+files whose binder/target chains are swapped need no special handling:
+
+    alphafold  Data/TIMP_Complexes/AlphaFold_CIF/TIMP3_vs_<T>_AF.cif   (binder = chain A, 188 aa)
+    haddock    Data/TIMP_Complexes/HADDOCK_Outputs/<T>_TIMP3_HADDOCK.pdb (binder = chain B, 121 aa)
+
+TIMP3 is trimmed to the N-terminal design construct (default residues 1..121)
+and relabelled to the pipeline's canonical binder=A / target=B convention.  Loop
+positions and native lengths are then **derived from the template's own
+sequence** by locating the flanking tripeptides, so alternative templates and
+numbering offsets work without editing LOOP_CONFIGS.
 
 This module reuses the engine wrappers and helpers from `iterative_refinement`
-(so it must run in the same GPU `foundry` conda env with FOUNDRY_CHECKPOINT_DIRS
-set).  All heatmap/counting logic lives in the GPU-free `loop_probe_analysis`
-module, so figures can be rebuilt on any machine from the CSVs written here.
+(so it must run in the same GPU `foundry` conda env).  All heatmap/counting
+logic lives in the GPU-free `loop_probe_analysis` module.
 
 Example
 -------
     conda activate foundry
-    python Generation/Loop-Probe/loop_probe.py --target MMP2 --loops AB C EF \
-        --n-backbones 40 --seqs-per-backbone 3 --temperature 0.3
+    python Generation/Loop-Probe/loop_probe.py --target MMP2 --loops AB C EF
+    python Generation/Loop-Probe/loop_probe.py --config my_run.yaml --target MMP2
 
 Native loop lengths (default) come from LOOP_CONFIGS: AB=6, C=6, EF=4, GH=10.
 """
 
 from __future__ import annotations
 
+import re
 import sys
 import json
 import time
@@ -88,49 +101,134 @@ logger = logging.getLogger("loop_probe")
 for _noisy in ("transforms", "atomworks.io", "atomworks.ml", "foundry", "lightning"):
     logging.getLogger(_noisy).setLevel(logging.ERROR)
 
-# ── Paths / target inputs ──────────────────────────────────────────────────────
+# ── Paths ──────────────────────────────────────────────────────────────────────
 # _HERE is Generation/Loop-Probe/, so the repo root is two levels up.
 _REPO    = _HERE.parent.parent
-AF_DIR   = _REPO / "Data" / "TIMP_Complexes" / "AlphaFold_CIF"
 OUT_BASE = _REPO / "Local" / "loop_probe"
 
-# Target -> AlphaFold complex CIF (chain A = TIMP3 binder, chain B = target).
-# These six clean "TIMP3_vs_<T>_AF.cif" folds cover the pipeline's target set.
-PROBE_TARGETS = {
-    "MMP2":   "TIMP3_vs_MMP2_AF.cif",
-    "MMP3":   "TIMP3_vs_MMP3_AF.cif",
-    "MMP9":   "TIMP3_vs_MMP9_AF.cif",
-    "MMP10":  "TIMP3_vs_MMP10_AF.cif",
-    "ADAM10": "TIMP3_vs_ADAM10_AF.cif",
-    "ADAM17": "TIMP3_vs_ADAM17_AF.cif",
+TARGET_NAMES = ["MMP2", "MMP3", "MMP9", "MMP10", "ADAM10", "ADAM17"]
+
+# Built-in template sets: {name: (directory, filename pattern)}.  Anything else
+# can be pointed at with --template-dir / --template-map.
+TEMPLATE_SETS = {
+    "alphafold": (_REPO / "Data" / "TIMP_Complexes" / "AlphaFold_CIF",
+                  "TIMP3_vs_{target}_AF.cif"),
+    "haddock":   (_REPO / "Data" / "TIMP_Complexes" / "HADDOCK_Outputs",
+                  "{target}_TIMP3_HADDOCK.pdb"),
 }
+DEFAULT_TEMPLATE_SET = "alphafold"
 
-# TIMP3 chain in the AF CIF is full-length (188 aa); the design construct is the
-# N-terminal domain.  1..121 is the pipeline's scaffold_len; extended only if a
-# C-terminal loop (GH) is requested.
-DEFAULT_SCAFFOLD_LEN = 121
+# Mature human TIMP3 (188 aa) — the reference used to decide which chain of a
+# template is the binder.  Designed/variant TIMP3s still score far above any
+# protease chain, so detection is robust to loop mutations.
+TIMP3_REF = (
+    "CTCSPSHPQDAFCNSDIVIRAKVVGKKLVKEGPFGTLVYTIKQMKMYRGFTKMPHVQYIHTEASESLCGLK"
+    "LEVNKYQYLLTGRVYDGKMYTGLCNFVERWDQLTLSQRKGLNYRYHLGCNCKIKSCYYLPCFVTSKNECLW"
+    "TDMLSNFGYPGYQSKHYACIRQKGGYCSWYRGWAPPDKSIINATDP"
+)
+# Every loop flank tripeptide — a TIMP3 chain contains most of them, a protease
+# essentially none.  (A 121-aa N-TIMP3 construct hits 6/8: GH's flanks lie
+# beyond residue 121.)
+FLANK_MOTIFS = sorted({m for lc in LOOP_CONFIGS.values()
+                       for m in (lc["left"], lc["right"])})
+
+DEFAULT_SCAFFOLD_LEN = 121   # N-terminal TIMP3 design construct
 FULL_TIMP3_LEN       = 188
-AF_BINDER_CHAIN      = "A"   # TIMP3 in the AlphaFold CIF
-AF_TARGET_CHAIN      = "B"   # protease in the AlphaFold CIF
+BINDER_SCORE_MIN     = 0.50  # below this we refuse to guess the binder chain
+BINDER_SCORE_MARGIN  = 0.20  # binder must beat runner-up by at least this
+
+# ── Run defaults (tuned for multi-day sweeps; all CLI/config overridable) ───────
+DEFAULT_N_BACKBONES       = 100   # RFd3 backbones per configuration
+DEFAULT_SEQS_PER_BACKBONE = 5     # LigandMPNN sequences per backbone
+DEFAULT_TEMPERATURE       = 0.5   # matches production's hot end (INIT_TEMPERATURE)
+DEFAULT_SEED              = 42
 
 
-# ── Loop-length resolution ──────────────────────────────────────────────────────
-def resolve_lengths(active_loops: list[str], overrides: dict[str, int] | None) -> dict[str, int]:
-    """Native (LOOP_CONFIGS['normal']) length per loop, overridden where given."""
-    overrides = overrides or {}
+# ── Config file ────────────────────────────────────────────────────────────────
+def load_config(path: str | Path | None) -> dict:
+    """
+    Load a JSON or YAML run config.  Every CLI flag has a same-named key (dashes
+    or underscores); explicit CLI flags always win over the config file.
+    Returns {} when `path` is None.
+    """
+    if not path:
+        return {}
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"config not found: {p}")
+    text = p.read_text()
+    if p.suffix.lower() in (".yaml", ".yml"):
+        try:
+            import yaml
+        except ImportError as exc:
+            raise SystemExit(
+                f"{p.name} is YAML but PyYAML is not installed — "
+                f"`pip install pyyaml` or use a .json config") from exc
+        cfg = yaml.safe_load(text) or {}
+    else:
+        cfg = json.loads(text)
+    if not isinstance(cfg, dict):
+        raise ValueError(f"{p}: config must be a mapping at the top level")
+    return {str(k).replace("-", "_"): v for k, v in cfg.items()}
+
+
+def cfg_get(cli_value, cfg: dict, key: str, default):
+    """CLI value (if given) > config file > built-in default."""
+    if cli_value is not None:
+        return cli_value
+    return cfg.get(key, default)
+
+
+# ── Loop selection / grouping ──────────────────────────────────────────────────
+def parse_loop_tokens(tokens: list[str]) -> tuple[list[list[str]], list[str]]:
+    """
+    Parse loop tokens into (groups, design_loops).
+
+    A token joined by '_' is a GROUP whose loops are swept jointly by
+    loop_probe_sweep (e.g. 'AB_C' sweeps AB and C lengths together, capturing
+    their interaction).  Within a single probe run every listed loop is designed
+    simultaneously regardless of grouping.
+
+        ['AB_C', 'EF'] -> ([['AB','C'], ['EF']], ['AB','C','EF'])
+    """
+    groups: list[list[str]] = []
+    design: list[str] = []
+    for tok in tokens:
+        grp = [x for x in str(tok).split("_") if x]
+        if not grp:
+            continue
+        for name in grp:
+            if name not in LOOP_CONFIGS:
+                raise ValueError(f"unknown loop {name!r}; known: {list(LOOP_CONFIGS)}")
+            if name not in design:
+                design.append(name)
+        groups.append(grp)
+    if not design:
+        raise ValueError("no loops selected")
+    return groups, design
+
+
+def resolve_lengths(active_loops: list[str], overrides: dict[str, int] | None,
+                    geometry: list[dict] | None = None) -> dict[str, int]:
+    """
+    Native length per loop, overridden where given.  Native comes from the
+    template-derived geometry when available, else LOOP_CONFIGS['normal'].
+    """
+    overrides = {k: int(v) for k, v in (overrides or {}).items()}
+    native = {g["name"]: g["normal"] for g in (geometry or [])}
     lengths = {}
     for name in active_loops:
         if name not in LOOP_CONFIGS:
             raise ValueError(f"unknown loop {name!r}; known: {list(LOOP_CONFIGS)}")
-        L = int(overrides.get(name, LOOP_CONFIGS[name]["normal"]))
-        if L < 1:
+        L = overrides.get(name, native.get(name, LOOP_CONFIGS[name]["normal"]))
+        if int(L) < 1:
             raise ValueError(f"loop {name} length must be >= 1 (got {L})")
-        lengths[name] = L
+        lengths[name] = int(L)
     return lengths
 
 
 def required_scaffold_len(active_loops: list[str]) -> int:
-    """Smallest N-TIMP3 length that still contains every selected loop + flanks."""
+    """Smallest TIMP3 construct length that still contains every selected loop."""
     need = DEFAULT_SCAFFOLD_LEN
     for name in active_loops:
         lc = LOOP_CONFIGS[name]
@@ -138,38 +236,185 @@ def required_scaffold_len(active_loops: list[str]) -> int:
     return min(need, FULL_TIMP3_LEN)
 
 
-# ── Input structure preparation (AF CIF -> trimmed design PDB) ──────────────────
-def prepare_input_pdb(target: str, af_dir: Path, out_pdb: Path,
-                      scaffold_len: int) -> tuple[Path, int]:
+# ── Template resolution + chain identification ─────────────────────────────────
+def resolve_template(target: str, template_set: str = DEFAULT_TEMPLATE_SET,
+                     template_dir: str | Path | None = None,
+                     template_map: dict | None = None) -> Path:
     """
-    Read the AlphaFold complex CIF, keep TIMP3 chain A residues 1..scaffold_len
-    (the design construct) + the whole target chain B, relabel to the pipeline's
-    binder=A / target=B convention, renumber each chain from 1, and write a PDB
-    RFd3 can consume.  Cached: skipped if `out_pdb` already exists.
+    Find the template structure for `target`.
 
-    Returns (pdb_path, target_len).
+    Priority: explicit template_map[target] > <template_dir or set dir>/<pattern>
+    > any .cif/.pdb in that directory whose filename contains the target name.
     """
-    cif_path = af_dir / PROBE_TARGETS[target]
-    if not cif_path.exists():
-        raise FileNotFoundError(f"AF CIF not found for {target}: {cif_path}")
+    if template_map and target in template_map:
+        p = Path(template_map[target])
+        return p if p.is_absolute() else (_REPO / p)
 
-    cif = pdbx.CIFFile.read(str(cif_path))
-    arr = pdbx.get_structure(cif, model=1)
+    if template_set not in TEMPLATE_SETS:
+        raise ValueError(f"unknown template set {template_set!r}; "
+                         f"known: {list(TEMPLATE_SETS)}")
+    set_dir, pattern = TEMPLATE_SETS[template_set]
+    directory = Path(template_dir) if template_dir else set_dir
+    if not directory.is_absolute():
+        directory = _REPO / directory
 
-    binder = arr[(arr.chain_id == AF_BINDER_CHAIN) & (arr.res_id <= scaffold_len)]
-    target_arr = arr[arr.chain_id == AF_TARGET_CHAIN]
+    cand = directory / pattern.format(target=target)
+    if cand.exists():
+        return cand
+    hits = [p for p in sorted(directory.glob("*"))
+            if p.suffix.lower() in (".cif", ".pdb") and target.lower() in p.name.lower()]
+    if len(hits) == 1:
+        return hits[0]
+    if len(hits) > 1:
+        raise ValueError(
+            f"{target}: {len(hits)} candidate templates in {directory} "
+            f"({[p.name for p in hits]}); disambiguate with --template-map")
+    raise FileNotFoundError(f"{target}: no template found in {directory} "
+                            f"(tried {cand.name})")
+
+
+def load_structure(path: str | Path):
+    """Read a .cif or .pdb into a biotite AtomArray (first model)."""
+    path = Path(path)
+    if path.suffix.lower() in (".cif", ".mmcif"):
+        return pdbx.get_structure(pdbx.CIFFile.read(str(path)), model=1)
+    return PDBFile.read(str(path)).get_structure()[0]
+
+
+def timp3_likeness(seq: str) -> tuple[float, int, float]:
+    """
+    Score how TIMP3-like a chain sequence is.
+    Combines loop-flank motif hits (robust to loop redesign / numbering offsets)
+    with N-terminal identity to mature TIMP3.  Returns (score, n_flanks, identity).
+    """
+    if not seq:
+        return 0.0, 0, 0.0
+    hits = sum(1 for m in FLANK_MOTIFS if m in seq)
+    n = min(len(seq), len(TIMP3_REF))
+    ident = sum(1 for a, b in zip(seq[:n], TIMP3_REF[:n]) if a == b) / n if n else 0.0
+    return 0.7 * (hits / len(FLANK_MOTIFS)) + 0.3 * ident, hits, ident
+
+
+def identify_chains(arr, binder_chain: str | None = None,
+                    target_chain: str | None = None,
+                    label: str = "") -> tuple[str, str]:
+    """
+    Decide which chain is the TIMP3 binder and which is the target.
+
+    Explicit `binder_chain` / `target_chain` are honoured (and validated).
+    Otherwise the binder is the highest TIMP3-likeness chain and the target is
+    the largest remaining chain.  Raises if the call is ambiguous, so a bad
+    template fails loudly instead of silently designing the wrong chain.
+    """
+    chains = list(dict.fromkeys(arr.chain_id[arr.atom_name == "CA"].tolist()))
+    if not chains:
+        raise RuntimeError(f"{label}: no CA atoms / chains found")
+
+    if binder_chain and target_chain:
+        for ch, role in ((binder_chain, "binder"), (target_chain, "target")):
+            if ch not in chains:
+                raise ValueError(f"{label}: {role} chain {ch!r} not in {chains}")
+        return binder_chain, target_chain
+
+    scored = []
+    for ch in chains:
+        s, hits, ident = timp3_likeness(get_seq(arr, ch))
+        scored.append((s, hits, ident, ch, int((arr.chain_id == ch).sum())))
+    scored.sort(key=lambda r: -r[0])
+    best = scored[0]
+
+    if binder_chain:
+        bc = binder_chain
+    else:
+        if best[0] < BINDER_SCORE_MIN:
+            raise RuntimeError(
+                f"{label}: no chain looks like TIMP3 (best {best[3]!r} score "
+                f"{best[0]:.2f}). Pass --binder-chain/--target-chain explicitly.")
+        if len(scored) > 1 and (best[0] - scored[1][0]) < BINDER_SCORE_MARGIN:
+            raise RuntimeError(
+                f"{label}: binder chain ambiguous ({best[3]!r} {best[0]:.2f} vs "
+                f"{scored[1][3]!r} {scored[1][0]:.2f}). Pass --binder-chain.")
+        bc = best[3]
+
+    if target_chain:
+        tc = target_chain
+    else:
+        others = [r for r in scored if r[3] != bc]
+        if not others:
+            raise RuntimeError(f"{label}: only one chain ({bc}); need a target chain")
+        # largest remaining chain by atom count
+        tc = max(others, key=lambda r: r[4])[3]
+        if len(others) > 1:
+            logger.warning(f"{label}: {len(chains)} chains present; using {tc!r} "
+                           f"as target (largest non-binder)")
+
+    bs = next(r for r in scored if r[3] == bc)
+    logger.info(f"{label}: binder=chain {bc} (TIMP3 score {bs[0]:.2f}, "
+                f"flanks {bs[1]}/{len(FLANK_MOTIFS)}, ident {bs[2]:.2f}), "
+                f"target=chain {tc}")
+    return bc, tc
+
+
+# ── Template-derived loop geometry ─────────────────────────────────────────────
+def derive_loop_geometry(binder_seq: str, active_loops: list[str]) -> list[dict]:
+    """
+    Locate each selected loop in THIS template's binder sequence via its flanking
+    tripeptides, returning loop dicts with template-accurate `pos` (1-indexed
+    last fixed residue before the loop) and `normal` (native loop length).
+
+    This makes the probe independent of LOOP_CONFIGS' hard-coded numbering, so
+    alternative templates / constructs / numbering offsets work unchanged.
+    """
+    geometry, cursor = [], 0
+    for name in sorted(active_loops, key=lambda n: LOOP_CONFIGS[n]["pos"]):
+        lc = LOOP_CONFIGS[name]
+        m = re.compile(f"{lc['left']}([A-Z]*?){lc['right']}").search(binder_seq[cursor:])
+        if not m:
+            raise RuntimeError(
+                f"loop {name}: flanks {lc['left']}...{lc['right']} not found in the "
+                f"construct (len {len(binder_seq)}). The template may be truncated "
+                f"(try a larger --scaffold-len) or not TIMP3-like.")
+        abs_start = cursor + m.start()
+        pos = abs_start + len(lc["left"])      # 1-indexed last fixed residue
+        normal = len(m.group(1))
+        cursor = cursor + m.end() - len(lc["right"])
+        if pos != lc["pos"] or normal != lc["normal"]:
+            logger.info(f"loop {name}: template geometry pos={pos} normal={normal} "
+                        f"(LOOP_CONFIGS says pos={lc['pos']} normal={lc['normal']})")
+        geometry.append({**lc, "name": name, "pos": pos, "normal": normal})
+    return sorted(geometry, key=lambda g: g["pos"])
+
+
+# ── Input structure preparation (template -> trimmed design PDB) ───────────────
+def prepare_input_pdb(target: str, template: Path, out_pdb: Path, scaffold_len: int,
+                      binder_chain: str | None = None,
+                      target_chain: str | None = None) -> tuple[Path, int]:
+    """
+    Read a template complex (CIF or PDB), auto-detect which chain is the TIMP3
+    binder, keep binder residues 1..scaffold_len plus the whole target chain,
+    relabel to binder=A / target=B, renumber each chain from 1, and write a PDB
+    RFd3 can consume.  Returns (pdb_path, target_len).
+    """
+    template = Path(template)
+    if not template.exists():
+        raise FileNotFoundError(f"{target}: template not found: {template}")
+    arr = load_structure(template)
+    bc, tc = identify_chains(arr, binder_chain, target_chain,
+                             label=f"[{target}] {template.name}")
+
+    binder = arr[(arr.chain_id == bc) & (arr.res_id <= scaffold_len)]
+    target_arr = arr[arr.chain_id == tc]
     if len(binder) == 0 or len(target_arr) == 0:
-        raise RuntimeError(
-            f"{target}: expected chains {AF_BINDER_CHAIN}/{AF_TARGET_CHAIN} in "
-            f"{cif_path.name}; got chains {sorted(set(arr.chain_id))}")
+        raise RuntimeError(f"{target}: empty binder or target selection from "
+                           f"{template.name} (chains {bc}/{tc})")
 
-    binder.chain_id[:] = DESIGN_BINDER_CHAIN     # "A"
+    binder.chain_id[:] = DESIGN_BINDER_CHAIN      # "A"
     target_arr.chain_id[:] = DESIGN_TARGET_CHAIN  # "B"
     combined = renumber(binder + target_arr)
 
     target_len = len(np.unique(combined.res_id[combined.chain_id == DESIGN_TARGET_CHAIN]))
     binder_len = len(np.unique(combined.res_id[combined.chain_id == DESIGN_BINDER_CHAIN]))
-    logger.info(f"[{target}] prepared construct: binder(N-TIMP3)={binder_len} aa, "
+    logger.info(f"[{target}] construct from {template.name}: binder={binder_len} aa, "
                 f"target={target_len} aa -> {out_pdb.name}")
 
     out_pdb.parent.mkdir(parents=True, exist_ok=True)
@@ -179,7 +424,7 @@ def prepare_input_pdb(target: str, af_dir: Path, out_pdb: Path,
     return out_pdb, target_len
 
 
-# ── Fixed-length contig (loop lengths pinned to lengths[name]) ──────────────────
+# ── Fixed-length contig (loop lengths pinned to lengths[name]) ─────────────────
 def build_fixed_contig(selected_loops: list[dict], scaffold_len: int,
                        target_len: int, lengths: dict[str, int]) -> tuple[str, str]:
     """
@@ -208,7 +453,7 @@ def build_fixed_contig(selected_loops: list[dict], scaffold_len: int,
     return full_contig, f"{total}-{total}"
 
 
-# ── Generation ──────────────────────────────────────────────────────────────────
+# ── Generation ─────────────────────────────────────────────────────────────────
 def run_rfd3_fixed(input_pdb: Path, contig: str, length_range: str,
                    n_designs: int) -> list:
     """Sample `n_designs` fixed-length backbones with RFd3. Returns AtomArrays."""
@@ -246,8 +491,11 @@ def run_lmpnn_fixed(backbones: list, selected_loops: list[dict], out_dir: Path,
                     tag: str, seed: int) -> list[dict]:
     """
     Design loop sequences for each backbone with LigandMPNN (everything outside
-    the selected loops — scaffold + flanks + entire target — held fixed).
-    Returns one record per emitted sequence with the extracted loop sub-seqs.
+    the selected loops — scaffold + flanks + entire target — held fixed).  All
+    selected loops are designed together, so their interactions are modelled.
+
+    The engine writes no files (write_structures/write_fasta are False); the
+    sequences come back in memory and are persisted by run_probe.
     """
     bc, fc = DESIGN_BINDER_CHAIN, DESIGN_TARGET_CHAIN
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -285,45 +533,91 @@ def run_lmpnn_fixed(backbones: list, selected_loops: list[dict], out_dir: Path,
     return results
 
 
+# ── Construct preparation + geometry (shared by run_probe and the sweep) ───────
+def prepare_construct(target: str, active_loops: list[str],
+                      template_set: str = DEFAULT_TEMPLATE_SET,
+                      template_dir: str | Path | None = None,
+                      template_map: dict | None = None,
+                      binder_chain: str | None = None,
+                      target_chain: str | None = None,
+                      scaffold_len: int | None = None) -> dict:
+    """
+    Resolve the template, build (or reuse) the trimmed design construct, and
+    derive this template's loop geometry.
+
+    Returns {input_pdb, target_len, selected_loops, scaffold_len, template,
+    binder_seq}.  Cheap and idempotent — the prepared PDB is cached on disk, so
+    the sweep can call this once per target to learn the native loop lengths
+    before running anything.
+    """
+    scaffold_len = scaffold_len or required_scaffold_len(active_loops)
+    template = resolve_template(target, template_set, template_dir, template_map)
+    input_pdb = OUT_BASE / "inputs" / f"{target}_{template.stem}_N{scaffold_len}.pdb"
+    if not input_pdb.exists():
+        prepare_input_pdb(target, template, input_pdb, scaffold_len,
+                          binder_chain, target_chain)
+
+    prepared = PDBFile.read(str(input_pdb)).get_structure()[0]
+    binder_seq = get_seq(prepared, DESIGN_BINDER_CHAIN)
+    target_len = len(np.unique(
+        prepared.res_id[prepared.chain_id == DESIGN_TARGET_CHAIN]))
+    selected_loops = derive_loop_geometry(binder_seq, active_loops)
+    return {"input_pdb": input_pdb, "target_len": target_len,
+            "selected_loops": selected_loops, "scaffold_len": scaffold_len,
+            "template": template, "binder_seq": binder_seq}
+
+
+def template_native_lengths(target: str, active_loops: list[str], **kwargs) -> dict[str, int]:
+    """Native loop lengths as they appear in this target's template construct."""
+    con = prepare_construct(target, active_loops, **kwargs)
+    return {g["name"]: g["normal"] for g in con["selected_loops"]}
+
+
 # ── Top-level probe (one target, one length configuration) ─────────────────────
-def run_probe(target: str, active_loops: list[str], lengths: dict[str, int],
-              n_backbones: int, seqs_per_backbone: int, temperature: float,
-              out_dir: Path, af_dir: Path = AF_DIR, scaffold_len: int | None = None,
-              seed: int = 42, make_plots: bool = True) -> dict:
+def run_probe(target: str, active_loops: list[str],
+              lengths: dict[str, int] | None = None,
+              n_backbones: int = DEFAULT_N_BACKBONES,
+              seqs_per_backbone: int = DEFAULT_SEQS_PER_BACKBONE,
+              temperature: float = DEFAULT_TEMPERATURE,
+              out_dir: Path = None,
+              template_set: str = DEFAULT_TEMPLATE_SET,
+              template_dir: str | Path | None = None,
+              template_map: dict | None = None,
+              binder_chain: str | None = None, target_chain: str | None = None,
+              scaffold_len: int | None = None, seed: int = DEFAULT_SEED,
+              make_plots: bool = True) -> dict:
     """
     Run RFd3->LigandMPNN at fixed loop lengths for one target and write, per
     loop: sequences.csv, position-count/frequency CSVs, and heatmaps.
+    `lengths` defaults to each loop's template-native length.
     Returns a summary dict (also written as summary.json).
     """
-    if target not in PROBE_TARGETS:
-        raise ValueError(f"unknown target {target!r}; known: {list(PROBE_TARGETS)}")
-
-    selected_loops = sorted(
-        [{**LOOP_CONFIGS[n], "name": n} for n in active_loops],
-        key=lambda x: x["pos"])
-    scaffold_len = scaffold_len or required_scaffold_len(active_loops)
-
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    # Prepared design constructs are cached in one shared location, keyed by
-    # target + construct length, so a whole sweep reuses a single trim per target.
-    input_pdb = OUT_BASE / "inputs" / f"{target}_Nterm{scaffold_len}.pdb"
-    if not input_pdb.exists():
-        _, target_len = prepare_input_pdb(target, af_dir, input_pdb, scaffold_len)
-    else:
-        arr0 = PDBFile.read(str(input_pdb)).get_structure()[0]
-        target_len = len(np.unique(arr0.res_id[arr0.chain_id == DESIGN_TARGET_CHAIN]))
+
+    # Prepared constructs are cached per (target, template, construct length) so
+    # a whole sweep reuses a single trim per target.  Loop positions and native
+    # lengths come from THIS template's own sequence.
+    con = prepare_construct(target, active_loops, template_set, template_dir,
+                            template_map, binder_chain, target_chain, scaffold_len)
+    input_pdb      = con["input_pdb"]
+    target_len     = con["target_len"]
+    selected_loops = con["selected_loops"]
+    scaffold_len   = con["scaffold_len"]
+    template       = con["template"]
+    lengths = resolve_lengths(active_loops, lengths, selected_loops)
 
     contig, length_range = build_fixed_contig(selected_loops, scaffold_len,
                                               target_len, lengths)
-    length_sig = "_".join(f"{n}{lengths[n]}" for n in [lc["name"] for lc in selected_loops])
-    logger.info(f"[{target}] loops={active_loops} lengths={lengths} "
-                f"T={temperature} backbones={n_backbones}x{seqs_per_backbone}")
+    ordered = [lc["name"] for lc in selected_loops]
+    length_sig = "_".join(f"{n}{lengths[n]}" for n in ordered)
+    logger.info(f"[{target}] loops={ordered} lengths={lengths} T={temperature} "
+                f"backbones={n_backbones}x{seqs_per_backbone} template={template.name}")
     logger.info(f"[{target}] contig: {contig}")
 
     backbones = run_rfd3_fixed(input_pdb, contig, length_range, n_backbones)
     tag = f"{target}_{length_sig}_T{temperature}"
-    designs = run_lmpnn_fixed(backbones, selected_loops, out_dir / "lmpnn",
+    designs = run_lmpnn_fixed(backbones, selected_loops, out_dir,
                               temperature, seqs_per_backbone, tag, seed)
 
     # ── Persist sequences ──────────────────────────────────────────────────────
@@ -338,7 +632,7 @@ def run_probe(target: str, active_loops: list[str], lengths: dict[str, int],
                 s = d.get(f"loop_{lc['name']}_seq", "MISSING")
                 fh.write(f">{d['design_id']}|{lc['name']}|L{lengths[lc['name']]}\n{s}\n")
 
-    # ── Count + heatmap per loop ────────────────────────────────────────────────
+    # ── Count + heatmap per loop ───────────────────────────────────────────────
     per_loop = {}
     for lc in selected_loops:
         name, L = lc["name"], lengths[lc["name"]]
@@ -348,8 +642,10 @@ def run_probe(target: str, active_loops: list[str], lengths: dict[str, int],
         good = [s for s in raw if len(s) == L and set(s) <= lpa.AA_SET]
         counts = lpa.count_positions(good, length=L)
         counts.attrs["n_sequences"] = len(good)
+        n_uniq = len(set(good))
         per_loop[name] = {"n_designs": len(raw), "n_usable": len(good),
-                          "n_parse_fail": len(raw) - len(good), "length": L}
+                          "n_parse_fail": len(raw) - len(good),
+                          "n_unique": n_uniq, "length": L}
         if make_plots:
             lpa.render_all_heatmaps(counts, out_dir, stem=name,
                                     title_prefix=f"{target} | {name} L{L} | ")
@@ -358,26 +654,33 @@ def run_probe(target: str, active_loops: list[str], lengths: dict[str, int],
             counts.to_csv(out_dir / f"position_counts_{name}.csv")
 
     summary = {
-        "target": target, "loops": active_loops, "lengths": lengths,
+        "target": target, "loops": ordered, "lengths": lengths,
+        "template": str(template), "template_set": template_set,
         "scaffold_len": scaffold_len, "temperature": temperature,
         "n_backbones": n_backbones, "seqs_per_backbone": seqs_per_backbone,
         "n_designs_total": len(designs), "contig": contig,
-        "length_range": length_range, "seed": seed, "per_loop": per_loop,
+        "length_range": length_range, "seed": seed,
+        "loop_geometry": {g["name"]: {"pos": g["pos"], "normal": g["normal"]}
+                          for g in selected_loops},
+        "per_loop": per_loop,
     }
     with open(out_dir / "summary.json", "w") as fh:
         json.dump(summary, fh, indent=2)
-    logger.info(f"[{target}] done -> {out_dir}  "
-                + " ".join(f"{k}:{v['n_usable']}/{v['n_designs']}" for k, v in per_loop.items()))
+    logger.info(f"[{target}] done -> {out_dir}  " + " ".join(
+        f"{k}:{v['n_usable']}/{v['n_designs']}(uniq {v['n_unique']})"
+        for k, v in per_loop.items()))
     return summary
 
 
-# ── CLI ─────────────────────────────────────────────────────────────────────────
-def _parse_lengths(spec: str | None) -> dict[str, int]:
-    """Parse '--lengths AB=8,C=6' into {'AB':8,'C':6}."""
+# ── CLI ────────────────────────────────────────────────────────────────────────
+def parse_kv_ints(spec: str | dict | None) -> dict[str, int]:
+    """Parse 'AB=8,C=6' (or pass through a dict from a config file)."""
     if not spec:
         return {}
+    if isinstance(spec, dict):
+        return {k: int(v) for k, v in spec.items()}
     out = {}
-    for tok in spec.replace(" ", "").split(","):
+    for tok in str(spec).replace(" ", "").split(","):
         if not tok:
             continue
         name, _, val = tok.partition("=")
@@ -385,41 +688,75 @@ def _parse_lengths(spec: str | None) -> dict[str, int]:
     return out
 
 
+def add_common_args(ap: argparse.ArgumentParser) -> None:
+    """Arguments shared by loop_probe and loop_probe_sweep (defaults stay None
+    so the config file can supply them; see cfg_get)."""
+    ap.add_argument("--config", default=None, help="JSON/YAML run config")
+    ap.add_argument("--loops", nargs="+", default=None,
+                    help="loops to design; join with '_' to sweep jointly "
+                         "(e.g. AB_C EF). Default: AB C EF")
+    ap.add_argument("--n-backbones", type=int, default=None,
+                    help=f"RFd3 backbones per config (default {DEFAULT_N_BACKBONES})")
+    ap.add_argument("--seqs-per-backbone", type=int, default=None,
+                    help=f"LigandMPNN sequences per backbone (default {DEFAULT_SEQS_PER_BACKBONE})")
+    ap.add_argument("--temperature", type=float, default=None,
+                    help=f"LigandMPNN sampling temperature (default {DEFAULT_TEMPERATURE})")
+    ap.add_argument("--template-set", default=None, choices=list(TEMPLATE_SETS),
+                    help=f"built-in template set (default {DEFAULT_TEMPLATE_SET})")
+    ap.add_argument("--template-dir", default=None,
+                    help="directory of template structures (overrides the set's dir)")
+    ap.add_argument("--binder-chain", default=None,
+                    help="force the TIMP3/binder chain id (default: auto-detect)")
+    ap.add_argument("--target-chain", default=None,
+                    help="force the target chain id (default: auto-detect)")
+    ap.add_argument("--scaffold-len", type=int, default=None,
+                    help="TIMP3 construct length (default auto: 121, extended for GH)")
+    ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--out-dir", default=None)
+    ap.add_argument("--no-plots", action="store_true",
+                    help="write CSVs only (rebuild figures later with loop_probe_analysis)")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--target", required=True, choices=list(PROBE_TARGETS),
-                    help="which TIMP3-vs-target AF complex to probe")
-    ap.add_argument("--loops", nargs="+", default=["AB", "C", "EF"],
-                    choices=list(LOOP_CONFIGS), help="loops to design (default AB C EF)")
+    ap.add_argument("--target", default=None, choices=TARGET_NAMES,
+                    help="which target complex to probe")
     ap.add_argument("--lengths", default=None,
-                    help="fix loop lengths, e.g. 'AB=8,C=6'; unspecified loops use native")
-    ap.add_argument("--n-backbones", type=int, default=40,
-                    help="RFd3 backbones to sample (default 40)")
-    ap.add_argument("--seqs-per-backbone", type=int, default=3,
-                    help="LigandMPNN sequences per backbone (default 3)")
-    ap.add_argument("--temperature", type=float, default=0.3,
-                    help="LigandMPNN sampling temperature (default 0.3)")
-    ap.add_argument("--scaffold-len", type=int, default=None,
-                    help="N-TIMP3 construct length (default auto: 121, extended for GH)")
-    ap.add_argument("--out-dir", default=None,
-                    help="output dir (default Local/loop_probe/<target>_<lengthsig>)")
-    ap.add_argument("--af-dir", default=str(AF_DIR), help="AlphaFold CIF directory")
-    ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--no-plots", action="store_true",
-                    help="write CSVs only (rebuild figures later with loop_probe_analysis)")
+                    help="fix loop lengths, e.g. 'AB=8,C=6'; unspecified use native")
+    add_common_args(ap)
     args = ap.parse_args()
 
+    cfg = load_config(args.config)
+    target = cfg_get(args.target, cfg, "target", None)
+    if not target:
+        ap.error("--target is required (or set 'target' in the config)")
+
+    loop_tokens = cfg_get(args.loops, cfg, "loops", ["AB", "C", "EF"])
+    if isinstance(loop_tokens, str):
+        loop_tokens = loop_tokens.split()
+    _, design_loops = parse_loop_tokens(loop_tokens)
+    lengths = parse_kv_ints(cfg_get(args.lengths, cfg, "lengths", None))
+
     setup_env()
-    lengths = resolve_lengths(args.loops, _parse_lengths(args.lengths))
-    length_sig = "_".join(f"{n}{lengths[n]}" for n in args.loops)
-    out_dir = Path(args.out_dir) if args.out_dir else OUT_BASE / f"{args.target}_{length_sig}"
+    length_sig = "_".join(f"{n}{lengths[n]}" for n in design_loops if n in lengths) or "native"
+    out_dir = cfg_get(args.out_dir, cfg, "out_dir", None)
+    out_dir = Path(out_dir) if out_dir else OUT_BASE / f"{target}_{length_sig}"
 
     run_probe(
-        target=args.target, active_loops=args.loops, lengths=lengths,
-        n_backbones=args.n_backbones, seqs_per_backbone=args.seqs_per_backbone,
-        temperature=args.temperature, out_dir=out_dir, af_dir=Path(args.af_dir),
-        scaffold_len=args.scaffold_len, seed=args.seed, make_plots=not args.no_plots,
+        target=target, active_loops=design_loops, lengths=lengths, out_dir=out_dir,
+        n_backbones=cfg_get(args.n_backbones, cfg, "n_backbones", DEFAULT_N_BACKBONES),
+        seqs_per_backbone=cfg_get(args.seqs_per_backbone, cfg, "seqs_per_backbone",
+                                  DEFAULT_SEQS_PER_BACKBONE),
+        temperature=cfg_get(args.temperature, cfg, "temperature", DEFAULT_TEMPERATURE),
+        template_set=cfg_get(args.template_set, cfg, "template_set", DEFAULT_TEMPLATE_SET),
+        template_dir=cfg_get(args.template_dir, cfg, "template_dir", None),
+        template_map=cfg.get("template_map"),
+        binder_chain=cfg_get(args.binder_chain, cfg, "binder_chain", None),
+        target_chain=cfg_get(args.target_chain, cfg, "target_chain", None),
+        scaffold_len=cfg_get(args.scaffold_len, cfg, "scaffold_len", None),
+        seed=cfg_get(args.seed, cfg, "seed", DEFAULT_SEED),
+        make_plots=not (args.no_plots or cfg.get("no_plots", False)),
     )
 
 

@@ -261,32 +261,52 @@ def mean_group_frequency(counts: pd.DataFrame, scheme: str) -> pd.Series:
     return gfreq.mean(axis=1) if gfreq.shape[1] else gfreq.sum(axis=1)
 
 
-def length_trend_matrix(counts_by_length: dict[int, pd.DataFrame],
-                        scheme: str) -> pd.DataFrame:
+def sort_keys(keys) -> list:
     """
-    group × length matrix of position-averaged group frequency — the compact
-    "how does composition shift as the loop grows" view for one scheme.
+    Sort sweep keys: integer lengths (single-loop sweep) numerically, string
+    combination labels (joint multi-loop sweep, e.g. 'AB6_C7') lexically.
+    """
+    keys = list(keys)
+    if all(isinstance(k, (int, np.integer)) for k in keys):
+        return sorted(keys)
+    return sorted(keys, key=str)
+
+
+def key_label(key) -> str:
+    """Column label for a sweep key: 'L06' for a length, the string itself otherwise."""
+    return f"L{int(key):02d}" if isinstance(key, (int, np.integer)) else str(key)
+
+
+def length_trend_matrix(counts_by_key: dict, scheme: str) -> pd.DataFrame:
+    """
+    group × sweep-point matrix of position-averaged group frequency — the compact
+    "how does composition shift across the sweep" view for one scheme.
+
+    Keys may be integer lengths (single-loop sweep) or combination labels such
+    as 'AB6_C7' (joint multi-loop sweep).
     """
     cols = {}
-    for L in sorted(counts_by_length):
-        cols[f"L{L:02d}"] = mean_group_frequency(counts_by_length[L], scheme)
+    for k in sort_keys(counts_by_key):
+        cols[key_label(k)] = mean_group_frequency(counts_by_key[k], scheme)
     out = pd.DataFrame(cols)
     out = out.reindex(list(PROPERTY_SCHEMES[scheme]))  # stable group order
     return out
 
 
-def length_montage(freq_by_length: dict[int, pd.DataFrame], title: str,
+def length_montage(freq_by_key: dict, title: str,
                    out_path: Path, cbar_label: str = "frequency") -> Path:
     """
-    One figure stacking the raw 20-AA frequency heatmaps for every swept length
-    (one subplot per length, shared 20-AA y-axis).  Widths differ because longer
-    loops have more positions, so each subplot draws its own position axis.
+    One figure stacking the raw 20-AA frequency heatmaps for every sweep point
+    (one subplot each, shared 20-AA y-axis).  Widths differ because longer loops
+    have more positions, so each subplot draws its own position axis.
+
+    Keys may be integer lengths or joint-group combination labels ('AB6_C7').
     """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    lengths = sorted(freq_by_length)
-    n = len(lengths)
-    max_cols = max((freq_by_length[L].shape[1] for L in lengths), default=1)
+    keys = sort_keys(freq_by_key)
+    n = len(keys)
+    max_cols = max((freq_by_key[k].shape[1] for k in keys), default=1)
 
     fig_h = max(3.0, 0.34 * len(AA20) * 1.0 + 0.8)
     fig, axes = plt.subplots(
@@ -294,13 +314,13 @@ def length_montage(freq_by_length: dict[int, pd.DataFrame], title: str,
         dpi=150, squeeze=False)
     axes = axes[0]
     im = None
-    for ax, L in zip(axes, lengths):
-        m = freq_by_length[L]
+    for ax, k in zip(axes, keys):
+        m = freq_by_key[k]
         im = ax.imshow(m.values.astype(float), aspect="auto", cmap=_CMAP,
                        vmin=0.0, vmax=1.0)
         ax.set_xticks(range(m.shape[1]))
         ax.set_xticklabels([c.replace("pos", "") for c in m.columns], fontsize=7)
-        ax.set_xlabel(f"L={L}", fontsize=9)
+        ax.set_xlabel(key_label(k) if not isinstance(k, str) else k, fontsize=9)
         n_seq = m.attrs.get("n_sequences")
         if n_seq is not None:
             ax.set_title(f"n={n_seq}", fontsize=8)
