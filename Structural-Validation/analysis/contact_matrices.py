@@ -80,6 +80,24 @@ def _panel(ax, mat, ylab, xlab, title):
     return im
 
 
+def _slug(source: str) -> str:
+    """Filename-safe source tag (':' is illegal on Windows)."""
+    return source.replace(":", "_").replace("×", "x")
+
+
+def resolve_model(source: str, cid: str, tid: str):
+    """Model path for any source: the two co-folds, or a HADDOCK docking track
+    named 'HADDOCK:<construct_src>x<target_src>' (e.g. HADDOCK:AF3xCrystal)."""
+    if source == "AF3_cofold":
+        return MR.af3_complex(cid, tid)
+    if source == "ESMFold2_cofold":
+        return MR.esmfold_complex(cid, tid)
+    if source.startswith("HADDOCK:"):
+        csrc, tsrc = source.split(":", 1)[1].split("x", 1)
+        return MR.haddock_complex(cid, tid, csrc, tsrc)
+    raise ValueError(f"unknown source {source!r}")
+
+
 def select_pairs(cx, source, top):
     """Best `top` construct(s) per target for `source`, ranked by DockQ then composite."""
     ok = cx[(cx.status == "ok") & (cx.source == source)].copy()
@@ -109,10 +127,10 @@ def main():
     csv_dir = C.OUT_ANALYSIS / "contact_matrices"
     csv_dir.mkdir(parents=True, exist_ok=True)
 
+    tag = _slug(args.source)
     panels = []
     for cid, tid in pairs:
-        mp = MR.af3_complex(cid, tid) if args.source == "AF3_cofold" else \
-            MR.esmfold_complex(cid, tid)
+        mp = resolve_model(args.source, cid, tid)
         if mp is None:
             continue
         res = matrix_for(mp, reg[cid]["sequence"], reg[tid]["sequence"])
@@ -120,7 +138,7 @@ def main():
             continue
         mat, ylab, xlab = res
         pd.DataFrame(mat, index=ylab, columns=xlab).to_csv(
-            csv_dir / f"{cid}__{tid}_{args.source}.csv")
+            csv_dir / f"{cid}__{tid}_{tag}.csv")
         panels.append((cid, tid, mat, ylab, xlab))
 
     if not panels:
@@ -143,7 +161,7 @@ def main():
     if im is not None:
         fig.colorbar(im, ax=axes, fraction=0.02, pad=0.02,
                      label="min heavy-atom distance (Å)")
-    out_png = out_dir / f"contact_matrix_gallery_{args.source}.png"
+    out_png = out_dir / f"contact_matrix_gallery_{tag}.png"
     fig.savefig(out_png, dpi=140, bbox_inches="tight")
     plt.close(fig)
     print(f"{len(panels)} contact matrices -> {out_png.relative_to(C.REPO_ROOT)}")
