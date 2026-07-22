@@ -95,6 +95,43 @@ def _save_monomer(struct_path, src_cid: str, new_cid: str, out_pdb: Path) -> Non
     _force_chain(out_pdb, new_cid)
 
 
+def _write_ensemble(conformers, cid: str, out_pdb: Path) -> int:
+    """Multi-MODEL ensemble PDB from several folds of the same chain.
+
+    Conformers are superposed onto the first before writing. AF3's own 5 seeds are
+    near-identical (0.2-0.8 A), so a useful ensemble needs CROSS-METHOD members
+    (AF3 + ESMFold2), which differ by ~0.9 A globally and up to 2.6 A at the
+    reactive edge — the conformational freedom rigid-body docking otherwise lacks.
+    """
+    blocks, ref = [], None
+    for i, p in enumerate(conformers):
+        st = sio.load(p)
+        ch = max(sio.get_chains(p).values(), key=lambda c: len(c.seq))
+        if ref is None:
+            ref = ch
+        else:
+            m, r = M._matched_ca(ch, ref)
+            if len(m) >= 3:
+                R, t, _ = M.kabsch(m, r)
+                for a in st.get_atoms():
+                    a.coord = M.apply_transform(np.asarray([a.coord], float), R, t)[0]
+        tmp = out_pdb.with_name(out_pdb.name + f".m{i}.tmp")
+        io = PDBIO()
+        io.set_structure(st)
+        io.save(str(tmp), _ChainSel(ch.cid))
+        _force_chain(tmp, cid)
+        blocks.append([ln for ln in tmp.read_text().splitlines()
+                       if ln.startswith(("ATOM", "TER"))])
+        tmp.unlink()
+    with open(out_pdb, "w") as f:
+        for i, b in enumerate(blocks, 1):
+            f.write(f"MODEL     {i}\n")
+            f.write("\n".join(b) + "\n")
+            f.write("ENDMDL\n")
+        f.write("END\n")
+    return len(blocks)
+
+
 def _zn_atoms(structure):
     """All zinc atoms.
 
@@ -243,6 +280,29 @@ def prep_target(target: str, out_dir: Path, timp_af, tc_ref_seq=None) -> dict:
     info["zn_his_resids"] = [motif[i] for i in (0, 4, 10)]
     info["timp_active"] = cc.resids[:5]      # C1-T2-C3-S4-P5 reactive edge
     info["timp_passive"] = cc.resids[5:10]
+
+    # ── ensemble inputs: AF3 seeds + the ESMFold2 fold (cross-method diversity) ──
+    def _members(entity, af_path):
+        out = [af_path]
+        alt = Path(af_path).parent / Path(af_path).name.replace("model_0", "model_4")
+        if alt.exists():
+            out.append(alt)
+        esm = MR.esmfold_monomer(entity)
+        if esm:
+            out.append(esm)
+        return out
+    try:
+        timp_ens = out_dir / f"{target}_TIMP3_ens.pdb"
+        tgt_ens = out_dir / f"{target}_target_ens.pdb"
+        n_c = _write_ensemble(_members(TIMP_ENTITY, timp_af), "B", timp_ens)
+        n_t = _write_ensemble(_members(target, tgt_af), "A", tgt_ens)
+        info["timp_pdb_ens"], info["target_pdb_ens"] = str(timp_ens), str(tgt_ens)
+        info["n_conformers"] = f"{n_c}x{n_t}"
+        # semi-flexible segments for flexref: target zinc loop, TIMP3 reactive edge
+        info["flex_target"] = [min(motif) - 2, max(motif) + 2]
+        info["flex_timp"] = [cc.resids[0], cc.resids[min(11, len(cc.resids) - 1)]]
+    except Exception as e:
+        info["ens_status"] = f"error:{e}"
     return info
 
 

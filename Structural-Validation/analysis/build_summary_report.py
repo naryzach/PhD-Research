@@ -205,6 +205,77 @@ def _b64(png: Path) -> str:
     return base64.b64encode(png.read_bytes()).decode()
 
 
+def build_haddock_section() -> str:
+    """'Can HADDOCK be improved?' — legacy-generation comparison, the zinc trial,
+    and the input-conformation effect. Reads analysis/legacy_haddock_eval.csv."""
+    p = A / "legacy_haddock_eval.csv"
+    if not p.exists():
+        return ""
+    df = pd.read_csv(p)
+    df = df[(df.get("status") == "ok") & (df.target == "ADAM17")].copy()
+    if df.empty:
+        return ""
+    df["dockq"] = _num(df, "dockq")
+
+    def agg(name):
+        s = df[df["set"] == name]["dockq"].dropna()
+        if s.empty:
+            return None
+        return (s.mean(), s.min(), s.max(), len(s))
+
+    rows, order = "", [
+        ("legacy_HADDOCK2", "HADDOCK2 (web server, first run)", "unbound monomers"),
+        ("legacy_HADDOCK3", "HADDOCK3 (the improvement)", "unbound monomers"),
+        ("indep_noZn", "HADDOCK3 reproduction", "unbound monomers"),
+        ("indep_Zn", "HADDOCK3 + catalytic Zn²⁺", "unbound monomers"),
+        ("indep_ens", "HADDOCK3 + ensemble &amp; flexible edge", "unbound, 3×3 conformers"),
+        ("cofoldsplit_noZn", "HADDOCK3 seeded with co-fold", "<b>bound</b> conformations"),
+    ]
+    for key, label, inp in order:
+        a = agg(key)
+        if a is None:
+            continue
+        mean, lo, hi, n = a
+        rng = f"[{lo:.3f}–{hi:.3f}]" if n > 1 else "—"
+        hl = ' style="background:#fdecea"' if key == "cofoldsplit_noZn" else ""
+        rows += (f"<tr{hl}><td>{label}</td><td>{inp}</td><td>{mean:.3f}</td>"
+                 f"<td>{rng}</td><td>{n}</td></tr>")
+    return f"""
+<h2>Can HADDOCK be improved? (three things we tried)</h2>
+<p class="sub">All numbers are DockQ against the native TIMP3:ADAM17 co-crystal.
+For scale, the AF3/ESMFold2 co-folds reach <b>0.76</b> and CAPRI “medium”; DockQ
+0.23 is the “acceptable” floor. Every HADDOCK row below is CAPRI <b>incorrect</b>.</p>
+<table><tr><th>Run</th><th>Input conformations</th><th>DockQ mean</th>
+<th>range over seeds</th><th>n</th></tr>{rows}</table>
+<div class="key"><b>What actually moves the needle — and what doesn't.</b>
+<b>(1) HADDOCK2 → HADDOCK3</b> was a real improvement (DockQ 0.030 → 0.085, AIR
+energy 166 → 95, violations 5 → 3) — and it is already what the current pipeline
+runs, so there is nothing left to recover there.
+<b>(2) Adding the catalytic Zn²⁺</b> — absent from every previous run — nudged the
+mean (0.046 → 0.078) but the seed ranges overlap and at n=3 vs 3 the comparison
+cannot reach significance (Mann-Whitney floor p=0.1). Tellingly HADDOCK's own score
+got <i>worse</i> with the metal. Zinc is not the missing ingredient.
+<b>(3) Ensemble + interface flexibility also fails</b> (0.034 vs 0.046, i.e. no
+better and nominally worse). Note AF3's own five seeds are useless as an ensemble —
+they differ by only 0.2–0.8 Å — so this used genuine cross-method conformers
+(AF3 + ESMFold2, differing up to 2.6 Å at the reactive edge) plus explicit
+semi-flexible segments. Its AIR energies were the best of any arm (50–161) while its
+DockQ was the worst: restraint satisfaction improved, realism did not.
+<b>(4) Input conformation dominates everything.</b> Seeding HADDOCK with the
+co-fold's <i>bound</i> conformations gives 0.78; independently-folded <i>unbound</i>
+monomers give 0.046 — a ~15× gap that dwarfs every other factor. HADDOCK's failure
+here is an induced-fit problem: rigid-body docking cannot rebuild the bound
+interface from unbound monomers, and no amount of metal, sampling or segment
+flexibility substitutes for it.</div>
+<p style="font-size:.85rem;color:#555">Caveat: the co-fold-seeded row is
+<i>semi-circular</i> — it needs the answer (the co-fold) as input, so it is a
+legitimate modelling route but not a validation. Also, HADDOCK parameterises the ion
+at charge +0.96 rather than a formal +2, so the null zinc result shows “zinc as
+HADDOCK models it doesn’t rescue this dock”, not that the metal is irrelevant.
+Full data: <code>analysis/legacy_haddock_eval.csv</code>.</p>
+"""
+
+
 def build_fcs_section() -> str:
     """A 'does structure predict binding?' block folded in from the FCS correlation
     layer (fcs_correlation.py). Returns '' if that analysis hasn't been run."""
@@ -244,7 +315,7 @@ purchased-only sensitivity check: <code>reports/fcs_correlation_report.html</cod
 
 
 def build_html(tbl: pd.DataFrame, png: Path, ext_png: Path, contact_png: Path,
-               cx, out_html, fcs_html: str = ""):
+               cx, out_html, fcs_html: str = "", haddock_html: str = ""):
     n_dock = (cx.source.str.startswith("HADDOCK") & (cx.status == "ok")).sum()
 
     def cell(v, fmt="{:.2f}"):
@@ -326,6 +397,7 @@ edge and each target's catalytic zinc motif, for the best construct per target
 matrix, generalised across sources; raw matrices for every pair are in
 <code>analysis/contact_matrices/</code>.</p>
 {img(contact_png, "contact matrix gallery")}
+{haddock_html}
 {fcs_html}
 <h2>What this supports</h2>
 <ul>
@@ -365,8 +437,9 @@ def main():
     make_extended_figure(cx, ext_png)
     contact_png = C.OUT_FIG / "contact_matrices" / "contact_matrix_gallery_AF3_cofold.png"
     fcs_html = build_fcs_section()
+    haddock_html = build_haddock_section()
     html = C.OUT_REPORT / "summary_report.html"
-    build_html(tbl, png, ext_png, contact_png, cx, html, fcs_html)
+    build_html(tbl, png, ext_png, contact_png, cx, html, fcs_html, haddock_html)
     print("Summary table:\n", tbl.to_string(index=False))
     print(f"\nFigure   -> {png.relative_to(C.REPO_ROOT)}")
     print(f"Extended -> {ext_png.relative_to(C.REPO_ROOT)}")

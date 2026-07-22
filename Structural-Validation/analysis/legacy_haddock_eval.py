@@ -40,6 +40,7 @@ SETS = {
     # independently-folded (unbound) monomer inputs — the unbiased test
     "indep_noZn": (_TC / "HADDOCK_indep_noZn", _STD),
     "indep_Zn": (_TC / "HADDOCK_indep_Zn", _STD),
+    "indep_ens": (_TC / "HADDOCK_indep_ens", _STD),   # ensemble + flexible edge
     # first-pass co-fold-split inputs (BIASED: bound conformations) — kept for the record
     "cofoldsplit_noZn": (_TC / "HADDOCK_Repro_noZn", _STD),
     "cofoldsplit_Zn": (_TC / "HADDOCK_Zn", _STD),

@@ -33,7 +33,8 @@ from pathlib import Path
 HADDOCK_CMD = os.environ.get("HADDOCK3_CMD", "haddock3")
 SCRATCH = Path(os.environ.get("HADDOCK_SCRATCH",
                               "/home/ryangustafson/haddock_scratch")) / "zn_trial"
-ARM_DIR = {"noZn": "HADDOCK_indep_noZn", "Zn": "HADDOCK_indep_Zn"}
+ARM_DIR = {"noZn": "HADDOCK_indep_noZn", "Zn": "HADDOCK_indep_Zn",
+           "ens": "HADDOCK_indep_ens"}
 
 CFG = """
 run_dir = "{run_dir}"
@@ -50,7 +51,7 @@ molecules = [
 [topoaa]
 
 [rigidbody]
-sampling = 500
+sampling = {sampling}
 iniseed = {seed}
 ambig_fname = "{tbl}"
 {unambig}
@@ -59,7 +60,7 @@ select = 200
 
 [flexref]
 ambig_fname = "{tbl}"
-{unambig}
+{unambig}{flexseg}
 [emref]
 ambig_fname = "{tbl}"
 {unambig}
@@ -139,8 +140,12 @@ def run_pair(arm: str, t: dict, repo_mnt: Path, jobs: int,
     # stage monomers from the D: prep into WSL-native, space-free scratch
     timp = inp / f"{target}_TIMP3.pdb"
     tgt = inp / f"{target}_target.pdb"
-    src_timp = win_to_wsl(t["timp_pdb"])
-    src_tgt = win_to_wsl(t["target_pdb_zn" if arm == "Zn" else "target_pdb"])
+    if arm == "ens":
+        src_timp = win_to_wsl(t["timp_pdb_ens"])
+        src_tgt = win_to_wsl(t["target_pdb_ens"])
+    else:
+        src_timp = win_to_wsl(t["timp_pdb"])
+        src_tgt = win_to_wsl(t["target_pdb_zn" if arm == "Zn" else "target_pdb"])
     for s, d in ((src_timp, timp), (src_tgt, tgt)):
         if not s.exists():
             return f"missing_input:{s.name}"
@@ -154,9 +159,20 @@ def run_pair(arm: str, t: dict, repo_mnt: Path, jobs: int,
         write_zn_unambig(ztbl, t["zn_resid"], t["zn_his_resids"])
         unambig = f'unambig_fname = "{ztbl}"\n'
 
+    # ensemble arm: more rigidbody sampling (3x3 conformer combinations) and
+    # explicit semi-flexible segments so the interface can adapt during flexref
+    sampling, flexseg = 500, ""
+    if arm == "ens":
+        sampling = 900
+        ft, fi = t.get("flex_target"), t.get("flex_timp")
+        if ft and fi:
+            flexseg = (f"nseg1 = 1\nseg_sta_1_1 = {ft[0]}\nseg_end_1_1 = {ft[1]}\n"
+                       f"nseg2 = 1\nseg_sta_2_1 = {fi[0]}\nseg_end_2_1 = {fi[1]}\n")
+
     cfg = inp / f"{target}_{arm}_s{seed}.cfg"
     cfg.write_text(CFG.format(run_dir=run_dir, ncores=jobs, tgt=tgt, timp=timp,
-                              tbl=tbl, unambig=unambig, seed=seed))
+                              tbl=tbl, unambig=unambig, seed=seed,
+                              sampling=sampling, flexseg=flexseg))
     if dry:
         return "dry-run(prepared)"
 
