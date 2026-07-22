@@ -7,12 +7,16 @@ import toml
 import os
 from db_manager import AdvancedLabInventory
 
-def generate_digest_body(db, include_all_pending=False):
+def generate_digest_body(db, include_all_pending=None):
     """Generates the text body for the lab digest without sending it."""
     # --- PART 1: Pending Orders ---
-    last_week = datetime.now() - timedelta(days=7)
-    excluded_statuses = "('Received', 'Cancelled', 'LOST', 'Completed')"
-    
+    if include_all_pending is None:
+        scope = db.get_setting("digest_pending_scope", "Pending This Week")
+        include_all_pending = (scope == "All Pending (Need to Order)")
+    days_back = int(db.get_setting("digest_days_back", "7"))
+    last_week = datetime.now() - timedelta(days=days_back)
+    excluded_statuses = "('Received', 'Cancelled', 'Lost', 'Completed')"
+
     if include_all_pending:
         pending_query = f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses}"
         df_orders = db.get_query_df(pending_query)
@@ -55,15 +59,18 @@ def generate_digest_body(db, include_all_pending=False):
         body += "🔮 PREDICTIVE REORDER ALERTS (Next 14 Days):\n" + "\n".join(predictive_alerts) + "\n" + "-"*40 + "\n\n"
         
     if not df_depleted.empty:
-        body += "⚠️ RECENTLY DEPLETED ITEMS (Last 7 Days):\n"
+        body += f"⚠️ RECENTLY DEPLETED ITEMS (Last {days_back} Days):\n"
         for _, row in df_depleted.iterrows():
             depleted_on = pd.to_datetime(row['last_depleted']).strftime('%Y-%m-%d %H:%M') if pd.notna(row['last_depleted']) else "N/A"
             body += f"❌ {row['name']} - Depleted {depleted_on}\n"
         body += "-"*40 + "\n\n"
-        
-    body += "🛒 PENDING PURCHASE REQUESTS:\n"
+
+    if include_all_pending:
+        body += "🛒 PENDING PURCHASE REQUESTS (Scope: All Outstanding / Need to Order):\n"
+    else:
+        body += f"🛒 PENDING PURCHASE REQUESTS (Scope: Last {days_back} Days):\n"
     if df_orders.empty:
-        body += "No new purchase requests this week.\n"
+        body += "No pending purchase requests found for this scope.\n"
     else:
         # Check layout setting
         layout = db.get_setting("email_digest_layout", "Abbreviated")
@@ -95,9 +102,10 @@ def generate_digest_body(db, include_all_pending=False):
 
 def generate_status_updates_body(db):
     """Generates the text body for all orders with recent status changes."""
-    last_week = datetime.now() - timedelta(days=7)
-    
-    # Query for all purchase requests updated in the last 7 days
+    days_back = int(db.get_setting("digest_days_back", "7"))
+    last_week = datetime.now() - timedelta(days=days_back)
+
+    # Query for all purchase requests updated in the last N days (inherits Days Back from Order Digest Options)
     # We sort by status FIRST (for grouping), then by date (most recent first)
     query = """
         SELECT item_name, requester_name, status, status_updated_at, quantity 
@@ -110,7 +118,7 @@ def generate_status_updates_body(db):
     if df_updates.empty:
         return None
         
-    body = "🧪 RECENT LAB ORDER STATUS UPDATES (Last 7 Days):\n"
+    body = f"🧪 RECENT LAB ORDER STATUS UPDATES (Last {days_back} Days):\n"
     body += "Items are grouped by their current status.\n\n"
     
     current_group = None

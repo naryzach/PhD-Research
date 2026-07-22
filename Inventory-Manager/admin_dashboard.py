@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 from db_manager import AdvancedLabInventory
 from friday_mailer import send_friday_digest
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import time
 from utils import display_tracking_button, color_status
@@ -70,19 +70,80 @@ menu = ["🔄 Manage Order Status", "✏️ Edit Tables Directly", "📥 Export 
 choice = st.sidebar.radio("Admin Tools", menu)
 
 
+def render_vendor_orders_view(db):
+    """Displays all outstanding purchase requests grouped by vendor, with approximate cost, item details, clickable links, and a grand total."""
+    scope = db.get_setting("digest_pending_scope", "Pending This Week")
+    layout = db.get_setting("email_digest_layout", "Abbreviated")
+    excluded_statuses = "('Received', 'Cancelled', 'Lost', 'Completed')"
+
+    if scope == "All Pending (Need to Order)":
+        df = db.get_query_df(f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses}")
+        scope_label = "all outstanding orders"
+    else:
+        days_back = int(db.get_setting("digest_days_back", "7"))
+        cutoff = datetime.now() - timedelta(days=days_back)
+        df = db.get_query_df(
+            f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses} AND request_date >= ?",
+            params=(cutoff,)
+        )
+        scope_label = f"orders requested in the last {days_back} days"
+
+    if df.empty:
+        st.info(f"No outstanding orders found ({scope_label}).")
+        return
+
+    df['seller_clean'] = df['seller'].apply(lambda s: str(s).strip() if pd.notna(s) and str(s).strip() else "Unknown Vendor")
+    df['unit_price'] = df['price'].apply(lambda p: float(p) if pd.notna(p) else 0.0)
+    df['qty_clean'] = df['quantity'].apply(lambda q: float(q) if pd.notna(q) else 1.0)
+    df['line_total'] = df['unit_price'] * df['qty_clean']
+
+    st.caption(f"Showing {scope_label} · Layout: {layout} (change in ⚙️ System Settings → Order Digest Options)")
+
+    grand_total = 0.0
+    for vendor, group in df.sort_values('item_name').groupby('seller_clean'):
+        vendor_total = group['line_total'].sum()
+        grand_total += vendor_total
+        with st.expander(f"🏪 {vendor} — {len(group)} item(s) — ${vendor_total:,.2f}", expanded=True):
+            for _, row in group.iterrows():
+                ice_flag = " ❄️ **[KEEP ON ICE]**" if row.get('keep_on_ice') else ""
+                st.markdown(f"📦 **{row['item_name']}**{ice_flag} — {row['qty_clean']:.1f}x @ ${row['unit_price']:,.2f} = **${row['line_total']:,.2f}**")
+
+                details = f"Status: `{row['status']}` · Requested by: {row['requester_name']}"
+                if layout == "Detailed":
+                    catalog = row['catalog_number'] if pd.notna(row['catalog_number']) else 'N/A'
+                    details += f" · Catalog #: {catalog}"
+                    if pd.notna(row['specs']) and str(row['specs']).strip():
+                        details += f" · Specs: {row['specs']}"
+                st.caption(details)
+
+                link = row['link'] if pd.notna(row['link']) and str(row['link']).strip() else None
+                if link:
+                    st.markdown(f"🔗 [View Product Link]({link})")
+                st.write("")
+
+    st.divider()
+    st.success(f"💰 **Order Total (All Vendors): ${grand_total:,.2f}**")
+
+
 # --- 0. Manage Order Status ---
 if choice == "🔄 Manage Order Status":
     st.header("Order Pipeline Manager")
     
     # Action for Manager: Generate Digest
+    _scope_setting = db.get_setting("digest_pending_scope", "Pending This Week")
+    _days_back_setting = db.get_setting("digest_days_back", "7")
+    _pending_help = ("Emails all outstanding pending orders" if _scope_setting == "All Pending (Need to Order)"
+                      else f"Emails pending orders from the last {_days_back_setting} days")
+    _updates_help = f"Emails all status changes from the last {_days_back_setting} days"
+
     col1, col2 = st.columns(2)
     with col1:
         st.write("**📦 Order Requests Digest**")
         digest_btn_col1, digest_btn_col2 = st.columns(2)
         with digest_btn_col1:
-            if st.button("📨 Send Weekly Digest", help="Emails pending orders from the last 7 days"):
+            if st.button("📨 Send Weekly Digest", help=_pending_help):
                 with st.spinner("Preparing digest..."):
-                    success, message, body = send_friday_digest(include_all_pending=False)
+                    success, message, body = send_friday_digest()
                     if success:
                         st.toast(f"✅ {message}")
                         st.success(message)
@@ -93,15 +154,15 @@ if choice == "🔄 Manage Order Status":
         with digest_btn_col2:
             if st.button("👁️ Preview Text", key="preview_pending"):
                 from friday_mailer import generate_digest_body
-                st.session_state.preview_content = generate_digest_body(db, include_all_pending=False)
+                st.session_state.preview_content = generate_digest_body(db)
                 st.session_state.preview_type = "Pending Orders"
                 st.session_state.preview_subject = "🧪 Weekly Lab Orders Digest"
-    
+
     with col2:
         st.write("**🧪 Recent Status Updates**")
         updates_btn_col1, updates_btn_col2 = st.columns(2)
         with updates_btn_col1:
-            if st.button("📨 Email Update Digest", help="Emails all status changes from the last 7 days"):
+            if st.button("📨 Email Update Digest", help=_updates_help):
                 from friday_mailer import send_status_updates_digest
                 with st.spinner("Sending updates digest..."):
                     success, message, body = send_status_updates_digest()
@@ -118,13 +179,13 @@ if choice == "🔄 Manage Order Status":
                 st.session_state.preview_content = generate_status_updates_body(db)
                 st.session_state.preview_type = "Recent Updates"
                 st.session_state.preview_subject = "🧪 Lab Order Status Updates Digest"
-    
+
     # --- Full Width Preview Display ---
     if "preview_content" in st.session_state and st.session_state.preview_content:
         st.markdown("---")
         st.info(f"🔍 {st.session_state.preview_type} Preview:")
         st.code(st.session_state.preview_content, language="text")
-        
+
         # Action Buttons for the preview
         btn_col1, btn_col2, _ = st.columns([1, 1, 2])
         with btn_col1:
@@ -140,7 +201,7 @@ if choice == "🔄 Manage Order Status":
             if st.button("❌ Close Preview", width='stretch'):
                 del st.session_state.preview_content
                 st.rerun()
-                
+
         with st.expander("📋 View Digest Content to Copy"):
             st.code(st.session_state.preview_content, language="text")
     elif "preview_content" in st.session_state:
@@ -148,7 +209,14 @@ if choice == "🔄 Manage Order Status":
         if st.button("Clear Notification"):
             del st.session_state.preview_content
             st.rerun()
-    
+
+    st.divider()
+    st.write("**📊 Outstanding Orders by Vendor**")
+    if st.button("📊 View Outstanding Orders by Vendor"):
+        st.session_state.show_vendor_view = not st.session_state.get("show_vendor_view", False)
+    if st.session_state.get("show_vendor_view", False):
+        render_vendor_orders_view(db)
+
     st.info("Update the status of pending lab requests.")
     
     # Fetch all active orders
@@ -600,16 +668,47 @@ elif choice == "⚙️ System Settings":
 
     st.divider()
     
-    # Email Digest Layout Setting
+    # --- Order Digest Options ---
+    st.subheader("📧 Order Digest Options")
+    st.caption("Applies to the Order Requests Digest, the Outstanding Orders by Vendor view, and (Days Back only) the Recent Status Updates digest.")
+
+    # Layout: Abbreviated vs Detailed
     current_layout = db.get_setting("email_digest_layout", "Abbreviated")
-    new_layout = st.radio("📧 Weekly Digest Layout", options=["Abbreviated", "Detailed"], index=0 if current_layout == "Abbreviated" else 1,
+    new_layout = st.radio("Layout", options=["Abbreviated", "Detailed"], index=0 if current_layout == "Abbreviated" else 1,
                           help="Abbreviated: One line per item. Detailed: Shows all specs, catalog #s, and links.")
-    
+
     if new_layout != current_layout:
         db.set_setting("email_digest_layout", new_layout)
         st.success(f"Digest layout updated to {new_layout}.")
         time.sleep(1)
         st.rerun()
+
+    # Scope: Pending This Week vs All Pending
+    scope_options = ["Pending This Week", "All Pending (Need to Order)"]
+    current_scope = db.get_setting("digest_pending_scope", "Pending This Week")
+    if current_scope not in scope_options:
+        current_scope = "Pending This Week"
+    new_scope = st.radio("Scope", options=scope_options, index=scope_options.index(current_scope),
+                         help="Pending This Week: Only orders requested within the Days Back window. All Pending (Need to Order): every currently outstanding order, regardless of request date.")
+
+    if new_scope != current_scope:
+        db.set_setting("digest_pending_scope", new_scope)
+        st.success(f"Digest scope updated to {new_scope}.")
+        time.sleep(1)
+        st.rerun()
+
+    # Days Back (drives the "this week" window, and is always used by Recent Status Updates)
+    current_days_back = int(db.get_setting("digest_days_back", "7"))
+    if new_scope == "Pending This Week":
+        new_days_back = st.number_input("Days Back", min_value=1, max_value=90, value=current_days_back, step=1,
+                                        help="Number of days back to include for the 'Pending This Week' scope. The Recent Status Updates digest also uses this value, regardless of Scope.")
+        if new_days_back != current_days_back:
+            db.set_setting("digest_days_back", str(new_days_back))
+            st.success(f"Days back updated to {new_days_back}.")
+            time.sleep(1)
+            st.rerun()
+    else:
+        st.caption(f"ℹ️ Days Back is currently **{current_days_back}** (used by the Recent Status Updates digest; only shown here when Scope is 'Pending This Week').")
 
     st.divider()
     st.subheader("🧹 System Maintenance")
