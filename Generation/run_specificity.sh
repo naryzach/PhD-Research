@@ -17,6 +17,10 @@
 
 set -uo pipefail
 
+# Reduce CUDA fragmentation OOMs. And do NOT share GPUs with run_generation.sh —
+# pin this to its own device(s) (CUDA_VISIBLE_DEVICES=...) or run it sequentially.
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+
 # ── Config (edit here) ───────────────────────────────────────────────────────
 PAIRS="MMP ADAM"                     # MMP2-vs-MMP9, ADAM10-vs-ADAM17
 LOOPS="AB C EF"

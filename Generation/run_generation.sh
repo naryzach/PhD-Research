@@ -25,6 +25,15 @@
 
 set -uo pipefail
 
+# Reduce CUDA fragmentation OOMs (the failure mode when GPUs are shared/tight).
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+# IMPORTANT: do NOT co-schedule this with run_specificity.sh on the SAME GPUs — they
+# will starve each other's ESMFold2 (CUDA OOM) and silently leave designs unscored,
+# hitting the last-processed targets hardest. Pin each run to its own device(s):
+#   CUDA_VISIBLE_DEVICES=0,1 bash Generation/run_generation.sh
+#   CUDA_VISIBLE_DEVICES=2,3 bash Generation/run_specificity.sh
+# If you only have one GPU set, run them SEQUENTIALLY, not at once.
+
 # ── Config (edit here) ───────────────────────────────────────────────────────
 TARGETS="MMP2 MMP9 ADAM10 ADAM17"    # purchased/human = the calibratable set
 LOOPS="AB C EF"

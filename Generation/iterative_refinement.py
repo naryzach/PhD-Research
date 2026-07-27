@@ -85,6 +85,7 @@ from rf3.utils.inference import InferenceInput
 # specificity_refinement.
 sys.path.insert(0, str(Path(__file__).parent.resolve()))
 import calibrated_scoring as cs
+import sv_bridge as svb
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -239,6 +240,15 @@ ESMFOLD2_TIMEOUT_S  = 3600   # whole-batch timeout (model load + N designs)
 # it gives an inspectable predicted complex from the actual ranker, and feeds
 # hof_structures/. Off → scores only.
 SAVE_ESMFOLD2_STRUCTURES = True
+
+# Structural-Validation battery (sv_bridge). LOG-ONLY: sv_* columns are written to
+# round_summary.csv for transparency + future wet-lab correlation; they never enter
+# calc_composite. The occlusion filter is a mechanistic sanity gate (does the
+# reactive edge reach the catalytic cleft), analogous to the foldability floor —
+# not a ranking term. All opt-in; off by default (SASA/shape cost per candidate).
+SV_BATTERY = False
+SV_OCCLUSION_FILTER = False
+SV_OCCLUSION_MIN = svb.DEFAULT_MIN_OCCLUSION
 # Multi-GPU for the ESMFold2 stage (the dominant cost). Designs are embarrassingly
 # parallel, so we data-parallel-shard them across GPUs, one scorer process each.
 #   1      → single GPU (default; no behavior change)
@@ -965,7 +975,20 @@ class IterativeRefiner:
             # positive ESMFold2 binding-ish feature is contact density). Free when
             # SAVE_ESMFOLD2_STRUCTURES wrote the CIF; skipped otherwise.
             c.update(_esm_iface_feats(m.get("esm_cif")))
+            # Full Structural-Validation battery — LOG-ONLY, never enters the
+            # composite (calibration: these don't predict binding). Optional
+            # occlusion gate can drop designs that miss the catalytic cleft.
+            if SV_BATTERY:
+                sv = svb.sv_battery(m.get("esm_cif"), DESIGN_BINDER_CHAIN,
+                                    DESIGN_TARGET_CHAIN, target_id=target_name)
+                c.update(sv)
+                if SV_OCCLUSION_FILTER:
+                    c["sv_occlusion_pass"] = svb.occlusion_pass(sv, SV_OCCLUSION_MIN)
             c["composite_score"] = calc_composite(c)
+            if (SV_BATTERY and SV_OCCLUSION_FILTER
+                    and c.get("sv_occlusion_pass") is False):
+                c["composite_score"] = 0.0        # sanity gate: exclude from HOF/ranking
+                c["sv_filtered"] = "occlusion"
             n_done += 1
 
         logger.info(f"[{target_name}] ESMFold2 done in {(time.time()-t0)/60:.1f} min "
@@ -1497,7 +1520,14 @@ class IterativeRefiner:
             return
         pool[sm] = pd.to_numeric(pool[sm], errors="coerce")
         pool = pool.dropna(subset=[sm]).drop_duplicates(subset=["full_seq"])
-        logger.info(f"Stratifying AF3 tranche on '{sm}' over {len(pool)} pooled designs.")
+        # Drop UNSCORED designs: an ESMFold2 failure (e.g. OOM) leaves esm_iptm NaN
+        # and composite_score == 0. Including them would fill the LO band with junk
+        # rather than genuinely predicted-weak designs. Require a real ESMFold2 score.
+        if "esm_iptm" in pool.columns:
+            pool = pool[pd.to_numeric(pool["esm_iptm"], errors="coerce").notna()]
+        if sm == "composite_score":
+            pool = pool[pool[sm] > 0]
+        logger.info(f"Stratifying AF3 tranche on '{sm}' over {len(pool)} SCORED pooled designs.")
 
         n_targets       = max(1, len(self.active_targets))
         per_target      = max(n_bands, n_total // n_targets)
@@ -1872,6 +1902,7 @@ def main():
     # argparse help strings (which read the defaults) don't trip Python's
     # "name used prior to global declaration" rule.
     global RF3_ENABLE, ESMFOLD2_GPUS, INIT_TEMPERATURE, MIN_TEMPERATURE, TEMP_DECAY, ADAPTIVE_BIAS_START
+    global SV_BATTERY, SV_OCCLUSION_FILTER, SV_OCCLUSION_MIN
     global BACKBONES_PER_TARGET, LMPNN_SEQS_PER_BACKBONE
 
     parser = argparse.ArgumentParser(description="Iterative TIMP3 binder design.")
@@ -1913,6 +1944,25 @@ def main():
              "round_summary.csv; does not change ranking (ESMFold2 ranks). Slower.",
     )
     parser.add_argument(
+        "--sv-battery", action="store_true",
+        help="Log the full Structural-Validation interface battery (BSA, H-bonds, "
+             "shape complementarity, catalytic occlusion, pDockQ, DockQ-vs-WT, ...) "
+             "as sv_* columns in round_summary.csv. LOG-ONLY: does NOT change "
+             "ranking (the FCS calibration showed these don't predict binding). "
+             "Slower (SASA/shape per candidate).",
+    )
+    parser.add_argument(
+        "--sv-occlusion-filter", action="store_true",
+        help="With --sv-battery: drop designs whose reactive edge does not reach "
+             "the catalytic zinc cleft — a mechanistic sanity gate like the "
+             "foldability floor, NOT a metric in the composite.",
+    )
+    parser.add_argument(
+        "--sv-occlusion-min", type=float, default=None, metavar="FRAC",
+        help=f"Min buried fraction of the zinc loop for the occlusion gate "
+             f"(default {SV_OCCLUSION_MIN}).",
+    )
+    parser.add_argument(
         "--esmfold2-gpus", default=None, metavar="N|auto",
         help="Data-parallel the ESMFold2 stage across GPUs (default 1). An integer "
              "uses up to N *free* GPUs; 'auto' uses all free GPUs (cap "
@@ -1941,6 +1991,12 @@ def main():
 
     if args.enable_rf3:
         RF3_ENABLE = True
+    if args.sv_battery:
+        SV_BATTERY = True
+    if args.sv_occlusion_filter:
+        SV_OCCLUSION_FILTER = True
+    if args.sv_occlusion_min is not None:
+        SV_OCCLUSION_MIN = args.sv_occlusion_min
     if args.esmfold2_gpus is not None:
         ESMFOLD2_GPUS = args.esmfold2_gpus  # int-like string or "auto"; resolved at call time
     if args.init_temperature is not None:
