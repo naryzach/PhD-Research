@@ -17,7 +17,7 @@ mdc: true
 <div class="layout: center">
 
 # De Novo Binder Generation
-### RFdiffusion → ProteinMPNN → AlphaFold3 → Yeast Display
+### Generative Design → Structural Verification → Yeast Display Validation
 
 <div class="mt-10 flex justify-center gap-4">
   <div class="px-4 py-2 bg-white/5 rounded border border-white/10">
@@ -126,8 +126,8 @@ layout: default
 transition: fade-out
 ---
 
-# Full Pipeline Architecture
-Six stages from backbone hallucination to experimentally validated selectivity.
+# Full Pipeline Architecture — Round 1
+Six stages from backbone hallucination to experimentally validated selectivity. This is the pipeline that generated and validated the primary result of this talk; <b class="text-amber-300">Round 2</b> (an iterative-refinement successor, now 12 iterations deep) is covered later.
 
 <div class="grid grid-cols-6 gap-2 mt-8">
   <div class="flex flex-col items-center p-3 bg-blue-500/10 rounded border border-blue-500/30 text-center">
@@ -192,7 +192,7 @@ Computational filtering (stages ①–④) vs experimental validation (stages �
   <div class="space-y-3">
     <h3 class="text-cyan-400 font-bold uppercase text-xs tracking-widest border-b border-cyan-500/20 pb-1">Experimental Phase</h3>
     <div class="p-3 bg-cyan-500/5 rounded border border-cyan-500/15 space-y-2 text-[10px] leading-relaxed opacity-80">
-      <p><b class="text-cyan-300">Yeast surface display:</b> Golden Gate cloning into pCT302; EBY100 yeast transformation. Surface expression detected by FITC-conjugated anti-Myc antibody. His-tagged target detected by APC-conjugated anti-His.</p>
+      <p><b class="text-cyan-300">Yeast surface display:</b> Ready-to-transform pCHA-TIMP3 plasmids received directly from Twist Bioscience (no in-lab cloning step); EBY100 yeast transformation. Surface expression detected by FITC-conjugated anti-Myc antibody. His-tagged target detected by APC-conjugated anti-His.</p>
       <p><b class="text-cyan-300">Gating:</b> Pentagon FSC/SSC singlet gate learned from NC via KDE. Quadrant thresholds at 99.5th percentile NC per channel — &lt;0.5% NC events above threshold in either channel.</p>
       <p><b class="text-cyan-300">Primary metric:</b> Bind Med (Expr+) — raw APC-A median for FITC+ cells. Cross-target comparable because MMP9 and MMP2 values share the same fluorescence scale.</p>
       <p><b class="text-cyan-300">Statistics:</b> One-way ANOVA per construct across targets; Tukey-HSD post-hoc for pairwise target comparisons.</p>
@@ -307,7 +307,7 @@ transition: fade-out
 ---
 
 # Final Ordered Library — 13 Constructs
-All constructs passed RE site screening (BsrGI, BamHI, BsaI).
+Ready-to-transform pCHA-TIMP3 plasmids from Twist Bioscience, spanning three design intents.
 
 <div class="mt-6">
   <TopVariants />
@@ -318,37 +318,32 @@ layout: default
 transition: fade-out
 ---
 
-# Final Library — Loop Group Breakdown
+# Final Library — Design-Intent Breakdown
+Three parallel design axes in the same synthesis order — not just an ADAM17 side quest.
 
-<div class="grid grid-cols-3 gap-5 mt-8">
-  <div class="p-4 bg-blue-500/10 rounded border border-blue-500/20 space-y-2">
-    <h4 class="text-blue-300 font-bold text-[11px] uppercase tracking-widest">AB-Loop Variants (7)</h4>
+<div class="grid grid-cols-3 gap-5 mt-6">
+  <div class="p-4 bg-emerald-500/10 rounded border border-emerald-500/20 space-y-2">
+    <h4 class="text-emerald-300 font-bold text-[11px] uppercase tracking-widest">MMP9-Selective (5)</h4>
     <p class="text-[10px] leading-relaxed opacity-70">
-      Native residues 31–36; extensions 6–15 aa. Targeted at MMP9 active site
-      via HADDOCK geometry. AB 6 showed the strongest statistical signal (p = 0.0002).
-      AB 1 was predicted selective — directionally correct but ANOVA non-significant due to high trial-to-trial variance.
+      AB 1, AB 2, AB 6 (AB loop) and C 12, C 15 (C loop) — designed for M9&gt;M2 preference. AB 6, C 12, C 15 confirmed by ANOVA + Tukey-HSD; AB 1/AB 2 directionally correct but underpowered. The primary result of this campaign.
     </p>
   </div>
-  <div class="p-4 bg-violet-500/10 rounded border border-violet-500/20 space-y-2">
-    <h4 class="text-violet-300 font-bold text-[11px] uppercase tracking-widest">C-Loop Variants (5)</h4>
+  <div class="p-4 bg-blue-500/10 rounded border border-blue-500/20 space-y-2">
+    <h4 class="text-blue-300 font-bold text-[11px] uppercase tracking-widest">MMP9 High / Low Controls (3)</h4>
     <p class="text-[10px] leading-relaxed opacity-70">
-      Native residues 63–68. C 12 (loop: ASGPITVNGETIW) and C 15 both confirmed
-      MMP9-selective at p &lt; 0.02. Up to 13 aa insertions tolerated without
-      loss of yeast surface display function.
+      AB 3 ("High" — broad binder) and AB 5, C 13 ("Low" — designed non-binders) calibrate the assay's dynamic range on the MMP9 axis. Both Low constructs came back correctly non-significant — validating that the T-score filter isn't just calling everything a hit.
     </p>
   </div>
   <div class="p-4 bg-amber-500/10 rounded border border-amber-500/20 space-y-2">
-    <h4 class="text-amber-300 font-bold text-[11px] uppercase tracking-widest">ADAM17-Targeted (4)</h4>
+    <h4 class="text-amber-300 font-bold text-[11px] uppercase tracking-widest">ADAM17-Targeted (5)</h4>
     <p class="text-[10px] leading-relaxed opacity-70">
-      AB 4, AB 7, C 11, C 14 designed for ADAM17. ADAM10 comparison pending
-      positive control optimization. Included in within-target analysis only.
-      Extend the pipeline to inflammatory signaling vs Alzheimer's disease target pair.
+      AB 4, AB 7, C 11, C 14, ABC 22 designed for ADAM17 (and A17&gt;A10 where noted). ADAM10 comparison was limited by positive-control activity in this campaign; AB 4/AB 7/C 11 later confirmed as reproducible MMP9 hits in a follow-up screen.
     </p>
   </div>
 </div>
 
 <div class="mt-6 p-3 bg-white/5 rounded border border-white/10 text-[10px] opacity-70">
-  <b class="text-blue-400">Library design rationale:</b> MMP9-targeted constructs span both primary contact loops (AB and C) to probe whether selectivity is loop-position–specific or generalizable across the TIMP3 interface. The ADAM17 group tests pipeline generalizability beyond the MMP scaffold in the same experimental cycle.
+  <b class="text-blue-400">Library design rationale:</b> The MMP9 axis (selective + High/Low controls) is the primary, statistically powered result of this campaign, spanning both contact loops (AB and C). The ADAM17 group runs in parallel to test pipeline generalizability beyond the MMP scaffold in the same synthesis order.
 </div>
 
 ---
@@ -396,8 +391,8 @@ layout: default
 transition: fade-out
 ---
 
-# Flow Cytometry Metrics — Hover for Detail
-Six quantitative metrics extracted per sample. Hover any card for full definition, scope, and use.
+# Flow Cytometry Metrics
+Six quantitative metrics extracted per sample.
 
 <div class="mt-4">
   <MetricExplorer />
@@ -408,6 +403,8 @@ Six quantitative metrics extracted per sample. Hover any card for full definitio
   <div><span class="text-violet-400 font-bold">Within-target:</span> Norm Bind Med, Norm Median Ratio, Norm IWB</div>
   <div><span class="text-slate-400 font-bold">QC only:</span> Stain Index</div>
 </div>
+
+<div class="mt-2 text-[8px] opacity-30 italic text-center">Hover any card above for its full definition, scope, and use.</div>
 
 ---
 layout: default
@@ -442,14 +439,10 @@ APC/FITC median ratio in expressing cells — cross-target comparable, expressio
       Pos Med Ratio uses all FITC+ cells; Efficiency uses a binary gate. Both are cross-target comparable.
     </div>
   </div>
-  <div class="space-y-3">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/fig_bind_med_expr_pos.png"
-         alt="Positive Median Ratio"
-         class="w-full rounded-lg border border-white/10"
-         style="max-height: 300px; object-fit: contain;">
+  <div class="space-y-2">
+    <BindMedBars />
     <p class="text-[9px] opacity-40 italic text-center">
-      Pos Med Ratio per construct — MMP9 (green) vs MMP2 (red), APC/FITC.
-      Dashed lines = TIMP3-WT ratio per target. Error bars = 95% CI. Significance by Tukey-HSD.
+      Bind Med (Expr+) per construct across all five targets — mean ± SEM, aggregated from real per-trial data. Hover a bar for exact values.
     </p>
   </div>
 </div>
@@ -464,37 +457,11 @@ How do variants compare to TIMP3-WT on the <em>same</em> target?
 
 <div class="grid grid-cols-2 gap-6 mt-4 items-start">
   <div>
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/fig_bind_med_heatmap.png"
-         alt="Norm Bind Med (Expr+) heatmap"
-         class="w-full rounded-lg border border-white/10"
-         style="max-height: 360px; object-fit: contain;">
-    <p class="text-[9px] opacity-40 italic text-center mt-1">
-      Each target normalized independently to TIMP3-WT (= 1.0).
-      Do not compare MMP9 values to MMP2 values across rows.
-    </p>
+    <NormBindHeatmap />
   </div>
   <div class="space-y-2">
     <div class="p-2 bg-white/5 rounded border border-white/10 text-[9.5px] leading-snug opacity-80">
       <b class="text-blue-400">Why normalize within-target:</b> Raw MMP9 and MMP2 baselines differ due to protein concentration, staining efficiency, and TIMP3 affinity per target. Dividing by TIMP3-WT for each target independently isolates construct-level effects from between-target scale differences.
-    </div>
-    <div class="p-2 bg-emerald-500/10 rounded border border-emerald-500/20 text-[9.5px]">
-      <b class="text-emerald-400 block mb-1">Key constructs vs TIMP3-WT (Norm Bind Med):</b>
-      <table class="w-full font-mono border-collapse text-[9px]">
-        <thead>
-          <tr class="border-b border-white/20">
-            <th class="text-left py-0.5 opacity-50">Construct</th>
-            <th class="text-right py-0.5 opacity-50">MMP9</th>
-            <th class="text-right py-0.5 opacity-50">MMP2</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr class="border-b border-white/5"><td class="py-0.5 text-emerald-400 font-bold">C 12</td><td class="text-right text-emerald-400">0.99</td><td class="text-right opacity-60">0.88</td></tr>
-          <tr class="border-b border-white/5"><td class="py-0.5 text-emerald-400 font-bold">C 15</td><td class="text-right text-emerald-400">0.92</td><td class="text-right opacity-60">0.89</td></tr>
-          <tr class="border-b border-white/5"><td class="py-0.5 text-emerald-400 font-bold">AB 6</td><td class="text-right text-emerald-400">0.85</td><td class="text-right opacity-60">0.78</td></tr>
-          <tr class="border-b border-white/5 opacity-50"><td class="py-0.5">C 13</td><td class="text-right">0.73</td><td class="text-right">1.11</td></tr>
-          <tr><td class="py-0.5 text-blue-400">TIMP 3</td><td class="text-right text-blue-400">1.00</td><td class="text-right text-blue-400">1.00</td></tr>
-        </tbody>
-      </table>
     </div>
     <div class="p-2 bg-amber-500/10 rounded border border-amber-500/20 text-[9.5px] opacity-80">
       <b class="text-amber-400">Interpretation:</b> Values near 1.0 = binding similar to TIMP3-WT for that target. Selectivity signal comes from the raw cross-target comparison — this normalized view confirms variants are not simply super-binders on every target.
@@ -633,35 +600,26 @@ transition: fade-out
 ---
 
 # Key Findings: 3 of 4 Predictions Confirmed
-75% PPV — strong given the vast sequence landscape. Every control non-significant.
+75% PPV — every non-selective control stayed non-significant.
 
-<div class="grid grid-cols-2 gap-8 mt-6">
-  <div class="space-y-4">
-    <h3 class="text-emerald-400 font-bold uppercase text-xs tracking-widest border-b border-emerald-500/20 pb-1">Positive Outcomes (3/4 Predicted Selective)</h3>
-    <ul class="text-[11px] space-y-4 opacity-85 list-none p-0">
-      <li class="flex gap-3 items-start">
-        <div class="w-7 h-7 rounded-full bg-emerald-500/20 flex items-center justify-center text-[10px] font-black text-emerald-400 shrink-0">01</div>
-        <span><b class="text-emerald-300">3 of 4 Selective Confirmed:</b> C 12 (p=0.012), C 15 (p=0.018), AB 6 (p=0.0002) confirmed by ANOVA + Tukey-HSD. Selectivity ratios 2.6–3.8× vs TIMP3-WT baseline (2.5×). AB 1 showed directional preference but ANOVA non-significant due to high trial-to-trial variance (σ = 43%).</span>
-      </li>
-      <li class="flex gap-3 items-start">
-        <div class="w-7 h-7 rounded-full bg-blue-500/20 flex items-center justify-center text-[10px] font-black text-blue-400 shrink-0">02</div>
-        <span><b class="text-blue-300">Zero False Positives:</b> All 4 non-selective control constructs (C 13, AB 5, AB 2, AB 3) showed non-significant ANOVA (p > 0.05) — validating the T-score filter's specificity, not just sensitivity.</span>
-      </li>
-      <li class="flex gap-3 items-start">
-        <div class="w-7 h-7 rounded-full bg-violet-500/20 flex items-center justify-center text-[10px] font-black text-violet-400 shrink-0">03</div>
-        <span><b class="text-violet-300">Scaffold Plasticity Confirmed:</b> 6–15 aa loop insertions tolerated structurally and biologically. WT TIMP3 itself shows MMP9 preference (p=0.024) — engineered variants amplify a native preference.</span>
-      </li>
-    </ul>
-  </div>
+<div class="mt-3">
+  <SelectivityBars />
+</div>
 
-  <div class="space-y-4">
-    <h3 class="text-blue-400 font-bold uppercase text-xs tracking-widest border-b border-blue-500/20 pb-1">Pipeline Validation Logic</h3>
-    <div class="p-3 bg-white/5 rounded border border-white/10 text-[10px] leading-relaxed opacity-75 space-y-2">
-      <p><b class="text-blue-300">Context for 75% PPV:</b> Binders are not 50/50 by chance — the background rate of a randomly chosen sequence being both functional on yeast display AND MMP9-selective is far below 75%. Three statistically confirmed predictions from four targeted designs is a strong result against that baseline.</p>
-      <p><b class="text-blue-300">Bidirectional concordance:</b> 0 false positives in the non-selective set. A filter that only gets selective constructs right might be too lenient — confirmed true negatives validate the filter's specificity, not just sensitivity.</p>
-      <p><b class="text-blue-300">Platform implication:</b> 75% PPV at N=4 with 0 FP at N=4 justifies SPR kinetic characterization and next-cycle loop redesign without experimental redesign of the gating or statistical framework.</p>
-    </div>
+<div class="grid grid-cols-3 gap-4 mt-3 text-[10px]">
+  <div class="p-2.5 bg-emerald-500/10 rounded border border-emerald-500/20">
+    <b class="text-emerald-300">Confirmed selective:</b> C 12 (p=0.012), C 15 (p=0.018), AB 6 (p=0.0002) — ratios 2.6–3.8× vs. TIMP3-WT (2.5×).
   </div>
+  <div class="p-2.5 bg-blue-500/10 rounded border border-blue-500/20">
+    <b class="text-blue-300">Zero false positives:</b> All non-selective controls (C 13, AB 5, AB 2, AB 3) stayed non-significant (p&gt;0.05).
+  </div>
+  <div class="p-2.5 bg-violet-500/10 rounded border border-violet-500/20">
+    <b class="text-violet-300">Scaffold plasticity:</b> 6–15 aa insertions tolerated; WT TIMP3 already shows mild MMP9 preference (p=0.024) — variants amplify it.
+  </div>
+</div>
+
+<div class="mt-2 text-[9px] opacity-50 text-center">
+  75% PPV at N=4 with 0 false positives justifies SPR kinetics next — this is the narrow, adequately-powered confirmatory test; see the full 13-construct scorecard ahead for the broader picture.
 </div>
 
 ---
@@ -669,33 +627,136 @@ layout: default
 transition: fade-out
 ---
 
-# Design-Prediction Verdict Scorecard (July 2)
+# Design-Prediction Verdict Scorecard — All 13 Constructs
 
 <div class="grid grid-cols-2 gap-8 mt-6 items-start">
   <div class="space-y-4">
     <div class="p-4 bg-white/5 rounded border border-white/10">
       <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-3">Model vs. Bench Scorecard</h4>
       <p class="text-[11px] leading-relaxed opacity-75">
-        A systematic tally comparing the design intent of engineered TIMP3 loop variants against measured binding profiles across targets (MMP9, MMP2, and ADAM10).
+        A systematic tally comparing the design intent of all 13 engineered TIMP3 loop variants against aggregated flow-cytometry results — the full-library complement to the MMP9-vs-MMP2 primary result on the next slide.
       </p>
       <ul class="text-[10px] list-disc pl-4 space-y-1.5 opacity-70 mt-3">
-        <li><b>Directional Hits (6/13):</b> Constructs successfully demonstrated binding trends matching computational design hypotheses.</li>
-        <li><b>Partial Consensus (3/13):</b> Exhibited directional intent but failed to meet statistical significance due to experimental variance.</li>
-        <li><b>Untestable / Misses (4/13):</b> Limited by low target activity, degraded prep quality, or mismatch in screening thresholds.</li>
+        <li><b>Hits (6/13):</b> Binding trend matched computational design intent. Standout: <b>AB 4</b> (ADAM17-directed, normalized median ratio 1.26 — ranked 1st of 12 testable constructs).</li>
+        <li><b>Partials (2/13):</b> Directionally correct but not statistically significant.</li>
+        <li><b>Misses (2/13):</b> <b>C 13</b> predicted low-affinity but measured NMR 1.11; <b>C 15</b> predicted MMP9-preferential but measured MMP2-preferential on this broader (non-ANOVA) metric — flags scoring-function edge cases even though C 15 remains one of the three ANOVA-confirmed MMP9-selective winners (next slide).</li>
+        <li><b>Untestable (3/13):</b> Limited by low target activity, degraded prep quality, or mismatch in screening thresholds (incl. C 16 / ABC 21, which failed to display on yeast at all).</li>
       </ul>
     </div>
     <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
-      <b class="text-amber-400">Experimental Resolution:</b> Low positive control activity in commercial ADAM10 and degradation of in-house MMP9 preps restrict the statistical resolution of the campaign.
+      <b class="text-amber-400">Reading this against the headline number:</b> The 75% PPV / "3 of 4" statistic quoted throughout this talk is the <i>narrow, adequately-powered</i> confirmatory result — the MMP9-vs-MMP2 ANOVA on 4 constructs explicitly designed for that axis. This scorecard is the <i>broad</i> exploratory result — directional agreement across all 13 constructs on every design axis (MMP9, ADAM17, "Low") and every metric, most of which were underpowered (n=1–3 trials). Both are true; they answer different questions.
     </div>
   </div>
   <div class="space-y-3 flex flex-col items-center">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/verdict_scorecard.png"
-         alt="Design-prediction verdict scorecard"
-         class="w-full rounded-lg border border-white/10 shadow-sm"
-         style="max-height: 280px; object-fit: contain;">
+    <CategoryBars dataset="verdict" title="Verdict Tally — All 13 Constructs" />
     <p class="text-[9px] opacity-40 italic text-center">
-      Tally of design campaign success rate across 13 scored constructs (July 2).
+      Tally of design campaign success rate across all 13 scored constructs.
     </p>
+  </div>
+</div>
+
+---
+layout: section
+transition: slide-up
+---
+
+# Phase 3
+### Second-Generation Design — Iterative Refinement & ESM-C (June–July 2026)
+
+---
+layout: default
+transition: fade-out
+---
+
+# Round 2 Pipeline: Iterative Refinement
+Round 1 validated the approach; Round 2 automates and accelerates it on a dedicated GPU cluster.
+
+<div class="grid grid-cols-5 gap-2 mt-4">
+  <div class="flex flex-col items-center p-2.5 bg-blue-500/10 rounded border border-blue-500/30 text-center">
+    <div class="text-blue-400 font-black text-lg mb-1">①</div>
+    <div class="text-[10px] font-bold text-white mb-1.5">RFd3</div>
+    <div class="text-[8px] opacity-50 leading-tight">RoseTTAFold Diffusion 3<br/>20 backbones/target/iter</div>
+  </div>
+  <div class="flex items-center justify-center text-blue-400 text-lg">→</div>
+  <div class="flex flex-col items-center p-2.5 bg-violet-500/10 rounded border border-violet-500/30 text-center">
+    <div class="text-violet-400 font-black text-lg mb-1">②</div>
+    <div class="text-[10px] font-bold text-white mb-1.5">LigandMPNN</div>
+    <div class="text-[8px] opacity-50 leading-tight">Annealed T: 0.50→0.10<br/>0.85× decay/iteration</div>
+  </div>
+  <div class="flex items-center justify-center text-blue-400 text-lg">→</div>
+  <div class="flex flex-col items-center p-2.5 bg-cyan-500/10 rounded border border-cyan-500/30 text-center">
+    <div class="text-cyan-400 font-black text-lg mb-1">③</div>
+    <div class="text-[10px] font-bold text-white mb-1.5">ESMFold2</div>
+    <div class="text-[8px] opacity-50 leading-tight">MSA-free local ranker<br/>replaced Boltz-2</div>
+  </div>
+  <div class="flex items-center justify-center text-blue-400 text-lg">→</div>
+  <div class="flex flex-col items-center p-2.5 bg-emerald-500/10 rounded border border-emerald-500/30 text-center">
+    <div class="text-emerald-400 font-black text-lg mb-1">④</div>
+    <div class="text-[10px] font-bold text-white mb-1.5">Best Binders</div>
+    <div class="text-[8px] opacity-50 leading-tight">Top 75/target<br/>loop-length narrowing</div>
+  </div>
+  <div class="flex items-center justify-center text-blue-400 text-lg">→</div>
+  <div class="flex flex-col items-center p-2.5 bg-amber-500/10 rounded border border-amber-500/30 text-center">
+    <div class="text-amber-400 font-black text-lg mb-1">⑤</div>
+    <div class="text-[10px] font-bold text-white mb-1.5">AF3 Gold-Standard</div>
+    <div class="text-[8px] opacity-50 leading-tight">Every 2 iterations<br/>final verification</div>
+  </div>
+</div>
+
+<div class="mt-4 grid grid-cols-2 gap-3">
+  <div class="p-2.5 bg-white/5 rounded border border-white/10 text-[9px] opacity-75 leading-snug">
+    <b class="text-blue-400">Why ESMFold2 over Boltz-2:</b> Predicts AF3 ipTM at ρ≈+0.34 (n=24) vs. Boltz-2's ρ≈+0.11 — a better cheap-ranker proxy for the expensive AF3 gold standard.
+  </div>
+  <div class="p-2.5 bg-red-500/10 rounded border border-red-500/20 text-[9px] opacity-75 leading-snug">
+    <b class="text-red-400">RF3 disabled for scoring:</b> RFd3's own confidence scores are <i>anti-correlated</i> with AF3 ipTM (r≈-0.07 to -0.51, n=18) — contributes geometric features only.
+  </div>
+</div>
+
+<div class="mt-2.5 p-2.5 bg-white/5 rounded border border-white/10 text-[9px] opacity-70 leading-snug">
+  Compute: Caprine cluster, 2× V100 GPUs. Active targets: MMP2, MMP9, MMP3, MMP10, ADAM10, ADAM17. Selection script <code>select_binders_to_order.py</code> computes loop-pLDDT, loop-interface PAE, and framework RMSD vs. native TIMP3.
+</div>
+
+---
+layout: default
+transition: fade-out
+---
+
+# Per-Target Champions & Convergence Dynamics (Iteration 12)
+Cumulative best composite score discovered per iteration, tracked across all four protease targets.
+
+<div class="grid grid-cols-2 gap-6 mt-4 items-start">
+  <div>
+    <ConvergenceLines />
+    <p class="text-[9px] opacity-40 italic text-center mt-1">
+      Cumulative max composite score through iteration 12, by target. Hover a line for its champion score.
+    </p>
+  </div>
+  <div class="space-y-2 text-[10px]">
+    <table class="w-full font-mono border-collapse text-[9px]">
+      <thead>
+        <tr class="border-b border-white/20 text-blue-400 font-bold">
+          <th class="text-left py-1">Target</th>
+          <th class="text-left py-1">Champion</th>
+          <th class="text-right py-1">Composite</th>
+          <th class="text-right py-1">Iter</th>
+        </tr>
+      </thead>
+      <tbody class="opacity-85">
+        <tr class="border-b border-white/10"><td class="py-1">ADAM10</td><td>it7_d32_s0</td><td class="text-right">0.840</td><td class="text-right">7</td></tr>
+        <tr class="border-b border-white/10"><td class="py-1 text-emerald-400">ADAM17</td><td>it8_d29_s0</td><td class="text-right text-emerald-400">0.831</td><td class="text-right">8</td></tr>
+        <tr class="border-b border-white/10"><td class="py-1">MMP9</td><td>it6_d11_s1</td><td class="text-right">0.808</td><td class="text-right">6</td></tr>
+        <tr><td class="py-1 text-amber-400">MMP2</td><td>it3_d18_s0</td><td class="text-right text-amber-400">0.762</td><td class="text-right">3</td></tr>
+      </tbody>
+    </table>
+    <div class="p-2.5 bg-emerald-500/10 rounded border border-emerald-500/20 mt-2">
+      <b class="text-emerald-400">ADAM17 still climbing:</b> steady late-stage gain (0.822→0.827→0.831 across iterations 1/4/8) — the most viable candidate for further cycles.
+    </div>
+    <div class="p-2.5 bg-amber-500/10 rounded border border-amber-500/20">
+      <b class="text-amber-400">MMP2 plateaued:</b> peaked at iteration 3 with no improvement through iteration 12 — flags a scaffold or parameter rethink rather than "just run it longer."
+    </div>
+    <div class="p-2.5 bg-white/5 rounded border border-white/10">
+      <b class="text-blue-300">MMP9 has the deepest pool:</b> median 0.731, worst-retained 0.675 among the top-75 Hall of Fame — all four targets emerged at iterations 3–8, confirming the loop consistently beats the seed pool.
+    </div>
   </div>
 </div>
 
@@ -704,32 +765,29 @@ layout: default
 transition: fade-out
 ---
 
-# AlphaFold ipTM Calibration vs. Wet-Lab Binding (July 3)
+# Raw ipTM Calibration Looks Broken (First Pass)
 
 <div class="grid grid-cols-2 gap-8 mt-6 items-start">
   <div class="space-y-4">
     <div class="p-4 bg-white/5 rounded border border-white/10">
-      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-3">ipTM vs. Yeast Display NMR</h4>
+      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-3">ipTM vs. Yeast Display NMR — raw, per target</h4>
       <p class="text-[11px] leading-relaxed opacity-75">
-        Linear correlation analysis comparing computational design metrics (AlphaFold ipTM) with experimental yeast display normalized median ratio (NMR) binding across three targets.
+        Linear correlation of computational ipTM against experimental yeast-display normalized median ratio (NMR), 12 constructs across three targets.
       </p>
       <ul class="text-[10px] list-disc pl-4 space-y-1.5 opacity-70 mt-3">
-        <li><b>ADAM17 (Orange):</b> Weak negative correlation (r = -0.163, p = 0.613).</li>
-        <li><b>MMP2 (Blue):</b> Essentially zero correlation (r = 0.029, p = 0.928).</li>
-        <li><b>MMP9 (Red):</b> Moderate negative correlation (r = -0.471, p = 0.123).</li>
+        <li><b>ADAM17:</b> Weak negative (r = -0.163, p = 0.613).</li>
+        <li><b>MMP2:</b> Essentially zero (r = 0.029, p = 0.928).</li>
+        <li><b>MMP9:</b> Moderate negative (r = -0.471, p = 0.123).</li>
       </ul>
     </div>
-    <div class="p-3 bg-red-500/10 rounded border border-red-500/20 text-[10px]">
-      <b class="text-red-400">Design Implication:</b> Computational ipTM score does not predict bench-measured binding. Designing solely to maximize ipTM is insufficient for fine-grained library optimization.
+    <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
+      <b class="text-amber-400">First-pass read (later revised, next slide):</b> Taken at face value, ipTM appears to carry no predictive signal for binding. That conclusion turns out to be an artifact of testing raw scores — see why on the next slide.
     </div>
   </div>
   <div class="space-y-3 flex flex-col items-center">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/alphafold_calibration_multipanel.png"
-         alt="AlphaFold ipTM vs. Yeast Display NMR Calibration"
-         class="w-full rounded-lg border border-white/10 shadow-sm"
-         style="max-height: 280px; object-fit: contain;">
+    <CalibrationScatter metric="ipTM" />
     <p class="text-[9px] opacity-40 italic text-center">
-      Multi-panel correlation of ipTM predictions vs. experimental NMR across 12 constructs (July 3).
+      ipTM predictions vs. experimental NMR, real per-construct data (n=12). Hover a point for its value.
     </p>
   </div>
 </div>
@@ -739,38 +797,83 @@ layout: default
 transition: fade-out
 ---
 
-# Next Steps and Translational Vision
+# Resolving the Calibration Signal: An Avidity Confound
+Quantitative calibration of AlphaFold3 metrics against binding, 12 constructs × 3 targets (ADAM17, MMP2, MMP9).
 
-<div class="grid grid-cols-2 gap-8 mt-6">
+<div class="grid grid-cols-2 gap-6 mt-4 items-start">
   <div class="space-y-3">
-    <h3 class="text-cyan-400 font-bold uppercase text-xs tracking-widest border-b border-cyan-500/20 pb-1">Near-Term Experiments</h3>
-    <ul class="text-[11px] space-y-3 opacity-80 list-none p-0">
-      <li class="flex items-start gap-3">
-        <div class="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-1.5 shrink-0"></div>
-        <span><b>SPR Kinetics:</b> K<sub>D</sub>, k<sub>on</sub>, k<sub>off</sub> for C 12, C 15, AB 6 vs purified MMP9 and MMP2. Absolute affinities enable direct comparison to marimastat/prinomastat clinical benchmarks.</span>
-      </li>
-      <li class="flex items-start gap-3">
-        <div class="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-1.5 shrink-0"></div>
-        <span><b>Reverse Selectivity (MMP2 > MMP9):</b> Demonstrates controllable pipeline steering. If the same pipeline produces MMP2-preferring variants on demand, selectivity is engineerable in either direction — not an artifact of the TIMP3 scaffold.</span>
-      </li>
-      <li class="flex items-start gap-3">
-        <div class="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-1.5 shrink-0"></div>
-        <span><b>ADAM10 Protocol Optimization:</b> Titrate antibody concentration and induction time to achieve sufficient positive control signal; enables ADAM17/ADAM10 selectivity analysis with identical ANOVA framework.</span>
-      </li>
-      <li class="flex items-start gap-3">
-        <div class="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-1.5 shrink-0"></div>
-        <span><b>ESM-2 Saturation Mutagenesis:</b> Per-residue fitness landscape for all positions in C 12, C 15, AB 6 loops — identify critical selectivity determinants and tolerant positions for second-round design.</span>
-      </li>
-    </ul>
-  </div>
-
-  <div class="space-y-3">
-    <h3 class="text-violet-400 font-bold uppercase text-xs tracking-widest border-b border-violet-500/20 pb-1">Translational Context</h3>
-    <div class="p-4 bg-violet-500/5 rounded border border-violet-500/20 text-[10px] leading-relaxed opacity-80 space-y-3">
-      <p><b class="text-violet-300">MMP9 as oncology target:</b> Overexpressed in >15 solid tumor types; correlates with metastasis and poor prognosis. Prior pan-MMP inhibitors failed Phase III due to MMP2 off-target toxicity — not because MMP9 inhibition is wrong, but because selectivity was insufficient. An MMP9-specific TIMP3 variant addresses the actual failure mode.</p>
-      <p><b class="text-violet-300">Target-agnostic framework:</b> Any protein–protein interaction with available structural data is addressable by this pipeline. MMP9/MMP2 is the validation case; the computational workflow is identical for kinase isoforms, cytokine receptors, or viral surface proteins.</p>
-      <p><b class="text-violet-300">Precision CAR-T analogy:</b> Patient tumor genome → neoantigen identification → de novo binder generation → CAR construct with hyperspecific, genome-informed recognition. Combines precision genomics with AI-driven protein design to minimize on-target/off-tumor toxicity.</p>
+    <div class="p-3 bg-white/5 rounded border border-white/10 text-[10px] leading-relaxed opacity-80">
+      <b class="text-blue-400">Binding is dominated by a non-specific "avidity" factor:</b> Binding correlates strongly <em>across targets</em> for a given construct (ADAM17–MMP2 r=0.72, ADAM17–MMP9 r=0.69) — a construct that binds one protease tends to bind them all. Two-way variance decomposition attributes <b>49%</b> of binding variance to this construct-level "stickiness," <b>17%</b> to target baseline, and only <b>33%</b> to genuine target-specific interaction.
     </div>
+    <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px] leading-relaxed opacity-80">
+      <b class="text-emerald-400">Once avidity is regressed out, the signal reappears:</b> Per-target interface metrics predict the target-specific residual at oriented Spearman ρ ≈ 0.50 (interface PAE), 0.47 (loop pLDDT), 0.44 (BpTM) — far above their raw correlation. The categorical selectivity result (AB 6, C 12, C 15) was real all along; it was just masked in raw scores by stickiness.
+    </div>
+    <div class="p-3 bg-red-500/10 rounded border border-red-500/20 text-[10px] leading-relaxed opacity-80">
+      <b class="text-red-400">ipTM is a developability signal, not an affinity signal:</b> ipTM correlates more with construct <em>expression</em> (ρ ≈ 0.36) than with binding (ρ ≈ -0.09), and is nearly saturated across these designs (0.77–0.90) — too compressed to rank fine differences. Only loop-pLDDT and interface PAE carry real dynamic range.
+    </div>
+  </div>
+  <div class="space-y-2 flex flex-col items-center w-full">
+    <CategoryBars dataset="variance" title="Variance Decomposition (%)" />
+    <CategoryBars dataset="rho" title="Avidity-Removed Correlation (ρ)" />
+    <p class="text-[9px] opacity-40 italic text-center">
+      Top: 49% avidity / 17% target baseline / 33% target-specific. Bottom: once avidity is removed, PAE/LpLDDT/BpTM track binding; ipTM tracks expression, not binding.
+    </p>
+  </div>
+</div>
+
+---
+layout: default
+transition: fade-out
+---
+
+# A Multi-Term, Re-Fittable Selection Recipe
+Combining the real-dynamic-range metrics into a transparent, directional scoring function for the next design cycle.
+
+<div class="grid grid-cols-2 gap-6 mt-4 items-start">
+  <div class="space-y-3">
+    <div class="p-3 bg-white/5 rounded border border-white/10 text-[10px] leading-relaxed opacity-80">
+      <b class="text-blue-400">Recipe:</b> (i) an affinity term from loop-pLDDT + inverted interface PAE, (ii) an off-target selectivity term (on-target minus mean off-target confidence), (iii) BpTM as a low-weight term, (iv) ipTM as a small expressibility prior. Weights fixed by reasoning, not least-squares.
+    </div>
+    <div class="p-3 bg-white/5 rounded border border-white/10 text-[10px] leading-relaxed opacity-80">
+      <b class="text-cyan-400">Why not just fit the weights?</b> At n=12, a leave-one-construct-out regression-fit blend performed <em>worse</em> (ρ=0.20) than the reasoned weights (ρ=0.31) — fitting overfits at this scale. The recipe out-ranks every individual metric, including ipTM (currently the funnel's optimization target).
+    </div>
+    <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px] leading-relaxed opacity-80">
+      <b class="text-amber-400">Honest uncertainty:</b> 95% bootstrap CI on ρ=0.31 is [-0.15, +0.71] — it crosses zero. This is a reasoned prior that beats any single metric today, <em>not</em> a precisely estimated model. It is designed to be re-estimated as every new ordered batch returns data.
+    </div>
+  </div>
+  <div class="space-y-3 flex flex-col items-center">
+    <CategoryBars dataset="recipe" title="Ranking Power (ρ) vs. Individual Metrics" />
+    <p class="text-[9px] opacity-40 italic text-center">
+      Recipe score vs. consensus binding (ρ=0.31, wide bootstrap CI [-0.15, 0.71]) — out-ranks every individual metric and the overfit data-fitted blend.
+    </p>
+  </div>
+</div>
+
+---
+layout: default
+transition: fade-out
+---
+
+# Are the Docked Poses Even Right? A Crystal-Free Check
+The backbone-conditioning step docks TIMP3:target with HADDOCK before hallucination — but co-fold models may simply "remember" TIMP:MMP complexes from training. Two tests that consult no crystal structure probe whether that matters.
+
+<div class="grid grid-cols-2 gap-6 mt-4 items-start">
+  <div class="space-y-3">
+    <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px] leading-relaxed opacity-80">
+      <b class="text-emerald-400">Test 1 — Mechanistic chelation geometry:</b> AF3/ESMFold2 co-folds reproduce the native crystal's edge-leading C1/T2 chelation geometry (d≈2.6–4.0 Å vs. crystal 2.9 Å, edge-leads fraction 1.0). HADDOCK tracks bury the zinc loop non-specifically (d≈5.6–7.7 Å, edge-leads only 0.39–0.61).
+    </div>
+    <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px] leading-relaxed opacity-80">
+      <b class="text-emerald-400">Test 2 — Cross-source self-consistency:</b> The two co-folds mutually agree to ≈5.7 Å construct Cα RMSD after target superposition. The four independent HADDOCK tracks disagree with <em>each other</em> by ≈14–22 Å — a method that can't reproduce its own answer across equivalent inputs is unreliable on its own terms.
+    </div>
+    <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px] leading-relaxed opacity-80">
+      <b class="text-amber-400">Practical takeaway:</b> Attempts to "fix" HADDOCK (catalytic Zn²⁺, conformer ensembles) stayed CAPRI-incorrect. Use co-folds for binding-mode assignment; reserve HADDOCK for energetics on poses already believed correct — structural models are a foldability/mechanistic filter, not a standalone ranking objective.
+    </div>
+  </div>
+  <div class="space-y-3 flex flex-col items-center">
+    <CategoryBars dataset="haddock" title="Construct Cα RMSD Across Sources (Å)" />
+    <p class="text-[9px] opacity-40 italic text-center">
+      Cross-source pose convergence: co-folds agree (~5.7 Å); HADDOCK tracks disagree with each other (~14–22 Å) — without invoking any ground-truth structure.
+    </p>
   </div>
 </div>
 
@@ -792,10 +895,7 @@ Flow Cytometry assessment of TwistBio constructs against a multi-MMP panel.
 
 <div class="grid grid-cols-2 gap-6 mt-6 items-start">
   <div class="space-y-3">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260529_CrossReactivity/Aggregate_FoldChange_Binding.png"
-         alt="Binding Fold Change"
-         class="w-full rounded-lg border border-white/10"
-         style="max-height: 300px; object-fit: contain;">
+    <CrossReactivityBars />
   </div>
   <div class="space-y-4">
     <div class="p-4 bg-red-500/10 rounded border border-red-500/20">
@@ -818,37 +918,33 @@ layout: default
 transition: fade-out
 ---
 
-# Yeast Display Target Trial — ADAM10 & MMP9 (June 10\textsuperscript{th}, 2026)
+# Yeast Display Target Trial — MMP9 & ADAM10
 Flow Cytometry assessment of TwistBio constructs against commercial and in-house targets.
 
-<div class="grid grid-cols-2 gap-6 mt-6 items-start">
-  <div class="space-y-3">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260610_YeastDisplayTargetTrial/ADAM10_F6_R_Ridgeline_Binding.png"
-         alt="ADAM10 Fraction 6 Ridgeline Binding"
-         class="w-full rounded-lg border border-white/10"
-         style="max-height: 250px; object-fit: contain;">
-    <p class="text-[9px] opacity-40 italic text-center">
-      ADAM10 Fraction 6 (Ryan's run _R, FITC-A Binding, APC-A Expression).
-    </p>
+<div class="grid grid-cols-2 gap-5 mt-4 items-start">
+  <div class="space-y-2">
+    <div class="p-2 bg-emerald-500/10 rounded border border-emerald-500/20 text-[9px] leading-snug">
+      <h4 class="text-emerald-400 font-bold text-[9px] uppercase tracking-widest mb-0.5">MMP9 Positives Validated (Purchased Sino)</h4>
+      <p class="opacity-75">
+        Sino MMP9: positive control TIMP3 38.2% Double+ (491 MFI); AB 7 and AB 3 achieved 33.5%/32.9% Double+, validating the display system.
+      </p>
+    </div>
+    <div class="p-2 bg-violet-500/10 rounded border border-violet-500/20 text-[9px] leading-snug">
+      <h4 class="text-violet-400 font-bold text-[9px] uppercase tracking-widest mb-0.5">Commercial AbCam ADAM10 Validation</h4>
+      <p class="opacity-75">
+        AbCam ADAM10 (purchased): TIMP3 positive control 12.65% Double+; AB 5 and AB 3 showed strong binding (MFI 1708/1665.5).
+      </p>
+    </div>
   </div>
-  <div class="space-y-4">
-    <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px]">
-      <h4 class="text-emerald-400 font-bold text-[10px] uppercase tracking-widest mb-1">MMP9 Positives Validated</h4>
-      <p class="leading-relaxed opacity-75">
-        <b>Sino MMP9 binding</b> was strong: positive control <b>TIMP3</b> achieved 38.2% Double+ (491 MFI), and Twist variants <b>AB 7</b> and <b>AB 3</b> achieved 33.5% and 32.9% Double+ respectively, validating the display system.
+  <div class="space-y-2">
+    <div class="p-2 bg-red-500/10 rounded border border-red-500/20 text-[9px] leading-snug">
+      <h4 class="text-red-400 font-bold text-[9px] uppercase tracking-widest mb-0.5">In-House ADAM10 (F6/F9): Retracted</h4>
+      <p class="opacity-75">
+        This June 10 channel-corrected read (AB 7 13.29%, AB 1 11.71% Double+ vs. in-house Fraction 6/9) is <b>no longer trusted</b>. The construct-QC vendor manifest flags every in-house ADAM10 prep (Sam-FLAG, F6/F9) as out of calibration scope, and a dedicated July 24 control test (in-house ADAM10 vs. displayed WT TIMP1/TIMP3, proper NC) found <b>no genuine binding signal</b> — the earlier read is now understood as background/artifact, not confirmed binding.
       </p>
     </div>
-    <div class="p-3 bg-blue-500/10 rounded border border-blue-500/20 text-[10px]">
-      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-1">ADAM10 Binding Confirmed</h4>
-      <p class="leading-relaxed opacity-75">
-        Re-analysis with the correct channel configuration (FITC-A binding) revealed robust binding for <b>ADAM10</b> F6 and F9. <b>AB 7</b> achieved 13.29% Double+ (1.56x MFI vs TIMP 3 positive control), and <b>AB 1</b> reached 11.71% Double+.
-      </p>
-    </div>
-    <div class="p-3 bg-violet-500/10 rounded border border-violet-500/20 text-[10px]">
-      <h4 class="text-violet-400 font-bold text-[10px] uppercase tracking-widest mb-1">Commercial AbCam Validation</h4>
-      <p class="leading-relaxed opacity-75">
-        Commercial <b>AbCam ADAM10</b> confirmed target activity: <b>TIMP 3</b> positive control achieved 12.65% Double+, and Twist variants <b>AB 5</b> and <b>AB 3</b> showed strong binding (MFI 1708 and 1665.5).
-      </p>
+    <div class="p-2 bg-amber-500/10 rounded border border-amber-500/20 text-[9px] leading-snug">
+      <b class="text-amber-400">Status:</b> ADAM10 binding remains <b>unresolved</b>. The commercial AbCam reagent (left) is the only ADAM10 source currently in calibration scope; the in-house axis needs a validated positive control and a titrated, quantified target before any binding or selectivity claim can be made.
     </div>
   </div>
 </div>
@@ -858,36 +954,37 @@ layout: default
 transition: fade-out
 ---
 
-# Target Trial Analysis & Channel Correction
-Resolving analysis channel mismatch and explaining detection reagent failures.
+# Next Steps and Translational Vision
 
-<div class="grid grid-cols-2 gap-6 mt-6 items-start">
-  <div class="space-y-3">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260610_YeastDisplayTargetTrial/ADAM10_F6_R_FoldChange_Binding.png"
-         alt="ADAM10 Fold Change Binding"
-         class="w-full rounded-lg border border-white/10"
-         style="max-height: 220px; object-fit: contain;">
-    <div class="p-3 bg-blue-500/10 rounded border border-blue-500/20 text-[9px]">
-      <h4 class="text-blue-400 font-bold text-[9px] uppercase tracking-widest mb-1">Channel Mismatch Resolved</h4>
-      <p class="leading-relaxed opacity-75">
-        The default pipeline assumed a PE-A binding channel (Gavin's protocol). Re-running the pipeline with the correct <b>FITC-A</b> channel configuration for Ryan's run (<code>_R</code>) corrected the false-negative results.
-      </p>
-    </div>
+<div class="grid grid-cols-2 gap-6 mt-4">
+  <div class="space-y-2">
+    <h3 class="text-cyan-400 font-bold uppercase text-[11px] tracking-widest border-b border-cyan-500/20 pb-1">Near-Term Experiments</h3>
+    <ul class="text-[10px] space-y-2 opacity-80 list-none p-0 leading-snug">
+      <li class="flex items-start gap-2">
+        <div class="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-1 shrink-0"></div>
+        <span><b>SPR Kinetics (queued, top priority):</b> K<sub>D</sub>/k<sub>on</sub>/k<sub>off</sub> for C 12, C 15, AB 6 vs. purified MMP9/MMP2 — direct comparison to marimastat/prinomastat.</span>
+      </li>
+      <li class="flex items-start gap-2">
+        <div class="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-1 shrink-0"></div>
+        <span><b>Reverse Selectivity — stalled:</b> Round 2's MMP2 champion plateaued at iteration 3; needs a scaffold/parameter rethink, not more iterations.</span>
+      </li>
+      <li class="flex items-start gap-2">
+        <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1 shrink-0"></div>
+        <span><b>ADAM10/17 — still unresolved:</b> In-house ADAM10 <i>production</i> is validated (0.20 mg/mL, Western+BCA), but its <i>binding</i> is not — the earlier "positive" read was retracted by a July 24 control test and the vendor manifest. Needs a validated positive control. ADAM17 construct separately came back an empty vector — needs re-cloning (details: companion <i>ADAM Target Production</i> deck).</span>
+      </li>
+      <li class="flex items-start gap-2">
+        <div class="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-1 shrink-0"></div>
+        <span><b>ESM-C — exploratory only (appendix):</b> Consensus motifs found could nominate a future batch, but the calibrated multi-term recipe remains the active selection method for now.</span>
+      </li>
+    </ul>
   </div>
-  <div class="space-y-4">
-    <div class="p-4 bg-white/5 rounded border border-white/10 text-[10px]">
-      <h4 class="text-blue-300 font-bold text-[10px] uppercase tracking-widest mb-2">Detection Reagent Troubleshooting</h4>
-      <ul class="list-disc pl-4 space-y-2 opacity-80 leading-relaxed">
-        <li><b>PE-A Reagent Failure:</b> Gavin's run (<code>_G</code>) used 555-conjugated anti-FLAG and showed low signal (&lt;1% Double+) across all samples. This points to a failure in his PE detection reagents or sample preparation.</li>
-        <li><b>FITC-A Validation:</b> Using AF488 anti-mouse (FITC) for anti-FLAG binding and AF647 anti-rabbit (APC) for anti-c-myc expression confirmed high target activity.</li>
-        <li><b>Spillover QC:</b> Gating and spillover correction worked as expected (Alpha = 0.1638), eliminating false-positive bleed-through between channels.</li>
-      </ul>
-    </div>
-    <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px]">
-      <h4 class="text-emerald-400 font-bold text-[10px] uppercase tracking-widest mb-1">Active Target Conclusion</h4>
-      <p class="leading-relaxed opacity-75">
-        Both in-house purified ADAM10 FPLC fractions (F6 and F9) are folded and active, showing clear target binding and making them suitable for sorting and selectivity validations.
-      </p>
+
+  <div class="space-y-2">
+    <h3 class="text-violet-400 font-bold uppercase text-[11px] tracking-widest border-b border-violet-500/20 pb-1">Translational Context</h3>
+    <div class="p-3 bg-violet-500/5 rounded border border-violet-500/20 text-[9px] leading-snug opacity-80 space-y-2">
+      <p><b class="text-violet-300">MMP9 as oncology target:</b> Overexpressed in >15 tumor types. Prior pan-MMP inhibitors failed Phase III on MMP2 off-target toxicity, not a wrong hypothesis — insufficient selectivity. An MMP9-specific variant addresses that failure mode directly.</p>
+      <p><b class="text-violet-300">Target-agnostic framework:</b> Any protein–protein interaction with structural data is addressable; MMP9/MMP2 is the validation case, but the workflow is identical for kinase isoforms, cytokine receptors, or viral surface proteins.</p>
+      <p><b class="text-violet-300">Precision CAR-T analogy:</b> Tumor genome → neoantigen ID → de novo binder → CAR construct with genome-informed recognition, minimizing on-target/off-tumor toxicity.</p>
     </div>
   </div>
 </div>
@@ -897,565 +994,54 @@ layout: section
 transition: slide-up
 ---
 
-# Appendix: ADAM10/17 Expression & Purification
-### FPLC and SDS-PAGE Optimization
+# Appendix
+### ESM-C Sequence Classifier — Exploratory, Not Yet a Production Ranker
 
 ---
 layout: default
 transition: fade-out
 ---
 
-# FPLC Purification — ADAM10 & 17
-Optimization of Anion Exchange Chromatography (HiTrap Q FF).
-
-<div class="grid grid-cols-2 gap-4 mt-6">
-  <div class="space-y-2">
-    <div class="p-3 bg-white/5 rounded border border-white/10">
-      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-2">ADAM10 (Sam's sample)</h4>
-      <p class="text-[10px] leading-relaxed opacity-70">
-        Run on AEC SAMPLE HiTrap Q FF preset. Only UV peak is in sample application.
-      </p>
-      <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM_10_Sam_AEC_1.png" class="w-full rounded mt-2 border border-white/10" style="max-height: 150px; object-fit: contain;">
-    </div>
-  </div>
-  <div class="space-y-2">
-    <div class="p-3 bg-white/5 rounded border border-white/10">
-      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-2">ADAM10-pMopac</h4>
-      <p class="text-[10px] leading-relaxed opacity-70">
-        Diluted 1:4 with Buffer A. Something is eluting during wash. May need a more aggressive NaCl concentration during wash.
-      </p>
-      <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM_10_AEC_T1.png" class="w-full rounded mt-2 border border-white/10" style="max-height: 150px; object-fit: contain;">
-    </div>
-  </div>
-</div>
-
----
-# SDS-PAGE & Silver Stain Validation (June 2\textsuperscript{nd}, 2026)
-Successful detection and optimization of ADAM10 expression and FPLC fractions.
-
-<div class="grid grid-cols-2 gap-6 mt-4">
-  <div class="p-4 bg-white/5 rounded border border-white/10 text-center">
-    <b class="text-blue-400 text-xs block mb-1">ADAM10 Expression (Coomassie)</b>
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260602.png" class="w-full rounded mt-2 border border-white/10" style="max-height: 220px; object-fit: contain;">
-    <p class="text-[10px] leading-snug opacity-70 mt-2">
-      Expression test part 2. Bands visible at ~60-70 kDa corresponding to catalytic domain.
-      Comparison with Jake's samples provides an independent expression benchmark.
-    </p>
-  </div>
-  <div class="p-4 bg-white/5 rounded border border-white/10 text-center">
-    <b class="text-emerald-400 text-xs block mb-1">Low-Abundance (Silver Stain)</b>
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260602_Silver.png" class="w-full rounded mt-2 border border-white/10" style="max-height: 220px; object-fit: contain;">
-    <p class="text-[10px] leading-snug opacity-70 mt-2">
-      Pierce Silver Stain of FPLC fractions. Confirmed presence in low-concentration samples.
-      Detects F6 leakage in filtrate. Ladder compromised, so band identity is approximate.
-    </p>
-  </div>
-</div>
-
----
-# Protein Concentration & Recovery (June 2\textsuperscript{nd}, 2026)
-Evaluation of FPLC fractions following spin concentration with Amicon Ultra-4 (10 kDa MWCO).
-
-<div class="grid grid-cols-2 gap-4 mt-6">
-  <div>
-    <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-2">NanoDrop A280 Protein Concentrations</h4>
-    <table class="w-full text-[9px] text-left border-collapse border border-white/10 rounded overflow-hidden">
-      <thead>
-        <tr class="bg-white/10 text-white font-bold border-b border-white/20">
-          <th class="p-1 border-r border-white/10">Sample Name</th>
-          <th class="p-1 border-r border-white/10">Protein (mg/mL)</th>
-          <th class="p-1 border-r border-white/10">A280</th>
-          <th class="p-1">A260/A280</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr class="border-b border-white/10 bg-white/5">
-          <td class="p-1 border-r border-white/10 font-medium">A10 FXN 6 Unconcentrated</td>
-          <td class="p-1 border-r border-white/10">0.163</td>
-          <td class="p-1 border-r border-white/10">0.163</td>
-          <td class="p-1">0.963</td>
-        </tr>
-        <tr class="border-b border-white/10 bg-red-500/10 text-red-200">
-          <td class="p-1 border-r border-white/10 font-medium">A10 FXN 6 Filtrate (Leakage)</td>
-          <td class="p-1 border-r border-white/10">0.176</td>
-          <td class="p-1 border-r border-white/10">0.176</td>
-          <td class="p-1">0.981</td>
-        </tr>
-        <tr class="border-b border-white/10 bg-emerald-500/10 text-emerald-200">
-          <td class="p-1 border-r border-white/10 font-medium">A10 FXN 6 Residue (3.2x)</td>
-          <td class="p-1 border-r border-white/10">0.519</td>
-          <td class="p-1 border-r border-white/10">0.519</td>
-          <td class="p-1">0.779</td>
-        </tr>
-        <tr class="border-b border-white/10 bg-white/5">
-          <td class="p-1 border-r border-white/10 font-medium">A10 FXN 9 Unconcentrated</td>
-          <td class="p-1 border-r border-white/10">0.141</td>
-          <td class="p-1 border-r border-white/10">0.141</td>
-          <td class="p-1">1.309</td>
-        </tr>
-        <tr class="border-b border-white/10 bg-white/5">
-          <td class="p-1 border-r border-white/10 font-medium">A10 FXN 9 Filtrate</td>
-          <td class="p-1 border-r border-white/10">0.063</td>
-          <td class="p-1 border-r border-white/10">0.063</td>
-          <td class="p-1">1.358</td>
-        </tr>
-        <tr class="border-b border-white/10 bg-emerald-500/10 text-emerald-200">
-          <td class="p-1 border-r border-white/10 font-medium">A10 FXN 9 Residue (6.1x)</td>
-          <td class="p-1 border-r border-white/10">0.863</td>
-          <td class="p-1 border-r border-white/10">0.863</td>
-          <td class="p-1">0.803</td>
-        </tr>
-        <tr class="bg-white/5">
-          <td class="p-1 border-r border-white/10 font-medium">ADAM 17 FXN 12</td>
-          <td class="p-1 border-r border-white/10">0.141</td>
-          <td class="p-1 border-r border-white/10">0.141</td>
-          <td class="p-1">0.930</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-  <div class="space-y-2">
-    <div class="p-2.5 bg-emerald-500/10 rounded border border-emerald-500/20 text-[9px]">
-      <h4 class="text-emerald-400 font-bold text-[10px] uppercase tracking-widest mb-1">Key Accomplishments</h4>
-      <p class="leading-relaxed opacity-75">
-        <b>Successful Concentration:</b> Spin concentration is highly effective for concentrating FPLC fractions. ADAM10 FXN 9 yielded a 6.1x increase in concentration (up to 0.863 mg/mL) with minimal loss in filtrate (0.063 mg/mL).
-      </p>
-    </div>
-    <div class="p-2.5 bg-red-500/10 rounded border border-red-500/20 text-[9px]">
-      <h4 class="text-red-400 font-bold text-[10px] uppercase tracking-widest mb-1">Leakage Alert</h4>
-      <p class="leading-relaxed opacity-75">
-        <b>ADAM10 FXN 6 Membrane Failure:</b> A10 FXN 6 showed significant protein leakage in the filtrate (0.176 mg/mL vs 0.163 mg/mL unconcentrated), indicating a membrane seal failure in that specific centrifugal unit.
-      </p>
-    </div>
-    <div class="p-2.5 bg-white/5 rounded border border-white/10 text-[9px]">
-      <h4 class="text-blue-300 font-bold text-[10px] uppercase tracking-widest mb-1">Future Recommendations</h4>
-      <p class="leading-relaxed opacity-75">
-        Check membrane integrity before run. Check yields of ADAM17 FXN 12 which remains low (0.141 mg/mL) and may require additional optimization.
-      </p>
-    </div>
-  </div>
-</div>
-
----
-# ADAM17 Temperature Expansion Trial (June 3\textsuperscript{rd}, 2026)
-Coomassie Blue SDS-PAGE of expression across induction temperatures and timepoints.
-
-<div class="grid grid-cols-2 gap-6 mt-6 items-start">
-  <div class="space-y-2 text-center">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260603.png" class="w-full rounded-lg border border-white/10" style="max-height: 280px; object-fit: contain;">
-    <p class="text-[9px] opacity-40 italic mt-1">
-      Coomassie Blue stained 12% Tris-glycine gel of ADAM17 expression (15 lanes).
-    </p>
-  </div>
-  <div class="space-y-3">
-    <div class="p-3 bg-white/5 rounded border border-white/10 text-[10px]">
-      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Overnight Expression Requirement</h4>
-      <p class="leading-relaxed opacity-75">
-        <b>Strong Overnight Expression:</b> The overnight lysate pellet (Lane 13) shows strong expression with a prominent band at $\approx$30 kDa, indicating that overnight expression is required to obtain detectable levels.
-      </p>
-    </div>
-    <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px]">
-      <h4 class="text-emerald-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Localization & Leakage QC</h4>
-      <p class="leading-relaxed opacity-75">
-        <b>No Periplasmic Leakage:</b> Target protein is absent in the growth supernatants (Lanes 7, 8, 9). The overnight growth pellet (Lane 12) shows expression, while early growth pellets (Lanes 10, 11) show none.
-      </p>
-    </div>
-    <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
-      <h4 class="text-amber-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Temperature Optimization</h4>
-      <p class="leading-relaxed opacity-75">
-        <b>25°C Standardization:</b> Early induction points (Lanes 14 and 15) show no bands. 25°C overnight induction is recommended to minimize inclusion body formation in the cell pellet, aligning with ADAM10 observations.
-      </p>
-    </div>
-  </div>
-</div>
-
----
-# SDS-PAGE & Silver Stain Rerun (June 10\textsuperscript{th}, 2026)
-Resolving migration issues with updated running gel chemistry and fresh buffers.
-
-<div class="grid grid-cols-2 gap-4 mt-6">
-  <div class="p-3 bg-white/5 rounded border border-white/10 text-center text-[9px]">
-    <b class="text-blue-400 text-xs block mb-1">ADAM10 Gel Rerun</b>
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260610_ADAM10.png" class="w-full rounded mt-2 border border-white/10" style="max-height: 220px; object-fit: contain;">
-    <p class="opacity-70 mt-2">
-      Successful resolution of FPLC Fraction 9 Retentate (Lane 14) showing a band in the 30-40 kDa range (expected catalytic domain size).
-    </p>
-  </div>
-  <div class="p-3 bg-white/5 rounded border border-white/10 text-center text-[9px]">
-    <b class="text-emerald-400 text-xs block mb-1">ADAM17 Gel Rerun</b>
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260610_ADAM17.png" class="w-full rounded mt-2 border border-white/10" style="max-height: 220px; object-fit: contain;">
-    <p class="opacity-70 mt-2">
-      Successful resolution of FPLC Fraction 6 Retentate (Lane 14) resolving candidate target bands at 30-40 kDa with clean migration.
-    </p>
-  </div>
-</div>
-
----
-# Western Blot & Spin Concentration (June 11\textsuperscript{th}-12\textsuperscript{th}, 2026)
-Validating expression, secretion, and concentration of ADAM10/17-pMopac target preparations.
+# ESM-C Sequence Classifier (Exploratory)
+An early-stage, structure-free classifier explored as a possible future sequence-level pre-filter — not currently used to rank or select designs in the active pipeline.
 
 <div class="grid grid-cols-2 gap-6 mt-6 items-start">
   <div class="space-y-3">
-    <div class="p-3.5 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px]">
-      <h4 class="text-emerald-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Centrifugal Spin Concentration</h4>
-      <p class="leading-relaxed opacity-75">
-        <b>20-40x Concentration:</b> Culture supernatants from expression trials (25°C, 30°C, and overnight) were concentrated using Amicon Ultra-4 (10 kDa MWCO) with no membrane failures or seal leakage.
-      </p>
+    <div class="p-3 bg-white/5 rounded border border-white/10 text-[10px] leading-relaxed opacity-80">
+      <b class="text-blue-400">Scale:</b> A fine-tuned 300M-parameter ESM-C classifier enumerated all ~64M possible 6-residue C-loop sequences; retained the top 50,000 predicted binders per target (P≥0.99) for ADAM17, MMP3, MMP9. MMP9 and MMP3 share 38.1% Jaccard overlap; ADAM17 is highly distinct (0.066).
     </div>
-    <div class="p-3.5 bg-blue-500/10 rounded border border-blue-500/20 text-[10px]">
-      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Western Blot Protocol QC</h4>
-      <p class="leading-relaxed opacity-75">
-        <b>Trans-Blot Turbo:</b> Blotted onto PVDF membrane using a custom 1.3A 24V 10Min protocol. Blocked in 5% milk / TBST-Brij, then incubated with mouse anti-FLAG (1:1000) primary antibody.
-      </p>
+    <div class="p-3 bg-white/5 rounded border border-white/10 text-[10px] leading-relaxed opacity-80">
+      <b class="text-cyan-400">Consensus motifs found:</b> A shared core <code>L-S-x-x-T</code> (positions 1,2,5) across all three targets; selectivity is carried by positions 3/4/6 — ADAM17 <code>LSSDTT</code>, MMP3 <code>LSPDTT</code>, MMP9 <code>LSPTTL</code>. These are candidate leads for a future order, not yet acted on.
     </div>
   </div>
+  <div class="flex flex-col items-center">
+    <EsmcConfidenceBars />
+  </div>
+</div>
+
+---
+layout: default
+transition: fade-out
+---
+
+# ESM-C: Early Signal, Not Yet Sufficient to Adopt
+Held-out classifier performance, plus a direct check against flow-cytometry results — encouraging, but underpowered.
+
+<div class="grid grid-cols-2 gap-6 mt-6 items-start">
   <div class="space-y-3">
-    <div class="p-4 bg-white/5 rounded border border-white/10 text-[10px]">
-      <h4 class="text-blue-300 font-bold text-[10px] uppercase tracking-widest mb-2">Western Blot Parameters</h4>
-      <ul class="list-disc pl-4 space-y-2 opacity-80 leading-relaxed">
-        <li><b>Lanes Loaded:</b> Ladder, A10 lysis pellet, A10 25°C/30°C/ON supernatants, A10 FXN 6, A17 25°C/30°C/ON supernatants, MMP2-FLAG (positive control).</li>
-        <li><b>Blocking/Wash:</b> Blocked in 5% milk / TBST-Brij, primary anti-FLAG incubation overnight, secondary HRP-conjugated anti-mouse.</li>
-        <li><b>Imaging:</b> Chemiluminescent ECL imaging and Ponceau S membrane total protein transfer staining completed on June 12th.</li>
-      </ul>
+    <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px] leading-relaxed opacity-80">
+      <b class="text-emerald-400">Held-out performance:</b> ROC-AUC 0.912, PR-AUC 0.746, MCC 0.722, F1 0.734 (n=6,788, 381 MMP9 positives). ~99.7% of top predictions are absent from training data — genuine generalization, not memorization.
+    </div>
+    <div class="p-3 bg-violet-500/10 rounded border border-violet-500/20 text-[10px] leading-relaxed opacity-80">
+      <b class="text-violet-400">Encouraging early check against real FCS binding:</b> Spearman ρ=0.86 (ADAM17, p=0.014, n=7) and ρ=0.75 (MMP9 Double+%, p=0.052, n=7) on out-of-distribution AB-loop constructs — outperforming monomeric AlphaFold LpLDDT (r≈-0.26) on the same constructs.
+    </div>
+    <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px] opacity-80">
+      <b class="text-amber-400">Why it's not adopted yet:</b> n=7 is far too small to act on, and the strict novel-loop held-out subset contains 0 positive binders, so out-of-distribution generalization can't be quantified statistically. Wet-lab validation on a dedicated batch is required before ESM-C output could drive a synthesis order.
     </div>
   </div>
-</div>
-
----
-layout: default
-transition: fade-out
----
-
-# Western Blot Results & Analysis (June 12\textsuperscript{th}, 2026)
-Validating soluble target expression and membrane transfer quality.
-
-<div class="grid grid-cols-2 gap-4 mt-6">
-  <div class="p-3 bg-white/5 rounded border border-white/10 text-center text-[9px]">
-    <b class="text-blue-400 text-xs block mb-1">Ponceau S Membrane Stain</b>
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ponceau_labeled.png" class="w-full rounded mt-2 border border-white/10" style="max-height: 200px; object-fit: contain;">
-    <p class="opacity-70 mt-2">
-      Uniform total protein transfer showing high-fidelity transfer of ladder and major bands (20260612).
-    </p>
-  </div>
-  <div class="p-3 bg-white/5 rounded border border-white/10 text-center text-[9px]">
-    <b class="text-emerald-400 text-xs block mb-1">Western Blot (Anti-FLAG)</b>
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/western_blot_labeled.png" class="w-full rounded mt-2 border border-white/10" style="max-height: 200px; object-fit: contain;">
-    <p class="opacity-70 mt-2">
-      Lane 3 (ADAM10 25°C supernatant) shows a single soluble band near 60 kDa; lanes 7-9 (ADAM17) show no signal.
-    </p>
-  </div>
-</div>
-
----
-layout: default
-transition: fade-out
----
-
-# BCA Assay — ADAM10 Concentration Standardization (June 12\textsuperscript{th}, 2026)
-Quantifying purified ADAM10 FPLC Fraction 6 for downstream binding trials.
-
-<div class="grid grid-cols-2 gap-4 mt-4">
-  <div class="space-y-3">
-    <div class="p-3 bg-blue-500/10 rounded border border-blue-500/20 text-[10px]">
-      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">SpectraMax i3x Run</h4>
-      <p class="leading-relaxed opacity-75">
-        <b>Quadratic Fit ($R^2 = 0.9895$):</b> Back-calculated neat, 1:2, and 1:5 dilutions yield a mean concentration of <b>205.46 μg/mL</b> (~0.21 mg/mL).
-      </p>
-      <div class="flex gap-2 mt-2">
-        <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260612_2_standard_curve.png" class="w-1/2 rounded border border-white/5" style="max-height: 80px; object-fit: contain;">
-        <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260612_2_heatmap.png" class="w-1/2 rounded border border-white/5" style="max-height: 80px; object-fit: contain;">
-      </div>
-    </div>
-  </div>
-  <div class="space-y-3">
-    <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px]">
-      <h4 class="text-emerald-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">SPECTRAmax M5 Run</h4>
-      <p class="leading-relaxed opacity-75">
-        <b>Linear Fit ($R^2 = 0.9930$):</b> Dilution adjusted values show a mean concentration of <b>193.89 μg/mL</b> (~0.19 mg/mL).
-      </p>
-      <div class="flex gap-2 mt-2">
-        <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/BCA_template_2_standard_curve.png" class="w-1/2 rounded border border-white/5" style="max-height: 80px; object-fit: contain;">
-        <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/BCA_template_2_heatmap.png" class="w-1/2 rounded border border-white/5" style="max-height: 80px; object-fit: contain;">
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="mt-4 p-3 bg-white/5 rounded border border-white/10 text-[10px] text-center">
-  <span class="text-emerald-400 font-bold">Standardized Concentration:</span> Purified ADAM10 FPLC Fraction 6 concentration is standardized to <b>0.20 mg/mL</b> for downstream display trials.
-</div>
-
----
-layout: default
-transition: fade-out
----
-
-# Final Candidate Selection & Loop Extraction (June 15\textsuperscript{th}, 2026)
-Isolating TIMP3 variable loop regions for synthesis ordering.
-
-<div class="grid grid-cols-2 gap-4 mt-4">
-  <div class="space-y-3">
-    <div class="p-3 bg-blue-500/10 rounded border border-blue-500/20 text-[10px]">
-      <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Loop Extraction Logic</h4>
-      <p class="leading-relaxed opacity-75">
-        To prepare candidates for synthesis, native framework boundaries were defined in <code>select_binders_to_order.py</code> to automatically extract the variable regions:
-      </p>
-      <ul class="list-disc pl-4 space-y-1 opacity-80 leading-relaxed text-[9px] mt-1">
-        <li><b>AB Loop:</b> Between <code>PREFIX</code> and <code>REGION2</code></li>
-        <li><b>C Loop:</b> Between <code>REGION2</code> and <code>REGION3</code></li>
-        <li><b>EF Loop:</b> Between <code>REGION3</code> and <code>SUFFIX</code></li>
-      </ul>
-      <p class="leading-relaxed opacity-75 mt-1.5 text-[9px]">
-        Eliminates manual splicing errors and ensures precise boundary isolation.
-      </p>
-    </div>
-    <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px]">
-      <h4 class="text-emerald-400 font-bold text-[10px] uppercase tracking-widest mb-1.5">Priority Selection Summary</h4>
-      <p class="leading-relaxed opacity-75">
-        Filtered the candidate pool of <b>39 designs</b> down to <b>10 prioritized binders</b>:
-      </p>
-      <ul class="list-disc pl-4 space-y-1 opacity-80 leading-relaxed text-[9px] mt-1">
-        <li><b>MMP9:</b> 4 candidates (top composite: 0.816)</li>
-        <li><b>ADAM17:</b> 5 candidates (top composite: 0.792)</li>
-        <li><b>MMP2:</b> 1 candidate (composite: 0.785)</li>
-      </ul>
-      <p class="leading-relaxed opacity-75 mt-1.5 text-[9px]">
-        Gates: pTM &ge; 0.70, framework RMSD &le; 4.0 Å, target ipTM &ge; 0.50.
-      </p>
-    </div>
-  </div>
-  
-  <div class="space-y-2">
-    <div class="p-3 bg-white/5 rounded border border-white/10 text-[9px]">
-      <h4 class="text-blue-300 font-bold text-[10px] uppercase tracking-widest mb-1.5 text-center">Top prioritized designs for synthesis</h4>
-      <div class="overflow-x-auto mt-1">
-        <table class="w-full text-left text-[8px] opacity-90 border-collapse">
-          <thead>
-            <tr class="border-b border-white/20 text-blue-400 font-bold">
-              <th class="py-1">Design ID</th>
-              <th class="py-1">Target</th>
-              <th class="py-1">AB Loop</th>
-              <th class="py-1">C Loop</th>
-              <th class="py-1">EF Loop</th>
-              <th class="py-1">Comp</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr class="border-b border-white/10">
-              <td class="py-1 font-mono">MMP9_it15_d13_s0</td>
-              <td class="py-1">MMP9</td>
-              <td class="py-1 font-mono text-[7.5px]">HTNPDPRRGGE</td>
-              <td class="py-1 font-mono text-[7.5px]">ELTAM</td>
-              <td class="py-1 font-mono text-[7.5px]">RACD</td>
-              <td class="py-1 font-bold">0.816</td>
-            </tr>
-            <tr class="border-b border-white/10">
-              <td class="py-1 font-mono">MMP9_it15_d19_s0</td>
-              <td class="py-1">MMP9</td>
-              <td class="py-1 font-mono text-[7.5px]">DSVTGGTPSKS</td>
-              <td class="py-1 font-mono text-[7.5px]">ASSAL</td>
-              <td class="py-1 font-mono text-[7.5px]">RACD</td>
-              <td class="py-1 font-bold">0.798</td>
-            </tr>
-            <tr class="border-b border-white/10">
-              <td class="py-1 font-mono">ADAM17_it33_d11_s0</td>
-              <td class="py-1">ADAM17</td>
-              <td class="py-1 font-mono text-[7.5px]">EATIDGSPAKE</td>
-              <td class="py-1 font-mono text-[7.5px]">ESGVYHGMPIG</td>
-              <td class="py-1 font-mono text-[7.5px]">LGPCS</td>
-              <td class="py-1 font-bold">0.792</td>
-            </tr>
-            <tr class="border-b border-white/10">
-              <td class="py-1 font-mono">ADAM17_it31_d15_s0</td>
-              <td class="py-1">ADAM17</td>
-              <td class="py-1 font-mono text-[7.5px]">DSPIPNTKD</td>
-              <td class="py-1 font-mono text-[7.5px]">ESDYGSIA</td>
-              <td class="py-1 font-mono text-[7.5px]">DACS</td>
-              <td class="py-1 font-bold">0.786</td>
-            </tr>
-            <tr class="border-b border-white/10">
-              <td class="py-1 font-mono">MMP2_it24_d15_s0</td>
-              <td class="py-1">MMP2</td>
-              <td class="py-1 font-mono text-[7.5px]">KNVKDFFTGSMGDE</td>
-              <td class="py-1 font-mono text-[7.5px]">ADSKFENGKSIG</td>
-              <td class="py-1 font-mono text-[7.5px]">DLCS</td>
-              <td class="py-1 font-bold">0.785</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p class="opacity-60 text-[7.5px] mt-1.5 italic text-center">
-        Full list exported to order_list.csv (Local/iterative_refinement/ordering/).
-      </p>
-    </div>
-  </div>
-</div>
-
----
-layout: default
-transition: fade-out
----
-
-# Retry ADAM10 Expression Trials (June 16)
-
-<div class="grid grid-cols-12 gap-6 mt-6 items-center">
-  <div class="col-span-5">
-    <h2 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-2">Optimizing Soluble Yields</h2>
-    <p class="text-[10px] leading-relaxed opacity-70 mb-3">
-      To address low binding levels and optimize soluble periplasmic yields, a secondary expression trial was initiated to evaluate helper plasmid variants and lysis methods.
-    </p>
-    <h2 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-2">Trial Conditions & Status</h2>
-    <p class="text-[10px] leading-relaxed opacity-70">
-      Four conditions were set up evaluating combinations of <strong>BL21(DE3)</strong> host strains, <strong>pMopac-ADAM-10cd-Flg</strong>, and <strong>pBAD-helper</strong> vectors. Samples were collected at 1hr and 3hr post-induction. SDS-PAGE and Western blot validation runs are currently pending.
-    </p>
-  </div>
-  <div class="col-span-7 bg-white/5 p-4 rounded border border-white/10">
-    <div class="text-xs font-bold text-blue-300 mb-2">Expression Trial Design Matrix</div>
-    <table class="w-full text-left text-[9px] border-collapse">
-      <thead>
-        <tr class="border-b border-white/20 text-blue-400 font-bold">
-          <th class="py-1">Condition</th>
-          <th class="py-1">Strain / Plasmids</th>
-          <th class="py-1">Induction Temp</th>
-          <th class="py-1">Lysis / Prep</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr class="border-b border-white/10">
-          <td class="py-1">1</td>
-          <td class="py-1">BL21(DE3) + pMopac-ADAM10</td>
-          <td class="py-1">25°C, 3.5 hr</td>
-          <td class="py-1">Osmotic Shock</td>
-        </tr>
-        <tr class="border-b border-white/10">
-          <td class="py-1">2</td>
-          <td class="py-1">BL21(DE3) + pMopac-ADAM10 + pBAD-helper</td>
-          <td class="py-1">25°C, 3.5 hr</td>
-          <td class="py-1">Osmotic Shock + DsbC</td>
-        </tr>
-        <tr class="border-b border-white/10">
-          <td class="py-1">3</td>
-          <td class="py-1">BL21(DE3) + pMopac-ADAM10</td>
-          <td class="py-1">25°C, 3.5 hr</td>
-          <td class="py-1">Total Lysate (Sonicated)</td>
-        </tr>
-        <tr>
-          <td class="py-1">4</td>
-          <td class="py-1">BL21(DE3) + pMopac-ADAM10 + pBAD-helper</td>
-          <td class="py-1">25°C, 3.5 hr</td>
-          <td class="py-1">Total Lysate + DsbC</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-</div>
-
----
-layout: default
-transition: fade-out
----
-
-# pMopac DNA Plasmid Audit (June 17)
-
-<div class="grid grid-cols-12 gap-6 mt-6 items-center">
-  <div class="col-span-5">
-    <h2 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-2">Vector Topology Verification</h2>
-    <p class="text-[10px] leading-relaxed opacity-70 mb-3">
-      Audited DNA sequence files to resolve physical property discrepancies and verify cloning sites (SfiI restriction sites) and tag configurations.
-    </p>
-    <div class="p-2.5 bg-blue-500/10 border border-blue-500/20 rounded text-[9px]">
-      <strong class="text-blue-400">Purification Insights:</strong> Theoretical isoelectric points (pI 5.95 for ADAM17, pI 6.44 for ADAM10) suggest negative charges at pH 8.0, confirming suitability of HiTrap Q FF Anion Exchange chromatography.
-    </div>
-  </div>
-  <div class="col-span-7 bg-white/5 p-4 rounded border border-white/10">
-    <div class="text-xs font-bold text-blue-300 mb-2">Verified DNA Annotation Metadata</div>
-    <div class="space-y-2 text-[10px] opacity-90">
-      <div class="flex justify-between border-b border-white/10 pb-1">
-        <span class="font-medium"><strong>(pET-)ADAM-17cd-HT</strong> (T7 / KanR / 6xHis)</span>
-        <span class="text-teal-400 font-semibold">30.3 kDa / pI 5.95</span>
-      </div>
-      <div class="flex justify-between border-b border-white/10 pb-1">
-        <span class="font-medium"><strong>pCHA-ADAM17cd</strong> (GAL1,10 / AmpR / Myc)</span>
-        <span class="text-teal-400 font-semibold">42.4 kDa / pI 5.56</span>
-      </div>
-      <div class="flex justify-between pb-1">
-        <span class="font-medium"><strong>pMopac-ADAM-10cd-Flg</strong> (lac / CmR / FLAG)</span>
-        <span class="text-teal-400 font-semibold">29.6 kDa / pI 6.44</span>
-      </div>
-    </div>
-  </div>
-</div>
-
----
-layout: default
-transition: fade-out
----
-
-# ADAM17 Plasmid Miniprep (June 18)
-
-<div class="grid grid-cols-12 gap-6 mt-6 items-center">
-  <div class="col-span-5">
-    <h2 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-2">Plasmid Isolation & Purity</h2>
-    <p class="text-[10px] leading-relaxed opacity-70 mb-3">
-      Isolated the expression plasmid for <strong>(pET-)ADAM-17cd-HT</strong> using the Promega Wizard® Plus SV Miniprep kit.
-    </p>
-    <div class="p-2.5 bg-blue-500/10 border border-blue-500/20 rounded text-[9px]">
-      <strong class="text-blue-400">Sequence Validation:</strong> Isolated plasmid DNA was submitted to Eurofins Genomics for whole plasmid nanopore sequencing to verify construct integrity.
-    </div>
-  </div>
-  <div class="col-span-7 bg-white/5 p-4 rounded border border-white/10">
-    <div class="text-xs font-bold text-blue-300 mb-2">Spectrophotometric DNA Yields & Ratios</div>
-    <table class="w-full text-left text-[10px] border-collapse">
-      <thead>
-        <tr class="border-b border-white/20 text-blue-400 font-bold">
-          <th class="py-1">Parameter</th>
-          <th class="py-1">Measured Value</th>
-          <th class="py-1">Quality Assessment</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr class="border-b border-white/10">
-          <td class="py-1 font-medium">DNA Concentration</td>
-          <td class="py-1">99.5 ng/μL</td>
-          <td class="py-1 text-emerald-400 font-semibold">High Yield (9.95 μg total)</td>
-        </tr>
-        <tr class="border-b border-white/10">
-          <td class="py-1 font-medium">A260 / A280 Ratio</td>
-          <td class="py-1">1.894</td>
-          <td class="py-1 text-emerald-400 font-semibold">Excellent Purity (Target: ~1.8)</td>
-        </tr>
-        <tr>
-          <td class="py-1 font-medium">A260 / A230 Ratio</td>
-          <td class="py-1">1.785</td>
-          <td class="py-1 text-emerald-400 font-semibold">Minimal salt/organic carryover</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-</div>
-
----
-
-# Plasmid Sequence Recovery (June 30)
-
-<div class="grid grid-cols-12 gap-6 mt-6 items-center">
-  <div class="col-span-5">
-    <h2 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-2">Oxford Nanopore Results</h2>
-    <p class="text-[10px] leading-relaxed opacity-70 mb-3">
-      Analyzed Eurofins whole-plasmid sequencing reads (3,167 raw reads, 27 Mbp) to verify plasmid integrity. Metagenomic assembly resolved a mixture of two plasmids.
-    </p>
-    <div class="p-2.5 bg-red-500/10 border border-red-500/20 rounded text-[9px] text-red-300 mb-2">
-      <strong class="text-red-400">Construct Failure:</strong> The target ADAM17 catalytic-domain insert is entirely absent. The cloning cassette is empty, with the pelB secretion leader directly preceding the FLAG tag and stop codon.
-    </div>
-    <ul class="space-y-1 text-[9px] list-disc pl-4 opacity-70 mt-2">
-      <li>Resolved two circular contigs: dimer of pBAD-DsbC chaperone plasmid and tetramer of empty parental pMoPac vector.</li>
-      <li>Consensus assembly achieved ~3,300x average coverage depth.</li>
-      <li>Cassette translation: <code class="text-red-300 font-mono">MKSLLPTAAAGLLLLAAADYKDDDDKGRA*</code></li>
-    </ul>
-  </div>
-  <div class="col-span-7 bg-white/5 p-4 rounded border border-white/10 flex flex-col items-center">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/pMopac_recovered_map.png" class="h-52 object-contain rounded border border-white/10 shadow-sm" alt="Recovered pMopac Plasmid Map"/>
-    <div class="text-[9px] opacity-40 uppercase tracking-widest mt-2">Recovered Plasmid (June 30): Parental pMoPac vector (4,347 bp) with empty cloning cassette.</div>
+  <div class="flex flex-col items-center">
+    <CategoryBars dataset="esmc" title="Held-Out Test Performance (MMP9)" />
+    <p class="text-[9px] opacity-40 italic text-center mt-1">Held-out ROC/PR performance on MMP9.</p>
   </div>
 </div>
 

@@ -71,9 +71,28 @@ layout: default
     </div>
   </div>
   <div class="col-span-7 flex flex-col items-center">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260603.png" class="h-68 object-contain rounded border shadow-sm" alt="ADAM17 Expression Gel"/>
+    <img src="/SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260603.png" class="h-68 object-contain rounded border shadow-sm" alt="ADAM17 Expression Gel"/>
     <span class="text-2xs text-gray-500 mt-2">Coomassie Gel (June 3): Overnight induction (Lane 13) confirms strong target expression.</span>
   </div>
+</div>
+
+---
+
+# Expression Confirmation — Coomassie & Silver Stain
+
+<div class="grid grid-cols-2 gap-4 mt-4">
+  <div class="flex flex-col items-center border p-2 rounded bg-gray-50">
+    <img src="/SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260602.png" class="h-52 object-contain rounded border" alt="ADAM10 Expression Coomassie"/>
+    <span class="text-2xs text-gray-500 mt-2 text-center">ADAM10 Expression (Coomassie): bands visible at ~60-70 kDa corresponding to the catalytic domain.</span>
+  </div>
+  <div class="flex flex-col items-center border p-2 rounded bg-gray-50">
+    <img src="/SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260602_Silver.png" class="h-52 object-contain rounded border" alt="Low-Abundance Silver Stain"/>
+    <span class="text-2xs text-gray-500 mt-2 text-center">Pierce Silver Stain of FPLC fractions: confirms presence at low concentration and detects Fraction 6 leakage in the filtrate.</span>
+  </div>
+</div>
+
+<div class="text-2xs text-gray-600 mt-3 text-center">
+  Independent expression benchmark cross-checked against a colleague's parallel prep; ladder was compromised on the silver-stain gel, so band identity there is approximate.
 </div>
 
 ---
@@ -94,11 +113,11 @@ layout: default
   </div>
   <div class="grid grid-rows-2 gap-2">
     <div class="flex items-center gap-2 border p-2 rounded bg-gray-50">
-      <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM_10_AEC_T4.png" class="h-28 object-contain" alt="ADAM10 AEC"/>
+      <img src="/SharedAssets/figures/De_Novo_Binder_Generation/ADAM_10_AEC_T4.png" class="h-28 object-contain" alt="ADAM10 AEC"/>
       <div class="text-2xs text-gray-600"><strong>ADAM10 AEC profile:</strong> Large flow-through peak with secondary strip elution peak.</div>
     </div>
     <div class="flex items-center gap-2 border p-2 rounded bg-gray-50">
-      <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM_17_AEC_T2.png" class="h-28 object-contain" alt="ADAM17 AEC"/>
+      <img src="/SharedAssets/figures/De_Novo_Binder_Generation/ADAM_17_AEC_T2.png" class="h-28 object-contain" alt="ADAM17 AEC"/>
       <div class="text-2xs text-gray-600"><strong>ADAM17 AEC profile:</strong> Identical wash-through behavior, prompting silver-stain validation.</div>
     </div>
   </div>
@@ -168,15 +187,15 @@ layout: default
 
 ---
 
-# Optimized Silver-Stain Validation (June 10)
+# Optimized Silver-Stain Validation
 
 <div class="grid grid-cols-2 gap-4 items-center">
   <div class="flex flex-col items-center">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260610_ADAM10.png" class="h-68 object-contain rounded border" alt="ADAM10 Rerun"/>
+    <img src="/SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260610_ADAM10.png" class="h-68 object-contain rounded border" alt="ADAM10 Rerun"/>
     <span class="text-2xs text-gray-500 mt-1">ADAM10 Silver Stain Rerun (FXN 9 in Lane 14)</span>
   </div>
   <div class="flex flex-col items-center">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260610_ADAM17.png" class="h-68 object-contain rounded border" alt="ADAM17 Rerun"/>
+    <img src="/SharedAssets/figures/De_Novo_Binder_Generation/ADAM1017_SDS-Page_Gel_20260610_ADAM17.png" class="h-68 object-contain rounded border" alt="ADAM17 Rerun"/>
     <span class="text-2xs text-gray-500 mt-1">ADAM17 Silver Stain Rerun (FXN 6 in Lane 14)</span>
   </div>
 </div>
@@ -187,7 +206,7 @@ layout: default
 
 ---
 
-# Flow Cytometry Binding Trials (June 10)
+# Flow Cytometry Binding Trials
 
 <div class="grid grid-cols-2 gap-8 mt-2">
   <div>
@@ -259,7 +278,7 @@ layout: default
   </div>
 </div>
 
-# Western Blot Validation (June 11-12)
+# Western Blot Validation — Soluble Expression
 
 <div class="grid grid-cols-2 gap-6 mt-6 items-center">
   <div class="space-y-3">
@@ -272,14 +291,14 @@ layout: default
     </div>
   </div>
   <div class="flex flex-col items-center">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/western_blot_labeled.png" class="h-56 object-contain rounded border shadow-sm" alt="ADAM10 Western Blot"/>
+    <img src="/SharedAssets/figures/De_Novo_Binder_Generation/western_blot_labeled.png" class="h-56 object-contain rounded border shadow-sm" alt="ADAM10 Western Blot"/>
     <span class="text-2xs text-gray-500 mt-2">Anti-FLAG Western Blot: Soluble band near 60 kDa in Lane 3.</span>
   </div>
 </div>
 
 ---
 
-# BCA Assay Target Standardization (June 12)
+# BCA Assay Target Standardization
 
 <div class="grid grid-cols-2 gap-6 mt-6 items-center">
   <div class="space-y-3">
@@ -296,14 +315,14 @@ layout: default
     </div>
   </div>
   <div class="flex items-center gap-2 border p-2 rounded bg-gray-50">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260612_2_standard_curve.png" class="h-52 object-contain" alt="BCA Standard Curve"/>
+    <img src="/SharedAssets/figures/De_Novo_Binder_Generation/20260612_2_standard_curve.png" class="h-52 object-contain" alt="BCA Standard Curve"/>
     <div class="text-2xs text-gray-600"><strong>i3x Calibration:</strong> Standard curve fitting for precise concentration calculations.</div>
   </div>
 </div>
 
 ---
 
-# Retry ADAM10 Expression Trials (June 16)
+# Retry ADAM10 Expression Trials
 
 <div class="grid grid-cols-12 gap-6 mt-4 items-center">
   <div class="col-span-5">
@@ -359,7 +378,7 @@ layout: default
 
 ---
 
-# pMopac DNA Plasmid Audit (June 17)
+# pMopac DNA Plasmid Audit
 
 <div class="grid grid-cols-12 gap-6 mt-4 items-center">
   <div class="col-span-5">
@@ -392,7 +411,7 @@ layout: default
 
 ---
 
-# ADAM17 Plasmid Miniprep (June 18)
+# ADAM17 Plasmid Miniprep
 
 <div class="grid grid-cols-12 gap-6 mt-4 items-center">
   <div class="col-span-5">
@@ -437,7 +456,7 @@ layout: default
 
 ---
 
-# Plasmid Sequence Recovery (June 30)
+# Plasmid Sequence Recovery
 
 <div class="grid grid-cols-12 gap-6 mt-4 items-center">
   <div class="col-span-5">
@@ -455,14 +474,14 @@ layout: default
     </ul>
   </div>
   <div class="col-span-7 flex flex-col items-center border p-2 rounded bg-gray-50">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/pMopac_recovered_map.png" class="h-52 object-contain" alt="Recovered pMopac Plasmid Map"/>
+    <img src="/SharedAssets/figures/De_Novo_Binder_Generation/pMopac_recovered_map.png" class="h-52 object-contain" alt="Recovered pMopac Plasmid Map"/>
     <div class="text-2xs text-gray-600 mt-1"><strong>Recovered Plasmid (June 30):</strong> Parental pMoPac vector (4,347 bp) with empty cloning cassette.</div>
   </div>
 </div>
 
 ---
 
-# Western Blot Trials (June 22)
+# Western Blot Trials — Transfer Troubleshooting
 
 <div class="grid grid-cols-12 gap-6 mt-4 items-center">
   <div class="col-span-5">
@@ -480,14 +499,14 @@ layout: default
     </ul>
   </div>
   <div class="col-span-7 flex flex-col items-center border p-2 rounded bg-gray-50">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260624_Ponceau.jpg" class="h-52 object-contain" alt="Ponceau S Membrane Stain"/>
+    <img src="/SharedAssets/figures/De_Novo_Binder_Generation/20260624_Ponceau.jpg" class="h-52 object-contain" alt="Ponceau S Membrane Stain"/>
     <div class="text-2xs text-gray-600 mt-1"><strong>Ponceau S Stain (June 24):</strong> Verification of transfer stack lanes and ladder.</div>
   </div>
 </div>
 
 ---
 
-# FPLC Chromatogram Trace (June 25)
+# FPLC Chromatogram Trace
 
 <div class="grid grid-cols-12 gap-6 mt-4 items-center">
   <div class="col-span-5">
@@ -505,14 +524,14 @@ layout: default
     </ul>
   </div>
   <div class="col-span-7 flex flex-col items-center border p-2 rounded bg-gray-50">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/fplc_chromatogram_20260625.png" class="h-52 object-contain" alt="FPLC Purification Trace"/>
+    <img src="/SharedAssets/figures/De_Novo_Binder_Generation/fplc_chromatogram_20260625.png" class="h-52 object-contain" alt="FPLC Purification Trace"/>
     <div class="text-2xs text-gray-600 mt-1"><strong>HiTrap Q AEC Trace (June 25):</strong> UV A280 (blue) and Salt Gradient %B (green).</div>
   </div>
 </div>
 
 ---
 
-# Western Blot Trials (June 26)
+# Western Blot Trials — Lysis Fractions
 
 <div class="grid grid-cols-12 gap-6 mt-4 items-center">
   <div class="col-span-5">
@@ -531,11 +550,11 @@ layout: default
   </div>
   <div class="col-span-7 grid grid-cols-2 gap-2 border p-2 rounded bg-gray-50">
     <div class="flex flex-col items-center">
-      <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260626_Supernatant_Ponceau_labeled.png" class="h-44 object-contain" alt="Supernatant Ponceau"/>
+      <img src="/SharedAssets/figures/De_Novo_Binder_Generation/20260626_Supernatant_Ponceau_labeled.png" class="h-44 object-contain" alt="Supernatant Ponceau"/>
       <div class="text-3xs text-gray-500 mt-1">Supernatant Ponceau Stain</div>
     </div>
     <div class="flex flex-col items-center">
-      <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260626_Pellet_Ponceau_labeled.png" class="h-44 object-contain" alt="Pellet Ponceau"/>
+      <img src="/SharedAssets/figures/De_Novo_Binder_Generation/20260626_Pellet_Ponceau_labeled.png" class="h-44 object-contain" alt="Pellet Ponceau"/>
       <div class="text-3xs text-gray-500 mt-1">Lysis Pellet Ponceau Stain</div>
     </div>
   </div>
@@ -543,7 +562,7 @@ layout: default
 
 ---
 
-# ADAM10 Silver-Stain Validation (June 26)
+# ADAM10 Silver-Stain Validation — Induction Time Course
 
 <div class="grid grid-cols-12 gap-6 mt-4 items-center">
   <div class="col-span-5">
@@ -561,7 +580,7 @@ layout: default
     </ul>
   </div>
   <div class="col-span-7 flex flex-col items-center border p-2 rounded bg-gray-50">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/20260626_ADAM10_Silver_labeled.png" class="h-52 object-contain" alt="ADAM10 Silver Gel"/>
+    <img src="/SharedAssets/figures/De_Novo_Binder_Generation/20260626_ADAM10_Silver_labeled.png" class="h-52 object-contain" alt="ADAM10 Silver Gel"/>
     <div class="text-2xs text-gray-600 mt-1"><strong>Silver-Stained Gel (June 26):</strong> Progressive 30°C induction timecourse.</div>
   </div>
 </div>

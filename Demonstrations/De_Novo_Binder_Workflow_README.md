@@ -139,7 +139,7 @@
 | `validation_report.txt` | Per-construct RE site validation results (all PASS) |
 
 **Order placed:** December 2025, Twist Bioscience  
-**Format:** Linear dsDNA with Golden Gate assembly overhangs
+**Format:** Ready-to-transform plasmids in the pCHA-TIMP3 yeast-display backbone (no in-lab cloning step required)
 
 ---
 
