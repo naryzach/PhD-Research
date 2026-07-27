@@ -18,3 +18,6 @@ matplotlib
 seaborn
 umap-learn         # UMAP dimensionality reduction; visualize.py falls back to PCA if absent
                    # (pulls in numba + llvmlite; see README for the recommended Python env)
+
+# Interpretability (shap_hotspots.py)
+shap

@@ -75,7 +75,19 @@ python compare_pooling.py --config config.yaml --modes loop mean cls
 
 # 6. (optional) Selectivity: does the model see binders as non-selective?
 python selectivity.py --config config.yaml --split test
+
+# 7. (optional) SHAP hotspots: which loop positions/amino acids drive binding?
+python shap_hotspots.py --config config.yaml --loop-subtype C-loop
+
+# 8. (optional) Exhaustive 20^6 loop enumeration + figures (needs --loop-subtype
+#    if the training CSV mixes AB-loop and C-loop rows; see enumerate_cloop.py)
+python enumerate_cloop.py --config config.yaml --loop-subtype C-loop
+python analyze_enumeration.py --config config.yaml
 ```
+
+To fine-tune + SHAP + enumerate across several dataset variants at once (e.g.
+AB-loop vs C-loop vs the full mix) instead of editing this config by hand each
+time, see `multirun/README.md`.
 
 ### Running on a cluster / bigger GPU
 
@@ -141,6 +153,10 @@ python train.py     --config config.yaml --smoke      # writes <output_dir>/mode
 - `<output_dir>/visualizations/` — UMAP/PCA PNGs + 2D coordinate CSVs.
 - `<output_dir>/selectivity/` — cross-target correlation / co-binding report + heatmaps.
 - `<output_dir>/pooling_comparison_*.csv` — pooling head-to-head table.
+- `<output_dir>/shap/<tag>/` — SHAP position-importance + per-position amino-acid hotspot
+  heatmaps/CSVs from `shap_hotspots.py` (`<tag>` = the `--loop-subtype`, e.g. `cloop`).
+- `<output_dir>/enumeration/<tag>_.../` — top-K-per-target + selective-loop CSVs from the
+  exhaustive `enumerate_cloop.py` sweep, plus `analysis/` figures from `analyze_enumeration.py`.
 
 ## Notes / caveats
 

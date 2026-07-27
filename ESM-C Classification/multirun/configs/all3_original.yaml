@@ -1,0 +1,69 @@
+# ============================================================================
+# Multirun variant: all3_original
+# The original setup -- TIMP_binder_all.csv, all 3 targets, AB-loop and
+# C-loop rows mixed together (loop pooling handles the per-row window).
+# Targets don't fully overlap across subtypes (AB-loop: MMP3/MMP9 only,
+# C-loop: ADAM17/MMP9 only) -- rows for a target's untested subtype are
+# simply absent, which the masked multi-task loss already handles.
+# ============================================================================
+
+data:
+  csv_path: "../../../Data/TIMP3_Binding_Results/TIMP_binder_all.csv"
+  seq_col: "Full Seq"
+  target_col: "Target"
+  encoding_col: "Encoding"
+  loop_col: "Residues"
+  count_col: "Count"
+
+targets: ["ADAM17", "MMP3", "MMP9"]
+
+output_dir: "../../../Local/esmc_multirun/all3_original"
+
+model:
+  model_id: "Synthyra/ESMplusplus_small"
+  pooling: "loop"
+  dropout: 0.1
+  max_length: 1024
+
+preprocess:
+  min_count: 1
+  count_weighting: "log"
+
+split:
+  test_frac: 0.15
+  val_frac: 0.15
+  cluster_hamming1: false
+  seed: 42
+
+train:
+  batch_size: 16
+  precision: "auto"
+  multi_gpu: "false"
+  num_workers: 4
+  pin_memory: true
+  gradient_checkpointing: false
+  grad_clip: 1.0
+  weight_decay: 0.01
+  log_every: 100
+  metric: "pr_auc"
+  phase1:
+    epochs: 3
+    lr: 1.0e-3
+  phase2:
+    epochs: 15
+    lr: 1.0e-5
+    unfreeze_layers: 6
+    early_stop_patience: 3
+
+visualize:
+  reducer: "umap"
+  n_neighbors: 15
+  min_dist: 0.1
+  max_points: 5000
+
+smoke:
+  limit: 1500
+  batch_size: 8
+  phase1_epochs: 1
+  phase2_epochs: 1
+  unfreeze_layers: 2

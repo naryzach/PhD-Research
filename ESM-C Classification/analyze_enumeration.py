@@ -86,6 +86,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.yaml")
     ap.add_argument("--dir", default=None, help="enumeration subfolder (default: newest)")
+    ap.add_argument("--loop-subtype", default=None,
+                    help="Ligand_Subtype to use as the novelty reference (default: read from "
+                         "run_meta.json written by enumerate_cloop.py, else 'C-loop' for "
+                         "backward compatibility with pre-multirun enumeration runs)")
+    ap.add_argument("--template-csv", default=None,
+                    help="CSV to compute the novelty reference from (default: cfg data.csv_path)")
     ap.add_argument("--top", type=int, default=3000, help="rows/target to profile for heatmaps")
     ap.add_argument("--shortlist", type=int, default=60, help="deduped reps per list")
     ap.add_argument("--ham", type=int, default=2, help="min Hamming between shortlist reps")
@@ -96,16 +102,27 @@ def main():
     out = enum_dir / "analysis"; out.mkdir(parents=True, exist_ok=True)
     print(f"Analyzing {enum_dir}\n -> {out}")
 
+    loop_subtype = args.loop_subtype
+    run_meta_path = enum_dir / "run_meta.json"
+    if loop_subtype is None:
+        if run_meta_path.exists():
+            loop_subtype = json.loads(run_meta_path.read_text()).get("loop_subtype")
+            print(f"loop_subtype (from run_meta.json): {loop_subtype!r}")
+        else:
+            loop_subtype = "C-loop"  # pre-multirun enumeration runs were always C-loop-only
+            print(f"loop_subtype: no run_meta.json found, defaulting to {loop_subtype!r}")
+
     targets = sorted(p.stem.replace("top_", "") for p in enum_dir.glob("top_*.csv")
                      if p.stem != "top_selective")
     print("targets:", targets)
     summary = {"enum_dir": str(enum_dir), "targets": targets}
 
-    # measured C-loops = novelty reference
+    # measured loops (of the enumerated subtype) = novelty reference
     d = cfg["data"]
-    train = pd.read_csv(resolve_path(cfg, d["csv_path"]))
+    template_csv = args.template_csv or resolve_path(cfg, d["csv_path"])
+    train = pd.read_csv(template_csv)
     sub = "Ligand_Subtype"
-    col = train[train[sub] == "C-loop"] if sub in train.columns else train
+    col = train[train[sub] == loop_subtype] if (loop_subtype and sub in train.columns) else train
     train_loops = set(col[d["loop_col"]].dropna().astype(str))
     Lref = len(next(iter(train_loops))) if train_loops else 6
     train_arr = (np.array([[AA_IDX.get(c, -1) for c in s] for s in train_loops])
