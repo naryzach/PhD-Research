@@ -101,7 +101,19 @@ torch.set_float32_matmul_precision("medium")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 _HERE     = Path(__file__).parent.resolve()
-DATA_DIR  = _HERE / ".." / "Data" / "TIMP_Complexes" / "HADDOCK_Outputs"
+# AF3 co-fold complexes are the RFd3 design template (chain A = FULL-LENGTH 188-aa
+# TIMP3, chain B = target, in the AF3-predicted binding pose). Two fixes vs the
+# original:
+#  (1) replaced the HADDOCK complexes, which placed TIMP3 ~30 A off-native (LRMS
+#      ~30 A / DockQ ~0.05 vs AF3 co-fold LRMS ~2.3 A / DockQ ~0.76) — RFd3 was
+#      inpainting loops into a wrong binding orientation.
+#  (2) FULL LENGTH (188), not the N-domain (121): the pipeline orders + tests the
+#      full protein (N-domain design + native C-domain), and the C-domain is needed
+#      for ADAM10 binding (literature) — so design must see it. The C-domain
+#      (122-188) is fixed scaffold in the contig; scaffold_len=188 in TARGETS.
+# Regenerate templates with Generation/prep_af3_templates.py. Revert: point back to
+# "HADDOCK_Outputs", set binder_chain="B"/target_chain="A", scaffold_len=121.
+DATA_DIR  = _HERE / ".." / "Data" / "TIMP_Complexes" / "AF3_Templates"
 OUT_BASE  = _HERE / ".." / "Local" / "iterative_refinement"
 CKPT_DIR  = _HERE / ".." / "Tools" / "foundry_checkpoints"
 
@@ -110,13 +122,16 @@ CKPT_DIR  = _HERE / ".." / "Tools" / "foundry_checkpoints"
 # They are used to read target_seqs and to construct the RFd3 contig string.
 # After RFd3 runs, all output structures (RFd3, LMPNN, RF3) follow a fixed
 # convention regardless of input — see DESIGN_BINDER_CHAIN below.
+# pdb = AF3 co-fold template (chain A = full 188-aa TIMP3, chain B = target).
+# scaffold_len = 188: RFd3 designs the N-domain loops (AB/C/EF, and GH at pos 127)
+# with the native C-domain (122-188) held as fixed scaffold context.
 TARGETS = {
-    "MMP2":   {"pdb": "MMP2_TIMP3_HADDOCK.pdb",   "binder_chain": "B", "target_chain": "A", "scaffold_len": 121},
-    "MMP9":   {"pdb": "MMP9_TIMP3_HADDOCK.pdb",   "binder_chain": "B", "target_chain": "A", "scaffold_len": 121},
-    "MMP3":   {"pdb": "MMP3_TIMP3_HADDOCK.pdb",   "binder_chain": "B", "target_chain": "A", "scaffold_len": 121},
-    "MMP10":  {"pdb": "MMP10_TIMP3_HADDOCK.pdb",  "binder_chain": "B", "target_chain": "A", "scaffold_len": 121},
-    "ADAM10": {"pdb": "ADAM10_TIMP3_HADDOCK.pdb",  "binder_chain": "B", "target_chain": "A", "scaffold_len": 121},
-    "ADAM17": {"pdb": "ADAM17_TIMP3_HADDOCK.pdb",  "binder_chain": "B", "target_chain": "A", "scaffold_len": 121},
+    "MMP2":   {"pdb": "MMP2_TIMP3_AF3.pdb",   "binder_chain": "A", "target_chain": "B", "scaffold_len": 188},
+    "MMP9":   {"pdb": "MMP9_TIMP3_AF3.pdb",   "binder_chain": "A", "target_chain": "B", "scaffold_len": 188},
+    "MMP3":   {"pdb": "MMP3_TIMP3_AF3.pdb",   "binder_chain": "A", "target_chain": "B", "scaffold_len": 188},
+    "MMP10":  {"pdb": "MMP10_TIMP3_AF3.pdb",  "binder_chain": "A", "target_chain": "B", "scaffold_len": 188},
+    "ADAM10": {"pdb": "ADAM10_TIMP3_AF3.pdb",  "binder_chain": "A", "target_chain": "B", "scaffold_len": 188},
+    "ADAM17": {"pdb": "ADAM17_TIMP3_AF3.pdb",  "binder_chain": "A", "target_chain": "B", "scaffold_len": 188},
 }
 
 # RFd3 emits chains in contig order: the first contig segment becomes chain A,
@@ -998,14 +1013,19 @@ class IterativeRefiner:
     # ── RFd3 ─────────────────────────────────────────────────────────────────
 
     def _build_contig(self, tcfg: dict, fix_chain_len: int,
-                      adaptive_ranges: dict = None) -> tuple[str, str]:
+                      adaptive_ranges: dict = None,
+                      scaffold_len: int = None) -> tuple[str, str]:
         """
         Build contig string and length range for RFd3.
         Returns (contig_string, length_range_string).
+
+        scaffold_len is the binder length, derived from the template at runtime
+        (run_rfd3) so it tracks whatever TIMP3 form the template holds — 121 (N-domain)
+        or 188 (full length). Falls back to tcfg["scaffold_len"] if not supplied.
         """
         bc     = tcfg["binder_chain"]
         fc     = tcfg["target_chain"]
-        total  = tcfg["scaffold_len"]
+        total  = scaffold_len if scaffold_len is not None else tcfg.get("scaffold_len")
         ar     = adaptive_ranges or {}
 
         parts = []
@@ -1043,8 +1063,17 @@ class IterativeRefiner:
         tcfg     = TARGETS[target_name]
         pdb_arr  = PDBFile.read(pdb_path).get_structure()[0]
         fix_len  = len(np.unique(pdb_arr.res_id[pdb_arr.chain_id == tcfg["target_chain"]]))
+        # Derive the scaffold (binder) length from the template so 121 vs 188 is
+        # never hard-coded; warn if it disagrees with the TARGETS hint.
+        scaffold_len = int(len(np.unique(pdb_arr.res_id[pdb_arr.chain_id == tcfg["binder_chain"]])))
+        hint = tcfg.get("scaffold_len")
+        if hint is not None and hint != scaffold_len:
+            logger.warning(f"[{target_name}] template binder length {scaffold_len} "
+                           f"!= TARGETS scaffold_len {hint}; using template length.")
 
-        contig, length_range = self._build_contig(tcfg, fix_len, adaptive_ranges)
+        contig, length_range = self._build_contig(tcfg, fix_len, adaptive_ranges,
+                                                  scaffold_len=scaffold_len)
+        logger.info(f"[{target_name}] RFd3 scaffold_len (from template): {scaffold_len}")
         logger.info(f"[{target_name}] RFd3 contig: {contig}")
         logger.info(f"[{target_name}] Length range: {length_range}")
 

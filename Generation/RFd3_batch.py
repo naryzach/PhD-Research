@@ -91,7 +91,10 @@ def main():
     os.environ["DGLBACKEND"] = "pytorch"
 
     original_directory = os.getcwd()
-    data_path = "../Data/TIMP_Complexes/HADDOCK_PDB"
+    # AF3 co-fold templates (chain A = TIMP3, chain B = target), not HADDOCK — the
+    # structural validation showed HADDOCK poses are ~30 A off-native. Regenerate
+    # with prep_af3_templates.py.
+    data_path = "../Data/TIMP_Complexes/AF3_Templates"
 
     output_prefix = "design"
 
@@ -116,34 +119,22 @@ def main():
 
     chain_to_design = "A"
     fixed_chains = ["B"]
-    total_length = 121
-
-    contig_parts = []
-    current_pos = 1
-
-    for loop in selected_loops:
-        if current_pos <= loop["pos"]:
-            contig_parts.append(f"{chain_to_design}{current_pos}-{loop['pos']}")
-        contig_parts.append(f"{loop['normal']}-{loop['max']}")
-        current_pos = loop["pos"] + loop["normal"] + 1
-
-    if current_pos <= total_length:
-        contig_parts.append(f"{chain_to_design}{current_pos}-{total_length}")
-
-    contig_string = ",".join(contig_parts)
+    # The binder scaffold length (total_length) is derived per-template inside the
+    # loop below via get_pdb_length, so 121 (N-domain) vs 188 (full length) is never
+    # hard-coded. The binder contig is likewise rebuilt per template.
     # NOTE: In foundry rfd3, chain breaks are designated by adding the next chain ID without explicit /0.
-    
+
     num_sequences_to_generate = 25
 
     print(f"Targeting loops: {loop_names}")
-    
+
     pdb_file_list = [
-        "TIMP3_vs_ADAM10_HADDOCK_Xray.pdb",
-        "TIMP3_vs_ADAM17_HADDOCK_Xray.pdb",
-        "TIMP3_vs_MMP2_HADDOCK_Xray.pdb",
-        "TIMP3_vs_MMP7_HADDOCK_Xray.pdb",
-        "TIMP3_vs_MMP9_HADDOCK_Xray.pdb",
-        "TIMP3_vs_MMP10_HADDOCK_Xray.pdb"
+        "ADAM10_TIMP3_AF3.pdb",
+        "ADAM17_TIMP3_AF3.pdb",
+        "MMP2_TIMP3_AF3.pdb",
+        "MMP3_TIMP3_AF3.pdb",
+        "MMP9_TIMP3_AF3.pdb",
+        "MMP10_TIMP3_AF3.pdb",
     ]
 
     rfd3_out_base = "../Local/rfd3_output"
@@ -164,8 +155,21 @@ def main():
             continue
 
         fix_chain_len = get_pdb_length(pdb_path, fixed_chains[0])
-        print(f"B chain length: {fix_chain_len}")
-        
+        total_length = get_pdb_length(pdb_path, chain_to_design)   # dynamic binder length
+        print(f"B (target) length: {fix_chain_len}  |  A (binder) length: {total_length}")
+
+        # Build the binder contig for THIS template's scaffold length (121 or 188).
+        contig_parts = []
+        current_pos = 1
+        for loop in selected_loops:
+            if current_pos <= loop["pos"]:
+                contig_parts.append(f"{chain_to_design}{current_pos}-{loop['pos']}")
+            contig_parts.append(f"{loop['normal']}-{loop['max']}")
+            current_pos = loop["pos"] + loop["normal"] + 1
+        if current_pos <= total_length:
+            contig_parts.append(f"{chain_to_design}{current_pos}-{total_length}")
+        contig_string = ",".join(contig_parts)
+
         full_contig_string = f"{contig_string},/0,{fixed_chains[0]}1-{fix_chain_len}"
         print(f"Final Contig String: {full_contig_string}")
         
