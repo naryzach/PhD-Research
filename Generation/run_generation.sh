@@ -45,6 +45,10 @@ TEMP_DECAY=0.94                     # slow cool -> ~29 iters to reach the floor
 MAX_ITERATIONS=40                   # full anneal + ~11 exploit iterations at the floor
 ESMFOLD2_GPUS=auto                  # shard ESMFold2 across all free GPUs
 MAX_RETRIES=5                       # auto-restart budget on hard crashes
+# ── SV structural battery (sv_bridge) ──
+SV_BATTERY=1                        # 1 = log the full Structural-Validation interface battery (sv_* cols); 0 = off
+SV_OCCLUSION_FILTER=1               # 1 = zero the composite for cleft-missing designs (mechanistic sanity GATE)
+SV_OCCLUSION_MIN=""                 # optional: override catalytic-occlusion threshold (blank = default 0.15)
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -83,9 +87,16 @@ else
   echo "STARTING FRESH: no state file — anneal begins at T=$INIT_TEMPERATURE." | tee -a "$LOG"
 fi
 
+# Assemble optional SV-battery flags (log-only metrics + optional occlusion gate).
+sv_flags=()
+(( SV_BATTERY )) && sv_flags+=(--sv-battery)
+(( SV_OCCLUSION_FILTER )) && sv_flags+=(--sv-occlusion-filter)
+[[ -n "$SV_OCCLUSION_MIN" ]] && sv_flags+=(--sv-occlusion-min "$SV_OCCLUSION_MIN")
+
 echo "Log: $LOG"
 echo "Targets: $TARGETS | Loops: $LOOPS | ${BACKBONES_PER_TARGET}bb x ${SEQS_PER_BACKBONE}seq | " \
-     "T:${INIT_TEMPERATURE}->${MIN_TEMPERATURE} decay ${TEMP_DECAY} | ${MAX_ITERATIONS} iters" | tee -a "$LOG"
+     "T:${INIT_TEMPERATURE}->${MIN_TEMPERATURE} decay ${TEMP_DECAY} | ${MAX_ITERATIONS} iters | " \
+     "SV: ${sv_flags[*]:-none}" | tee -a "$LOG"
 
 # ── Run with crash-resume ────────────────────────────────────────────────────
 attempt=0
@@ -101,6 +112,7 @@ while (( attempt <= MAX_RETRIES )); do
     --temp-decay "$TEMP_DECAY" \
     --esmfold2-gpus "$ESMFOLD2_GPUS" \
     --max-iterations "$MAX_ITERATIONS" \
+    ${sv_flags[@]+"${sv_flags[@]}"} \
     >> "$LOG" 2>&1
   rc=$?
   if (( rc == 0 )); then
