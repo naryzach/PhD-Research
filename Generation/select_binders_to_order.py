@@ -87,7 +87,7 @@ def _target_seqs() -> dict:
 
 HERE     = Path(__file__).parent.resolve()
 OUT_BASE = (HERE / ".." / "Local" / "iterative_refinement").resolve()
-DATA_DIR = (HERE / ".." / "Data" / "TIMP_Complexes" / "HADDOCK_Outputs").resolve()
+DATA_DIR = (HERE / ".." / "Data" / "TIMP_Complexes" / "AF3_Templates").resolve()
 ORDER_DIR = OUT_BASE / "ordering"
 
 # Redesigned loops — flank tripeptides locate each loop inside any binder/native
@@ -620,24 +620,21 @@ def main():
                 pass
 
     # ── Report ──
-    PREFIX = 'CTCSPHPQDAFCNSDIVIRAKVGKKLVK'
-    REGION2 = 'LVYTIKQMKMYRGFTKMPHVQYIHTE'
-    REGION3 = 'CGLKLEVNKYQYLLTGRVYDGKMYT'
-    SUFFIX = 'FVERWDQLTLSQRKGLNYRYHLGCN'
-
     def extract_loops(seq: str):
-        if not isinstance(seq, str) or not seq.startswith(PREFIX):
+        """
+        AB/C/EF loop subsequences via the flank-tripeptide locator
+        (loop_residue_positions), the SAME robust method the pipeline uses. This
+        is scaffold-agnostic — it works for the full-length 188-aa AF3 template as
+        well as the old 121-aa N-domain, unlike the previous hardcoded-PREFIX slice
+        (which silently returned blanks when the template sequence changed).
+        """
+        if not isinstance(seq, str):
             return "", "", ""
-        s = seq[len(PREFIX):]
-        idx2 = s.find(REGION2)
-        ab = s[:idx2] if idx2 != -1 else ""
-        s = s[idx2+len(REGION2):] if idx2 != -1 else ""
-        idx3 = s.find(REGION3)
-        c = s[:idx3] if idx3 != -1 else ""
-        s = s[idx3+len(REGION3):] if idx3 != -1 else ""
-        idx4 = s.find(SUFFIX)
-        ef = s[:idx4] if idx4 != -1 else ""
-        return ab, c, ef
+        pos = loop_residue_positions(seq)   # {loop: set(1-indexed positions)}
+        def sub(name):
+            ps = sorted(pos.get(name, []))
+            return "".join(seq[p - 1] for p in ps if 0 < p <= len(seq)) if ps else ""
+        return sub("AB"), sub("C"), sub("EF")
 
     report = [f"# Binders to order  (criteria: {args.criteria}, AF3-preferred)\n"]
     report.append(f"{len(selections)} designs recommended from "

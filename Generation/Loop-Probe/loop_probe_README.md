@@ -42,18 +42,22 @@ swapped chains need no configuration:
 
 | set | location | binder chain |
 |-----|----------|--------------|
-| `alphafold` (default) | `Data/TIMP_Complexes/AlphaFold_CIF/TIMP3_vs_<T>_AF.cif` | **A** (188 aa, full length) |
+| `af3` (**default**) | `Data/TIMP_Complexes/AF3_Templates/<T>_TIMP3_AF3.pdb` | **A** (188 aa, full length) |
+| `alphafold` | `Data/TIMP_Complexes/AlphaFold_CIF/TIMP3_vs_<T>_AF.cif` | **A** (188 aa) |
 | `haddock` | `Data/TIMP_Complexes/HADDOCK_Outputs/<T>_TIMP3_HADDOCK.pdb` | **B** (121 aa) |
 
-Both are verified to converge on an identical design construct and contig. CIF
-and PDB both work. Point elsewhere with `--template-dir` (filenames matched by
-target name), or name files explicitly with `template_map:` in a config.
-Detection **raises rather than guesses** if no chain is TIMP3-like or two chains
-are too close — override with `--binder-chain` / `--target-chain`.
+All are verified to converge on the same design construct and contig. CIF and
+PDB both work. Point elsewhere with `--template-dir` (filenames matched by target
+name), or name files explicitly with `template_map:` in a config. Detection
+**raises rather than guesses** if no chain is TIMP3-like or two chains are too
+close — override with `--binder-chain` / `--target-chain`.
 
-TIMP3 is trimmed to the N-terminal design construct (default residues 1–121) and
-relabelled to binder=A / target=B. Loop positions and native lengths are then
-**derived from the template's own sequence** by locating the flanking
+**By default the full-length TIMP3 chain (188 aa) is kept** — the N-terminal
+domain that holds the loops plus the C-terminal domain as fixed structural
+context. This also makes the `GH` loop (pos 127, C-terminal domain) available.
+Pass `--scaffold-len 121` to trim to just the N-terminal design construct
+instead. TIMP3 is relabelled to binder=A / target=B. Loop positions and native
+lengths are **derived from the template's own sequence** by locating the flanking
 tripeptides, so alternative constructs and numbering offsets (e.g. an N-terminal
 tag) work without editing `LOOP_CONFIGS`.
 
@@ -154,9 +158,9 @@ so you can keep a config and override one knob on the command line.
 | `--temperature` | 0.5 | higher = more diverse loops |
 | `--loops` | `AB C EF` | `_`-join to sweep jointly |
 | `--lengths` / `--length-range` | native / native−2…+4 | `AB=8,C=6` / `AB=4-12` |
-| `--template-set` / `--template-dir` | `alphafold` | see Templates |
+| `--template-set` / `--template-dir` | `af3` | see Templates |
 | `--binder-chain` / `--target-chain` | auto-detect | only if detection fails |
-| `--scaffold-len` | 121 (auto-extends for GH) | 188 = full-length TIMP3 |
+| `--scaffold-len` | full length (188) | e.g. `121` trims to the N-terminal domain |
 | `--seed`, `--out-dir`, `--no-plots` | 42 / `Local/loop_probe/` / off | |
 | `--full-range`, `--grid` | off | sweep-only |
 | `--order` | `unit` | `unit` = each unit across all targets before the next; `target` = one target at a time |

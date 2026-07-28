@@ -26,13 +26,16 @@ Any complex structure with a TIMP3-like chain and a target chain works — CIF o
 PDB.  **Chain order is auto-detected** by sequence (see `identify_chains`), so
 files whose binder/target chains are swapped need no special handling:
 
-    alphafold  Data/TIMP_Complexes/AlphaFold_CIF/TIMP3_vs_<T>_AF.cif   (binder = chain A, 188 aa)
-    haddock    Data/TIMP_Complexes/HADDOCK_Outputs/<T>_TIMP3_HADDOCK.pdb (binder = chain B, 121 aa)
+    af3 (default)  Data/TIMP_Complexes/AF3_Templates/<T>_TIMP3_AF3.pdb    (binder = chain A, 188 aa)
+    alphafold      Data/TIMP_Complexes/AlphaFold_CIF/TIMP3_vs_<T>_AF.cif  (binder = chain A, 188 aa)
+    haddock        Data/TIMP_Complexes/HADDOCK_Outputs/<T>_TIMP3_HADDOCK.pdb (binder = chain B, 121 aa)
 
-TIMP3 is trimmed to the N-terminal design construct (default residues 1..121)
-and relabelled to the pipeline's canonical binder=A / target=B convention.  Loop
-positions and native lengths are then **derived from the template's own
-sequence** by locating the flanking tripeptides, so alternative templates and
+By default the **full-length TIMP3 chain** is kept (188 aa — the N-terminal
+domain that holds the loops plus the C-terminal domain as fixed structural
+context).  Pass `--scaffold-len 121` to trim to just the N-terminal design
+construct.  TIMP3 is relabelled to the pipeline's canonical binder=A / target=B
+convention.  Loop positions and native lengths are **derived from the template's
+own sequence** by locating the flanking tripeptides, so alternative templates and
 numbering offsets work without editing LOOP_CONFIGS.
 
 This module reuses the engine wrappers and helpers from `iterative_refinement`
@@ -111,12 +114,14 @@ TARGET_NAMES = ["MMP2", "MMP3", "MMP9", "MMP10", "ADAM10", "ADAM17"]
 # Built-in template sets: {name: (directory, filename pattern)}.  Anything else
 # can be pointed at with --template-dir / --template-map.
 TEMPLATE_SETS = {
+    "af3":       (_REPO / "Data" / "TIMP_Complexes" / "AF3_Templates",
+                  "{target}_TIMP3_AF3.pdb"),
     "alphafold": (_REPO / "Data" / "TIMP_Complexes" / "AlphaFold_CIF",
                   "TIMP3_vs_{target}_AF.cif"),
     "haddock":   (_REPO / "Data" / "TIMP_Complexes" / "HADDOCK_Outputs",
                   "{target}_TIMP3_HADDOCK.pdb"),
 }
-DEFAULT_TEMPLATE_SET = "alphafold"
+DEFAULT_TEMPLATE_SET = "af3"          # full-length TIMP3 (188 aa) AF3 complexes
 
 # Mature human TIMP3 (188 aa) — the reference used to decide which chain of a
 # template is the binder.  Designed/variant TIMP3s still score far above any
@@ -132,8 +137,13 @@ TIMP3_REF = (
 FLANK_MOTIFS = sorted({m for lc in LOOP_CONFIGS.values()
                        for m in (lc["left"], lc["right"])})
 
-DEFAULT_SCAFFOLD_LEN = 121   # N-terminal TIMP3 design construct
-FULL_TIMP3_LEN       = 188
+# Construct length = how many N-terminal TIMP3 residues to keep.  The DEFAULT is
+# now full length: scaffold_len=None keeps the entire binder chain (188 aa for
+# the AF3/AlphaFold templates).  Pass an int (e.g. 121) to trim to the
+# N-terminal domain instead.  NTERM_DOMAIN_LEN is the sensible floor / the classic
+# N-TIMP3 construct used by the rest of the pipeline.
+NTERM_DOMAIN_LEN = 121
+FULL_TIMP3_LEN   = 188
 BINDER_SCORE_MIN     = 0.50  # below this we refuse to guess the binder chain
 BINDER_SCORE_MARGIN  = 0.20  # binder must beat runner-up by at least this
 
@@ -229,7 +239,7 @@ def resolve_lengths(active_loops: list[str], overrides: dict[str, int] | None,
 
 def required_scaffold_len(active_loops: list[str]) -> int:
     """Smallest TIMP3 construct length that still contains every selected loop."""
-    need = DEFAULT_SCAFFOLD_LEN
+    need = NTERM_DOMAIN_LEN
     for name in active_loops:
         lc = LOOP_CONFIGS[name]
         need = max(need, lc["pos"] + lc["normal"] + len(lc["right"]) + 1)
@@ -385,15 +395,17 @@ def derive_loop_geometry(binder_seq: str, active_loops: list[str]) -> list[dict]
     return sorted(geometry, key=lambda g: g["pos"])
 
 
-# ── Input structure preparation (template -> trimmed design PDB) ───────────────
-def prepare_input_pdb(target: str, template: Path, out_pdb: Path, scaffold_len: int,
+# ── Input structure preparation (template -> design PDB) ───────────────────────
+def prepare_input_pdb(target: str, template: Path, out_pdb: Path,
+                      scaffold_len: int | None = None,
                       binder_chain: str | None = None,
                       target_chain: str | None = None) -> tuple[Path, int]:
     """
     Read a template complex (CIF or PDB), auto-detect which chain is the TIMP3
-    binder, keep binder residues 1..scaffold_len plus the whole target chain,
-    relabel to binder=A / target=B, renumber each chain from 1, and write a PDB
-    RFd3 can consume.  Returns (pdb_path, target_len).
+    binder, keep the binder (full length when `scaffold_len` is None, else its
+    N-terminal `scaffold_len` residues) plus the whole target chain, relabel to
+    binder=A / target=B, renumber each chain from 1, and write a PDB RFd3 can
+    consume.  Returns (pdb_path, target_len).
     """
     template = Path(template)
     if not template.exists():
@@ -402,7 +414,10 @@ def prepare_input_pdb(target: str, template: Path, out_pdb: Path, scaffold_len: 
     bc, tc = identify_chains(arr, binder_chain, target_chain,
                              label=f"[{target}] {template.name}")
 
-    binder = arr[(arr.chain_id == bc) & (arr.res_id <= scaffold_len)]
+    binder_mask = (arr.chain_id == bc)
+    if scaffold_len is not None:                 # trim to N-terminal domain
+        binder_mask &= (arr.res_id <= scaffold_len)
+    binder = arr[binder_mask]
     target_arr = arr[arr.chain_id == tc]
     if len(binder) == 0 or len(target_arr) == 0:
         raise RuntimeError(f"{target}: empty binder or target selection from "
@@ -542,17 +557,25 @@ def prepare_construct(target: str, active_loops: list[str],
                       target_chain: str | None = None,
                       scaffold_len: int | None = None) -> dict:
     """
-    Resolve the template, build (or reuse) the trimmed design construct, and
-    derive this template's loop geometry.
+    Resolve the template, build (or reuse) the design construct, and derive this
+    template's loop geometry.  `scaffold_len=None` (the default) keeps the FULL
+    TIMP3 chain (188 aa); an int trims to that many N-terminal residues.
 
     Returns {input_pdb, target_len, selected_loops, scaffold_len, template,
     binder_seq}.  Cheap and idempotent — the prepared PDB is cached on disk, so
     the sweep can call this once per target to learn the native loop lengths
     before running anything.
     """
-    scaffold_len = scaffold_len or required_scaffold_len(active_loops)
+    if scaffold_len is not None:
+        need = required_scaffold_len(active_loops)
+        if scaffold_len < need:
+            raise ValueError(f"--scaffold-len {scaffold_len} is too short for loops "
+                             f"{active_loops}: need >= {need} to contain them "
+                             f"(or leave it unset to keep full-length TIMP3).")
+
     template = resolve_template(target, template_set, template_dir, template_map)
-    input_pdb = OUT_BASE / "inputs" / f"{target}_{template.stem}_N{scaffold_len}.pdb"
+    tag = f"N{scaffold_len}" if scaffold_len is not None else "full"
+    input_pdb = OUT_BASE / "inputs" / f"{target}_{template.stem}_{tag}.pdb"
     if not input_pdb.exists():
         prepare_input_pdb(target, template, input_pdb, scaffold_len,
                           binder_chain, target_chain)
@@ -562,8 +585,10 @@ def prepare_construct(target: str, active_loops: list[str],
     target_len = len(np.unique(
         prepared.res_id[prepared.chain_id == DESIGN_TARGET_CHAIN]))
     selected_loops = derive_loop_geometry(binder_seq, active_loops)
+    # The construct length actually realised (full binder chain, or the trim).
+    actual_scaffold_len = len(binder_seq)
     return {"input_pdb": input_pdb, "target_len": target_len,
-            "selected_loops": selected_loops, "scaffold_len": scaffold_len,
+            "selected_loops": selected_loops, "scaffold_len": actual_scaffold_len,
             "template": template, "binder_seq": binder_seq}
 
 
@@ -702,7 +727,8 @@ def add_common_args(ap: argparse.ArgumentParser) -> None:
     ap.add_argument("--temperature", type=float, default=None,
                     help=f"LigandMPNN sampling temperature (default {DEFAULT_TEMPERATURE})")
     ap.add_argument("--template-set", default=None, choices=list(TEMPLATE_SETS),
-                    help=f"built-in template set (default {DEFAULT_TEMPLATE_SET})")
+                    help=f"built-in template set (default {DEFAULT_TEMPLATE_SET}: "
+                         f"full-length TIMP3 AF3 complexes)")
     ap.add_argument("--template-dir", default=None,
                     help="directory of template structures (overrides the set's dir)")
     ap.add_argument("--binder-chain", default=None,
@@ -710,7 +736,8 @@ def add_common_args(ap: argparse.ArgumentParser) -> None:
     ap.add_argument("--target-chain", default=None,
                     help="force the target chain id (default: auto-detect)")
     ap.add_argument("--scaffold-len", type=int, default=None,
-                    help="TIMP3 construct length (default auto: 121, extended for GH)")
+                    help="N-terminal TIMP3 residues to keep (default: full length, "
+                         "188 aa; e.g. 121 trims to the N-terminal domain)")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--out-dir", default=None)
     ap.add_argument("--no-plots", action="store_true",

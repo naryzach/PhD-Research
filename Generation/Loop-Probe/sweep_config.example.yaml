@@ -29,10 +29,11 @@ temperature: 0.6          # higher = more diverse loops; 0.3 is near-determinist
 seed: 42
 
 # ── Template structures ────────────────────────────────────────────────────────
-# Built-in sets: "alphafold" (AlphaFold_CIF, binder = chain A, 188 aa)
+# Built-in sets: "af3"       (AF3_Templates, binder = chain A, 188 aa)  [default]
+#                "alphafold" (AlphaFold_CIF, binder = chain A, 188 aa)
 #                "haddock"   (HADDOCK_Outputs, binder = chain B, 121 aa)
 # Chain order is auto-detected by sequence, so swapped files need no config.
-template_set: alphafold
+template_set: af3
 
 # Point at any other directory (filenames matched by target name if the set's
 # pattern doesn't apply):
@@ -48,8 +49,9 @@ template_set: alphafold
 # target_chain: B
 
 # ── Construct ──────────────────────────────────────────────────────────────────
-# TIMP3 construct length. Default 121 (N-terminal domain); auto-extends if GH
-# is selected. Set 188 to keep full-length TIMP3.
+# N-terminal TIMP3 residues to keep. DEFAULT = full length (188 aa: loop-bearing
+# N-terminal domain + C-terminal domain as fixed context; also enables the GH
+# loop). Set 121 to trim to just the N-terminal design construct.
 # scaffold_len: 121
 
 # ── Execution ──────────────────────────────────────────────────────────────────
