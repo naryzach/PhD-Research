@@ -142,11 +142,17 @@ def locate_loop(seq: str, loop: Optional[str]) -> int:
 # Metrics
 # --------------------------------------------------------------------------- #
 def compute_target_metrics(y_true: np.ndarray, y_score: np.ndarray,
-                           threshold: float = 0.5) -> Dict[str, float]:
-    """Per-target binary metrics robust to single-class slices."""
+                           threshold: float = 0.5, beta: float = 0.5) -> Dict[str, float]:
+    """Per-target binary metrics robust to single-class slices.
+
+    ``fbeta`` (default beta=0.5) weights precision over recall -- useful
+    alongside ``f1`` when false positives (calling a non-binder a binder) are
+    costlier than false negatives, e.g. picking candidates for wet-lab testing.
+    """
     from sklearn.metrics import (
         average_precision_score,
         f1_score,
+        fbeta_score,
         matthews_corrcoef,
         roc_auc_score,
     )
@@ -163,6 +169,7 @@ def compute_target_metrics(y_true: np.ndarray, y_score: np.ndarray,
         "roc_auc": float("nan"),
         "mcc": float("nan"),
         "f1": float("nan"),
+        "fbeta": float("nan"),
     }
     if n == 0:
         return out
@@ -173,12 +180,19 @@ def compute_target_metrics(y_true: np.ndarray, y_score: np.ndarray,
         out["roc_auc"] = float(roc_auc_score(y_true, y_score))
     out["mcc"] = float(matthews_corrcoef(y_true, y_pred)) if len(np.unique(y_pred)) > 1 or n_pos else 0.0
     out["f1"] = float(f1_score(y_true, y_pred, zero_division=0))
+    out["fbeta"] = float(fbeta_score(y_true, y_pred, beta=beta, zero_division=0))
     return out
 
 
-def best_threshold(y_true: np.ndarray, y_score: np.ndarray) -> float:
-    """Threshold on ``y_score`` that maximises MCC (falls back to 0.5)."""
-    from sklearn.metrics import matthews_corrcoef
+def best_threshold(y_true: np.ndarray, y_score: np.ndarray,
+                   metric: str = "mcc", beta: float = 0.5) -> float:
+    """Threshold on ``y_score`` that maximises ``metric`` (falls back to 0.5).
+
+    ``metric`` is ``"mcc"`` (balanced, threshold-agnostic-ish default) or
+    ``"fbeta"`` (precision-weighted when ``beta`` < 1 -- favors thresholds
+    that only call confident binders, at the cost of missing some true ones).
+    """
+    from sklearn.metrics import fbeta_score, matthews_corrcoef
 
     y_true = np.asarray(y_true).astype(int)
     y_score = np.asarray(y_score, dtype=float)
@@ -187,7 +201,11 @@ def best_threshold(y_true: np.ndarray, y_score: np.ndarray) -> float:
     candidates = np.unique(np.concatenate([[0.0, 1.0], y_score]))
     best_t, best_m = 0.5, -2.0
     for t in candidates:
-        m = matthews_corrcoef(y_true, (y_score >= t).astype(int))
+        pred = (y_score >= t).astype(int)
+        if metric == "fbeta":
+            m = fbeta_score(y_true, pred, beta=beta, zero_division=0)
+        else:
+            m = matthews_corrcoef(y_true, pred)
         if m > best_m:
             best_m, best_t = m, float(t)
     return best_t

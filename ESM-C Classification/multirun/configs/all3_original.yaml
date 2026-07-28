@@ -20,7 +20,7 @@ targets: ["ADAM17", "MMP3", "MMP9"]
 output_dir: "../../../Local/esmc_multirun/all3_original"
 
 model:
-  model_id: "Synthyra/ESMplusplus_small"
+  model_id: "Synthyra/ESMplusplus_large"
   pooling: "loop"
   dropout: 0.1
   max_length: 1024
@@ -46,6 +46,8 @@ train:
   weight_decay: 0.01
   log_every: 100
   metric: "pr_auc"
+  threshold_metric: "fbeta"
+  fbeta_beta: 0.5
   phase1:
     epochs: 3
     lr: 1.0e-3

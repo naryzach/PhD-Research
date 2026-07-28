@@ -18,9 +18,9 @@ loop windows at once, so their SHAP + enumeration steps run TWICE -- once per
 window (AB-loop, C-loop) -- since a single 6-position sweep/explanation can
 only cover one graft window at a time.
 
-Steps per (variant, loop_subtype):
-  data_prep -> train (once per variant, not per subtype) -> shap_hotspots ->
-  enumerate_cloop (full 20^6 sweep) -> analyze_enumeration
+Steps per variant:
+  data_prep -> train -> visualize (UMAP, once per variant) -> [per loop_subtype:
+  shap_hotspots -> enumerate_cloop (full 20^6 sweep) -> analyze_enumeration]
 
 Usage
 -----
@@ -30,6 +30,7 @@ Usage
     python multirun/run_all.py --variants abloop_only,cloop_only
     python multirun/run_all.py --steps data,train                 # just fine-tune
     python multirun/run_all.py --steps shap,enumerate,analyze     # redo analysis only
+    python multirun/run_all.py --steps visualize                  # just the UMAP plots
     python multirun/run_all.py --smoke                            # tiny sanity pass, all steps
     python multirun/run_all.py --dry-run                          # print commands, run nothing
     python multirun/run_all.py --force                            # ignore existing outputs, rerun
@@ -90,8 +91,9 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--variants", default=None,
                     help=f"comma-separated subset of: {','.join(VARIANT_NAMES)} (default: all)")
-    ap.add_argument("--steps", default="prepare,data,train,shap,enumerate,analyze",
-                    help="comma-separated subset of: prepare,data,train,shap,enumerate,analyze")
+    ap.add_argument("--steps", default="prepare,data,train,visualize,shap,enumerate,analyze",
+                    help="comma-separated subset of: "
+                         "prepare,data,train,visualize,shap,enumerate,analyze")
     ap.add_argument("--list", action="store_true", help="print the run plan and exit")
     ap.add_argument("--dry-run", action="store_true", help="print commands without running them")
     ap.add_argument("--force", action="store_true", help="rerun steps even if outputs already exist")
@@ -163,6 +165,17 @@ def main():
                 if args.log_every is not None:
                     cmd += ["--log-every", str(args.log_every)]
                 run(cmd, log_dir / "train.log", args.dry_run)
+
+        if "visualize" in steps:
+            viz_dir = out_dir / "visualizations"
+            for color_by in ("target", "binding"):
+                png = viz_dir / f"{color_by}.png"
+                if png.exists() and not args.force:
+                    print(f"[skip] visualize[{color_by}] already done ({png})")
+                else:
+                    cmd = [sys.executable, "visualize.py", "--config", cfg_rel,
+                          "--split", "test", "--color-by", color_by, "--out", str(png)]
+                    run(cmd, log_dir / f"visualize_{color_by}.log", args.dry_run)
 
         for subtype in v["loop_subtypes"]:
             tag = tag_of(subtype)

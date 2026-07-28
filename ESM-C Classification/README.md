@@ -142,6 +142,16 @@ python train.py     --config config.yaml --smoke      # writes <output_dir>/mode
 - `preprocess.{min_count,count_weighting}` — use read-count as a confidence filter / loss weight.
 - `train.precision / multi_gpu / gradient_checkpointing` — cluster scaling (see above).
 - `train.phase1 / phase2` — epochs, LRs, and `unfreeze_layers` for the staged curriculum.
+- `train.metric` (`pr_auc` default) — the val metric used to pick the best epoch/checkpoint.
+  PR-AUC is threshold-free (ranks scores across all cutoffs) and robust to the severe per-target
+  imbalance here, so it's a better *training-time* selection signal than F1/Fbeta, which only
+  become meaningful once a decision threshold exists.
+- `train.threshold_metric` (`fbeta` default) / `train.fbeta_beta` (`0.5` default) — once training
+  is done, this picks each target's final **decision threshold** on val (saved to
+  `model_meta.json`, used for `call_<target>` in predictions). `fbeta` with `beta<1` biases the
+  threshold toward precision — fewer false "binder" calls — which matters when a call feeds a
+  shortlist for wet-lab synthesis/testing; a false positive there costs real time and reagents.
+  Set `threshold_metric: mcc` to go back to the balanced (precision/recall-agnostic) threshold.
 
 ## Outputs
 

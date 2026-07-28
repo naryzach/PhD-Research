@@ -105,7 +105,7 @@ def run_train_epoch(model, loader, optimizer, scaler, device, grad_clip, desc, l
 
 
 @torch.no_grad()
-def evaluate(model, loader, device, targets, thresholds=None):
+def evaluate(model, loader, device, targets, thresholds=None, fbeta_beta=0.5):
     model.eval()
     logits_all, labels_all = [], []
     for batch in loader:
@@ -122,7 +122,7 @@ def evaluate(model, loader, device, targets, thresholds=None):
         if m.sum() == 0:
             continue
         thr = 0.5 if thresholds is None else thresholds.get(t, 0.5)
-        per[t] = compute_target_metrics(labels[m, ti], probs[m, ti], threshold=thr)
+        per[t] = compute_target_metrics(labels[m, ti], probs[m, ti], threshold=thr, beta=fbeta_beta)
     return per, probs, labels
 
 
@@ -131,9 +131,9 @@ def build_optimizer(model, lr, weight_decay):
     return torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
 
 
-def fmt_report(per, targets):
+def fmt_report(per, targets, beta=0.5):
     lines = [f"{'target':<8} {'n':>6} {'pos':>6} {'pos_rate':>8} "
-             f"{'pr_auc':>7} {'roc_auc':>7} {'mcc':>7} {'f1':>7}"]
+             f"{'pr_auc':>7} {'roc_auc':>7} {'mcc':>7} {'f1':>7} {'f'+str(beta):>7}"]
     for t in targets:
         if t not in per:
             continue
@@ -143,7 +143,7 @@ def fmt_report(per, targets):
             return f"{v:.3f}" if v == v else "  nan"
         lines.append(f"{t:<8} {m['n']:>6} {m['n_pos']:>6} "
                      f"{(m['pos_rate'] if m['pos_rate']==m['pos_rate'] else 0):>8.3f} "
-                     f"{g('pr_auc'):>7} {g('roc_auc'):>7} {g('mcc'):>7} {g('f1'):>7}")
+                     f"{g('pr_auc'):>7} {g('roc_auc'):>7} {g('mcc'):>7} {g('f1'):>7} {g('fbeta'):>7}")
     return "\n".join(lines)
 
 
@@ -181,6 +181,8 @@ def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None,
     unfreeze = smoke.get("unfreeze_layers", tr["phase2"]["unfreeze_layers"]) if args.smoke else tr["phase2"]["unfreeze_layers"]
     grad_clip = float(tr.get("grad_clip", 1.0))
     sel_metric = tr.get("metric", "pr_auc")
+    threshold_metric = tr.get("threshold_metric", "mcc")
+    fbeta_beta = float(tr.get("fbeta_beta", 0.5))
     log_every = int(tr.get("log_every", 0)) if log_every is None else int(log_every)
 
     data_dir = resolve_path(cfg, cfg["output_dir"]) / "data"
@@ -237,7 +239,7 @@ def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None,
     for ep in range(p1_epochs):
         loss = run_train_epoch(train_model, dl["train"], opt, scaler, device, grad_clip,
                                desc=f"P1 epoch {ep+1}/{p1_epochs}", log_every=log_every)
-        per, *_ = evaluate(model, dl["val"], device, targets)
+        per, *_ = evaluate(model, dl["val"], device, targets, fbeta_beta=fbeta_beta)
         print(f"  P1 ep{ep+1}: train_loss={loss:.4f} val_{sel_metric}={mean_metric(per, sel_metric):.4f}")
 
     # === Phase 2: unfreeze top-N layers, fine-tune with early stopping =====
@@ -250,7 +252,7 @@ def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None,
     for ep in range(p2_epochs):
         loss = run_train_epoch(train_model, dl["train"], opt, scaler, device, grad_clip,
                                desc=f"P2 epoch {ep+1}/{p2_epochs}", log_every=log_every)
-        per, *_ = evaluate(model, dl["val"], device, targets)
+        per, *_ = evaluate(model, dl["val"], device, targets, fbeta_beta=fbeta_beta)
         score = mean_metric(per, sel_metric)
         print(f"  P2 ep{ep+1}: train_loss={loss:.4f} val_{sel_metric}={score:.4f}")
         if score > best_score:
@@ -267,15 +269,19 @@ def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None,
     print(f"\nBest val {sel_metric}: {best_score:.4f}")
 
     # --- choose thresholds on validation -----------------------------------
-    per_val, probs_val, labels_val = evaluate(model, dl["val"], device, targets)
+    per_val, probs_val, labels_val = evaluate(model, dl["val"], device, targets, fbeta_beta=fbeta_beta)
     thresholds = {}
     for ti, t_ in enumerate(targets):
         m = labels_val[:, ti] != -100
-        thresholds[t_] = best_threshold(labels_val[m, ti], probs_val[m, ti]) if m.sum() else 0.5
+        thresholds[t_] = (best_threshold(labels_val[m, ti], probs_val[m, ti],
+                                         metric=threshold_metric, beta=fbeta_beta)
+                          if m.sum() else 0.5)
+    print(f"threshold_metric: {threshold_metric}" +
+         (f" (beta={fbeta_beta})" if threshold_metric == "fbeta" else ""))
 
     # --- final, single evaluation on the held-out test set -----------------
-    per_test, *_ = evaluate(model, dl["test"], device, targets, thresholds=thresholds)
-    report = fmt_report(per_test, targets)
+    per_test, *_ = evaluate(model, dl["test"], device, targets, thresholds=thresholds, fbeta_beta=fbeta_beta)
+    report = fmt_report(per_test, targets, beta=fbeta_beta)
     print("\n=== HELD-OUT TEST REPORT ===")
     print(report)
     print("thresholds:", {k: round(v, 3) for k, v in thresholds.items()})
@@ -292,8 +298,9 @@ def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None,
                 ndl = DataLoader(SeqDataset(novel, targets, count_weighting=cw),
                                  batch_size=batch_size, shuffle=False, collate_fn=collate,
                                  num_workers=nw, pin_memory=pin)
-                per_novel, *_ = evaluate(model, ndl, device, targets, thresholds=thresholds)
-                novel_report = fmt_report(per_novel, targets)
+                per_novel, *_ = evaluate(model, ndl, device, targets, thresholds=thresholds,
+                                        fbeta_beta=fbeta_beta)
+                novel_report = fmt_report(per_novel, targets, beta=fbeta_beta)
                 print(novel_report)
         else:
             print("\n[info] --strict-test: re-run data_prep.py to add the near_train_h1 column.")
@@ -312,6 +319,8 @@ def train_and_evaluate(cfg, smoke=False, pooling=None, out_name=None,
         "bos_offset": int(bos_offset),
         "max_length": int(cfg["model"]["max_length"]),
         "thresholds": thresholds,
+        "threshold_metric": threshold_metric,
+        "fbeta_beta": fbeta_beta,
         "pos_weight": {t: float(w) for t, w in zip(targets, pos_weight)},
         "val_best_metric": {sel_metric: float(best_score)},
     }

@@ -1,7 +1,7 @@
 # ESM-C multirun
 
-Runs the fine-tune -> SHAP hotspot -> 64M-combination enumeration -> figures
-pipeline across 5 dataset variants instead of one. See `run_all.py`'s
+Runs the fine-tune -> UMAP -> SHAP hotspot -> 64M-combination enumeration ->
+figures pipeline across 5 dataset variants instead of one. See `run_all.py`'s
 docstring for the full variant/step breakdown.
 
 | variant | data | targets |
@@ -38,7 +38,7 @@ sbatch run_esmc_multirun.sh --variants everything_combined
 Each step is skipped if its output already exists (`--force` to rerun
 anyway), so a crashed job can just be resubmitted. Useful flags:
 
-- `--steps data,train` / `--steps shap,enumerate,analyze` -- run a subset
+- `--steps data,train` / `--steps shap,enumerate,analyze` / `--steps visualize` -- run a subset
 - `--smoke` -- tiny fast pass through every step (sanity-checks the whole chain)
 - `--topk` / `--enum-batch-size` -- enumerate_cloop.py tuning
 - `--n-explain` / `--background-size` -- shap_hotspots.py tuning
@@ -50,6 +50,9 @@ Everything lands under `../../Local/esmc_multirun/<variant>/`:
 
 - `data/` -- train/val/test parquet + manifest (from `data_prep.py`)
 - `model/` -- fine-tuned weights + test report (from `train.py`)
+- `visualizations/target.png` / `binding.png` (+ matching `.csv` coords) -- UMAP of the
+  test-split embedding space, colored by assayed target / true binding label
+  (from `visualize.py`; runs once per variant, not per loop subtype)
 - `shap/<ab|c>loop/` -- SHAP hotspot heatmaps + CSVs (from `shap_hotspots.py`)
 - `enumeration/<ab|c>loop_full/` -- top-K per target + selective loops from the
   full 20^6 sweep (from `enumerate_cloop.py`), plus `analysis/` figures (from

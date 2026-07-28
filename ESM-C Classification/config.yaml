@@ -24,7 +24,7 @@ model:
   # Synthyra ESM++ = HF-native port of ESM-C (identical weights).
   #   Synthyra/ESMplusplus_small -> ESM-C 300M (fits a 12 GB GPU)
   #   Synthyra/ESMplusplus_large -> ESM-C 600M (default; use a bigger cluster GPU)
-  model_id: "Synthyra/ESMplusplus_small"
+  model_id: "Synthyra/ESMplusplus_large"
   pooling: "loop"          # loop | mean | cls  (loop = pool only the grafted loop)
   dropout: 0.1
   max_length: 1024
@@ -53,12 +53,24 @@ train:
   multi_gpu: "false"       # auto | false  (auto: DataParallel across all visible GPUs)
   num_workers: 4           # DataLoader workers (bump on multi-core cluster nodes)
   pin_memory: true
-  gradient_checkpointing: false  # true trades compute for memory (helps fit 600M + big batch)
+  gradient_checkpointing: false  # true trades compute for memory -- flip on if the 600M model
+                                  # + this batch_size OOMs on your GPU (see README VRAM notes)
   grad_clip: 1.0
   weight_decay: 0.01
   log_every: 0             # >0 prints a plain "step i/N loss=.. it/s" line every N steps
                            # (recommended on a cluster, e.g. 50-100; tqdm auto-hides in log files)
-  metric: "pr_auc"         # val selection metric (mean over targets): pr_auc | mcc | roc_auc
+  metric: "pr_auc"         # val selection metric (mean over targets, threshold-free): pr_auc | mcc | roc_auc
+                           # PR-AUC is the ranking-quality metric, robust to the severe per-target
+                           # class imbalance here (e.g. MMP3 ~92% pos, mmp9_other ~6% pos) and
+                           # doesn't depend on picking a threshold mid-training -- unlike F1/Fbeta,
+                           # which only make sense once a decision threshold exists (see below).
+  threshold_metric: "fbeta"  # metric used to pick each target's final decision threshold on val:
+                             # fbeta | mcc. fbeta (beta<1, see fbeta_beta) biases the threshold
+                             # toward precision -- fewer false "binder" calls -- appropriate when
+                             # calls feed a shortlist for wet-lab synthesis/testing.
+  fbeta_beta: 0.5            # beta<1 weights precision over recall (beta=0.5 => recall is
+                             # considered half as important as precision); beta=1 is plain F1;
+                             # beta>1 would weight recall over precision instead.
   phase1:                  # warm up the randomly-initialised heads, backbone frozen
     epochs: 3
     lr: 1.0e-3
