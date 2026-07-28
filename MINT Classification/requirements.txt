@@ -1,0 +1,18 @@
+# Core (this pipeline's own deps -- NOT the mint package itself, see README.md "Install")
+# NOTE: plain `pip install torch` grabs the newest CUDA build, which may be too
+# new for your GPU driver (symptom: "NVIDIA driver too old", falls back to CPU).
+# On a cluster, match the build to the driver's CUDA (see `nvidia-smi`), e.g.:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+torch>=2.1
+numpy
+pandas
+pyarrow            # parquet I/O for the prepared splits
+scikit-learn
+pyyaml
+tqdm
+
+# The `mint` package (https://github.com/VarunUllanat/mint) is NOT on PyPI and
+# is not listed here -- install it separately per README.md "Install" (its own
+# conda environment.yml + `pip install -e .` from a cloned checkout). This
+# pipeline imports it lazily (model.py's _load_mint), so data_prep.py and the
+# smoke-testable parts of this repo work without it installed.

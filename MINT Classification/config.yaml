@@ -1,0 +1,83 @@
+# ============================================================================
+# MINT binder-classification config
+# ----------------------------------------------------------------------------
+# MINT (https://github.com/VarunUllanat/mint) embeds a PAIR of sequences
+# jointly (it's trained on 96M real protein-protein interactions), so unlike
+# the ESM-C pipeline (single sequence + one output head per target), here the
+# target protease IS an input: (TIMP3-variant sequence, target sequence) ->
+# one shared bind/no-bind head. No per-target heads, no masked multi-task
+# loss, no target-overlap headaches across loop subtypes -- target identity
+# just comes along for the ride as chain B.
+# ============================================================================
+
+data:
+  csv_path: "../Data/TIMP3_Binding_Results/TIMP_binder_all.csv"
+  seqA_col: "Full Seq"       # 188-aa TIMP3 scaffold + grafted loop (the "query" chain)
+  seqB_col: "Target Seq"     # full protease sequence the row was screened against (the "partner" chain)
+  target_name_col: "Target"  # ADAM17 / MMP3 / MMP9 -- kept only for per-target reporting/thresholds
+  encoding_col: "Encoding"   # 1 = bound, 0 = did not
+  loop_col: "Residues"       # the grafted variable loop (6 aa) -> used for the leakage-safe split
+  count_col: "Count"         # observation / read count = confidence
+
+output_dir: "../Local/mint_binder_out"
+
+# Where the cloned https://github.com/VarunUllanat/mint repo + checkpoint live.
+# These are NOT installed by this pipeline -- see README.md "Install" for the
+# conda env / pip install -e . / wget steps (run once on the server).
+mint:
+  config_json: "/path/to/mint/data/esm2_t33_650M_UR50D.json"  # ships inside the cloned mint repo
+  checkpoint_path: "/path/to/mint.ckpt"                        # wget'd from HF, see README
+  sep_chains: true          # true -> 2560-dim (per-chain mean, concatenated; MINT's recommended
+                             # mode for downstream tasks). false -> 1280-dim (mean over both chains).
+  truncation_seq_length: 512  # CollateFn crop length (protease "Target Seq" rows can run long)
+  use_multimer: true
+
+model:
+  head_hidden: 256          # small MLP head on top of the pooled MINT embedding
+  dropout: 0.1
+
+preprocess:
+  min_count: 1              # drop (seq,target) whose total count < this
+  count_weighting: "log"    # none | log -> per-row loss weight = log1p(count)
+  # conflicting (seq,target) rows (both 0 and 1 observed) resolved by
+  # count-weighted majority vote; exact ties are dropped. Same logic as the
+  # ESM-C pipeline, just applied per-row instead of per-pivoted-sequence.
+
+split:
+  test_frac: 0.15
+  val_frac: 0.15
+  # Same leakage risk as ESM-C: constant TIMP3 scaffold means a random split
+  # leaks near-duplicate loops across splits. Group by exact loop motif.
+  cluster_hamming1: false
+  seed: 42
+
+train:
+  batch_size: 8             # pairs are longer than a single sequence (query + up to 512-aa
+                             # protease target), so start smaller than the ESM-C default; raise
+                             # if VRAM allows.
+  precision: "auto"
+  grad_clip: 1.0
+  weight_decay: 0.01
+  log_every: 100
+  metric: "pr_auc"          # val selection metric (mean over targets, threshold-free): pr_auc | mcc | roc_auc
+  threshold_metric: "fbeta" # metric used to pick each target's decision threshold on val: fbeta | mcc
+  fbeta_beta: 0.5           # beta<1 weights precision over recall (favor confident binder calls)
+  phase1:                   # warm up the randomly-initialised head, backbone frozen
+    epochs: 3
+    lr: 1.0e-3
+  phase2:                   # fine-tune the backbone
+    epochs: 15
+    lr: 1.0e-5
+    freeze_percent: 0.5     # MINT's own knob (passed to MINTWrapper): fraction of the backbone
+                             # kept FROZEN, counted from the input side -- 0.5 unfreezes the final
+                             # 50% of layers. NOTE the direction is inverted vs the ESM-C pipeline's
+                             # unfreeze_layers (an int count of trainable top layers).
+    early_stop_patience: 3
+
+# Overrides applied when train.py / data_prep.py are run with --smoke / --limit.
+smoke:
+  limit: 300
+  batch_size: 4
+  phase1_epochs: 1
+  phase2_epochs: 1
+  freeze_percent: 0.9
