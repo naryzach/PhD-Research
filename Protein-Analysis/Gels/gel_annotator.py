@@ -156,6 +156,18 @@ STAIN_LUTS: Dict[str, List[Tuple[int, Tuple[int, int, int]]]] = {
         (254, (255, 126,  62)),
         (255, (255, 255, 255)),
     ],
+    # EtBr UV: reproduces the appearance of an agarose gel stained
+    # with ethidium bromide and photographed on a UV transilluminator.
+    "etbr_uv": [
+        (  0, (  3,   0,   8)),
+        ( 20, ( 42,  20,  92)),
+        ( 45, (125,  55, 158)),
+        ( 55, (218,  82,  92)),
+        ( 75, (248,  88,  48)),
+        (150, (255, 128,  12)),
+        (254, (255, 182,  62)),
+        (255, (255, 255, 255)),
+    ],
     # SYBR Green: black → green → white.
     "sybr_green": [
         (  0, (  0,   0,   0)),
@@ -198,7 +210,7 @@ STAIN_LUTS: Dict[str, List[Tuple[int, Tuple[int, int, int]]]] = {
 
 # Order used for the swatch preview (matches the Image Lab dialog, Ponceau last).
 SWATCH_ORDER = [
-    "gray", "etbr", "coomassie", "stain_free", "sybr_green", "sypro_ruby",
+    "gray", "etbr", "etbr_uv", "coomassie", "stain_free", "sybr_green", "sypro_ruby",
     "flamingo", "silver", "false_color", "spectrum", "gold_silver", "pseudo",
     "ponceau",
 ]
@@ -223,6 +235,8 @@ STAIN_ALIASES = {
     "ponceau": "ponceau", "ponceau_s": "ponceau", "ponceaus": "ponceau",
     "red": "ponceau",
     "etbr": "etbr", "ethidium": "etbr", "ethidium_bromide": "etbr",
+    "etbr_uv": "etbr_uv", "etbr_photo": "etbr_uv", "uv": "etbr_uv",
+    "ethidium_uv": "etbr_uv", "ethidium_bromide_uv": "etbr_uv",
     "sybr_green": "sybr_green", "sybr": "sybr_green", "sybrgreen": "sybr_green",
     "green": "sybr_green",
     "spectrum": "spectrum", "rainbow": "spectrum",
