@@ -179,6 +179,49 @@ def main():
         plt.tight_layout(); plt.savefig(out_dir / f"aa_hotspot_{t}.png", dpi=150)
         plt.close()
 
+        # --- advanced SHAP plots ---
+        base_val = float(explainer.expected_value[ti]) if isinstance(explainer.expected_value, (list, np.ndarray)) else float(explainer.expected_value)
+        features_str = np.array([list(loop) for loop in explain_loops])
+        feature_names = [f"P{p+1}" for p in range(L)]
+        exp = shap.Explanation(values=sv,
+                               base_values=np.full(sv.shape[0], base_val),
+                               data=features_str,
+                               feature_names=feature_names)
+        
+        # 1. Waterfall Plot (first sample)
+        plt.figure()
+        shap.plots.waterfall(exp[0], show=False)
+        plt.savefig(out_dir / f"waterfall_sample_0_{t}.png", bbox_inches='tight', dpi=150)
+        plt.close()
+        
+        # 2. Individual Force Plot (first sample)
+        shap.plots.force(exp[0], show=False, matplotlib=True)
+        plt.savefig(out_dir / f"force_sample_0_{t}.png", bbox_inches='tight', dpi=150)
+        plt.close()
+        
+        # 3. Stacked/Global Force Plot (Interactive HTML)
+        try:
+            force_html = shap.plots.force(base_val, sv, features_str, feature_names=feature_names, show=False)
+            shap.save_html(str(out_dir / f"stacked_force_plot_{t}.html"), force_html)
+        except Exception as e:
+            print(f"Could not generate stacked force HTML for {t}: {e}")
+            
+        # 4. Beeswarm Plot
+        try:
+            plt.figure()
+            # Bypassing color mapping issues with strings by converting them to numeric indices for coloring
+            numeric_features = np.vectorize(AA_IDX.get)(features_str)
+            exp_numeric = shap.Explanation(values=sv, 
+                                           base_values=np.full(sv.shape[0], base_val), 
+                                           data=numeric_features, 
+                                           feature_names=feature_names)
+            shap.plots.beeswarm(exp_numeric, show=False, color_bar=False)
+            plt.title(f'{t}: SHAP Beeswarm Plot (Color=AA index)')
+            plt.savefig(out_dir / f"beeswarm_{t}.png", bbox_inches='tight', dpi=150)
+            plt.close()
+        except Exception as e:
+            print(f"Could not generate beeswarm for {t}: {e}")
+
         pd.DataFrame(hot.T, index=list(AAS), columns=[f"P{p+1}" for p in range(L)]
                     ).to_csv(out_dir / f"aa_hotspot_{t}.csv")
 
