@@ -260,9 +260,19 @@ LADDER_DB: Dict[str, "Ladder"] = {
         notes="10 bands 500–10000 bp. Pre-mixed with loading dye.",
     ),
 
-    "neb_quick_load_1kb_extend_n0550": Ladder(
-        name="Quick-Load 1 kb Extend DNA Ladder",
+    "neb_quick_load_purple_1kb_plus_n0550": Ladder(
+        name="Quick-Load Purple 1 kb Plus DNA Ladder",
         catalog="N0550",
+        manufacturer="NEB",
+        gel_type="dna",
+        unit="bp",
+        bands=_b([10000, 8000, 6000, 5000, 4000, 3000, 2000, 1500, 1200, 1000, 900, 800, 700, 600, 500, 400, 300, 200, 100]),
+        notes="19 bands 100–10000 bp.",
+    ),
+
+    "neb_quick_load_1kb_extend_n3239": Ladder(
+        name="Quick-Load 1 kb Extend DNA Ladder",
+        catalog="N3239",
         manufacturer="NEB",
         gel_type="dna",
         unit="bp",
@@ -312,10 +322,11 @@ LADDER_ALIASES: Dict[str, str] = {
     "sm0311": "generuler_1kb",
     "sm0321": "generuler_100bp_plus",
     "sm0241": "generuler_100bp",
+    "n3239": "neb_quick_load_1kb_extend_n3239",
     "n3232": "neb_1kb_n3232",
     "n3231": "neb_100bp_n3231",
     "n0468": "neb_quick_load_1kb_n0468",
-    "n0550": "neb_quick_load_1kb_extend_n0550",
+    "n0550": "neb_quick_load_purple_1kb_plus_n0550",
     "bio-33025": "hyperladder_1kb",
     "bio-33056": "hyperladder_100bp",
     # Short / alternate names
@@ -332,7 +343,8 @@ LADDER_ALIASES: Dict[str, str] = {
     "neb_1kb": "neb_1kb_n3232",
     "neb_100bp": "neb_100bp_n3231",
     "1kb_plus": "generuler_1kb_plus",
-    "1kb_extend": "neb_quick_load_1kb_extend_n0550",
+    "1kb_plus_purple": "neb_quick_load_purple_1kb_plus_n0550",
+    "1kb_extend": "neb_quick_load_1kb_extend_n3239",
     "quick_load_1kb": "neb_quick_load_1kb_n0468",
 }
 

@@ -1054,8 +1054,10 @@ def _ladder_from_config(cfg: dict) -> Ladder:
 
 def annotate(input_path: Path, config_path: Path, output_path: Optional[Path] = None,
              stain: Optional[str] = None, surround: Optional[str] = None,
-             print_bands: bool = False):
+             print_bands: bool = False, no_crop: bool = False):
     cfg = _load_config(config_path)
+    if no_crop:
+        cfg["no_crop"] = True
     merge_cfg = cfg.get("merge")
 
     # ── Build (merge) or load the source image ───────────────────────────────
@@ -1066,13 +1068,19 @@ def annotate(input_path: Path, config_path: Path, output_path: Optional[Path] = 
         img = load_image(input_path)
 
     # ── Correct ──────────────────────────────────────────────────────────────
-    corners = detect_gel_corners(img)
+    if cfg.get("no_crop", False):
+        corners = None
+        print("Skipping gel corner detection (--no-crop).")
+    else:
+        corners = detect_gel_corners(img)
+        
     if corners is not None:
         gel = perspective_correct(img, corners)
         print("Gel detected and perspective-corrected.")
     else:
         gel = img.copy()
-        print("Warning: gel boundary not detected; using full image.")
+        if not cfg.get("no_crop", False):
+            print("Warning: gel boundary not detected; using full image.")
 
     gel_h, gel_w = gel.shape[:2]
 
@@ -1296,6 +1304,8 @@ def main():
                         help="Print the ladder band y-positions (gel-corrected px) plus "
                              "relaxed candidate peaks, so missed bands can be identified "
                              "and pasted back into the config 'bands_y' list.")
+    parser.add_argument("--no-crop", action="store_true",
+                        help="Skip automatic gel boundary detection and perspective correction.")
     args = parser.parse_args()
 
     if args.swatch:
@@ -1358,7 +1368,7 @@ def main():
             sys.exit(1)
 
     annotate(args.input, args.config, args.output, stain=args.stain, surround=args.surround,
-             print_bands=args.print_bands)
+             print_bands=args.print_bands, no_crop=args.no_crop)
 
 
 if __name__ == "__main__":
