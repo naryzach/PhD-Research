@@ -71,6 +71,25 @@ def _stable_id(target: str, seq: str) -> str:
     return f"{target}_{hashlib.md5(seq.encode()).hexdigest()[:6]}"
 
 
+def _seq_to_esm_cif() -> dict:
+    """Map binder sequence → its saved ESMFold2 complex CIF (from round summaries),
+    so an AF3 design can be paired with the SAME design's ESMFold2 pose for the
+    second-source convergence check. Empty if the pipeline didn't save ESM structures."""
+    mp = {}
+    for c in sorted(OUT_BASE.glob("it_*/round_summary.csv")):
+        try:
+            d = pd.read_csv(c)
+            if "esm_cif" not in d.columns:
+                continue
+            for _, r in d.iterrows():
+                cif = r.get("esm_cif")
+                if isinstance(cif, str) and cif and r["full_seq"] not in mp:
+                    mp[r["full_seq"]] = cif
+        except Exception:
+            continue
+    return mp
+
+
 def _target_seqs() -> dict:
     """{target_name: target protein sequence} from the round summaries."""
     mp = {}
@@ -106,6 +125,21 @@ RMSD_MAX  = 4.0    # Å; framework backbone deviation from native TIMP3 above th
 IPTM_MIN  = 0.50   # minimum interface confidence to be "likely to bind"
 # Negative-control band: passes fold gate but binds weakly
 NEG_IPTM_LO, NEG_IPTM_HI = 0.30, 0.50
+
+# ── Second-source convergence flag (AF3 pose vs ESMFold2 pose) ────────────────
+# The design pipeline folds each candidate with BOTH ESMFold2 (ranker) and AF3
+# (validation). If the two independent methods put the binder in DIFFERENT places,
+# the AF3 pose the composite trusts is not corroborated. The 188-aa construct
+# validation (Local/TIMP3_FullLength_Validation_2026-07) showed this disagreement is
+# real and target-structured: WT + AB designs on strong targets agree (<5 Å N-domain),
+# but every ADAM10 design and most C-loop grafts diverge 20-90 Å — poses AF3 asserts
+# that a second method won't reproduce. We measure N-domain (resid 1..CONVERGENCE_NDOMAIN)
+# construct CA RMSD after superposing the two complexes on the target chain, and
+# down-weight designs whose pose is not confirmed. LOG + SOFT DOWN-WEIGHT by default
+# (never removes a candidate silently); --convergence-gate makes it a hard order gate.
+CONVERGENCE_MAX      = 5.0    # Å N-domain CA RMSD AF3<->ESM for a pose to count "confirmed"
+CONVERGENCE_NDOMAIN  = 121    # binder resid <= this = N-domain (the inhibitory binding domain)
+CONVERGENCE_PENALTY  = 0.85   # composite multiplier applied to UNconfirmed AF3 poses (0-1)
 
 # LEGACY composite weights (now computed as `composite_legacy` for comparison
 # only). Ranking uses the calibrated `binding_prior` from calibrated_scoring.py
@@ -202,6 +236,67 @@ def kabsch_rmsd(P: np.ndarray, Q: np.ndarray) -> float:
     d = np.sign(np.linalg.det(V @ Wt))
     R = V @ np.diag([1, 1, d]) @ Wt
     return float(np.sqrt(((Pc @ R - Qc) ** 2).sum() / len(P)))
+
+
+def kabsch_transform(P: np.ndarray, Q: np.ndarray):
+    """Rotation R and centroids so P superposes onto Q. Apply: (X - Pc0) @ R + Qc0."""
+    if len(P) != len(Q) or len(P) < 3:
+        return None
+    Pc0, Qc0 = P.mean(0), Q.mean(0)
+    V, _, Wt = np.linalg.svd((P - Pc0).T @ (Q - Qc0))
+    d = np.sign(np.linalg.det(V @ Wt))
+    R = V @ np.diag([1, 1, d]) @ Wt
+    return R, Pc0, Qc0
+
+
+def _ca_by_res(atoms, chain: str) -> dict:
+    """{res_id: (x,y,z)} for CA atoms of `chain` from a parsed atom list."""
+    return {a["res_id"]: (a["x"], a["y"], a["z"])
+            for a in atoms if a["chain"] == chain and a["atom"] == "CA"}
+
+
+def _ca_atoms_from_file(path) -> list | None:
+    """CA atom dicts (chain,res_id,atom,x,y,z) from a .cif or .pdb complex, or None."""
+    p = Path(path)
+    if not p.exists():
+        return None
+    if p.suffix.lower() == ".pdb":
+        out = []
+        for ln in p.read_text().splitlines():
+            if ln.startswith(("ATOM", "HETATM")) and ln[12:16].strip() == "CA":
+                try:
+                    out.append({"chain": ln[21], "res_id": int(ln[22:26]), "atom": "CA",
+                                "x": float(ln[30:38]), "y": float(ln[38:46]), "z": float(ln[46:54])})
+                except ValueError:
+                    continue
+        return out
+    return [a for a in _parse_cif_atoms(p.read_text()) if a["atom"] == "CA"]
+
+
+def convergence_nd_rmsd(af3_atoms, esm_atoms,
+                        binder_chain="A", target_chain="B",
+                        ndomain_max=CONVERGENCE_NDOMAIN) -> float:
+    """
+    N-domain construct CA RMSD between the AF3 and ESMFold2 complexes, after
+    superposing on the TARGET chain. Low = both methods agree on the binding mode;
+    high = the AF3 pose is not second-source-confirmed. NaN if either lacks the
+    target overlap needed to align, or shares no N-domain binder residues.
+    """
+    at, et = _ca_by_res(af3_atoms, target_chain), _ca_by_res(esm_atoms, target_chain)
+    tcommon = sorted(set(at) & set(et))
+    if len(tcommon) < 3:
+        return float("nan")
+    tf = kabsch_transform(np.array([et[i] for i in tcommon]),   # ESM target -> AF3 target
+                          np.array([at[i] for i in tcommon]))
+    if tf is None:
+        return float("nan")
+    R, Pc0, Qc0 = tf
+    ab, eb = _ca_by_res(af3_atoms, binder_chain), _ca_by_res(esm_atoms, binder_chain)
+    bcommon = [i for i in sorted(set(ab) & set(eb)) if i <= ndomain_max]
+    if not bcommon:
+        return float("nan")
+    moved = (np.array([eb[i] for i in bcommon]) - Pc0) @ R + Qc0
+    return float(np.sqrt(((moved - np.array([ab[i] for i in bcommon])) ** 2).sum(1).mean()))
 
 
 # ── AF3 parsing ───────────────────────────────────────────────────────────────
@@ -312,7 +407,9 @@ def framework_rmsd_to_ref(frame: np.ndarray, ref: np.ndarray) -> float:
 
 # ── Build the candidate table ─────────────────────────────────────────────────
 
-def build_table() -> pd.DataFrame:
+def build_table(convergence_max: float = CONVERGENCE_MAX,
+                convergence_penalty: float = CONVERGENCE_PENALTY,
+                convergence_gate: bool = False) -> pd.DataFrame:
     # --- Pass 1: parse all AF3 designs, keep atoms for the backbone reference ---
     af3, seen = [], set()
     for z in sorted(OUT_BASE.glob("folds_*.zip")):
@@ -330,12 +427,22 @@ def build_table() -> pd.DataFrame:
         ref_frame = ref["frame"]
 
     seq2id = _seq_to_pipeline_id()
+    seq2esm = _seq_to_esm_cif()
     rows = []
     for rec in af3:
         # Calibrated positive priors: binder-chain pLDDT, ApTM, interface geometry.
         chainA_plddt = per_residue_plddt(rec["atoms"], "A")
         af3_plddt = float(np.mean(list(chainA_plddt.values()))) if chainA_plddt else float("nan")
         iface = cs.interface_features_from_atoms(rec["atoms"])
+        # Second-source convergence: N-domain AF3<->ESM RMSD for this same design.
+        esm_cif = seq2esm.get(rec["binder_seq"])
+        nd_rmsd = float("nan")
+        if esm_cif:
+            esm_ca = _ca_atoms_from_file(esm_cif)
+            if esm_ca:
+                nd_rmsd = convergence_nd_rmsd(rec["atoms"], esm_ca,
+                                              ndomain_max=CONVERGENCE_NDOMAIN)
+        pose_confirmed = (bool(nd_rmsd <= convergence_max) if nd_rmsd == nd_rmsd else None)
         rows.append({
             "binder_seq": rec["binder_seq"], "target": rec["target"], "source": "AF3",
             "iptm": rec["iptm"], "ptm": rec["ptm"],
@@ -348,6 +455,10 @@ def build_table() -> pd.DataFrame:
             "af3_iface_n_iface_res": iface.get("n_iface_res"),
             "af3_iface_iface_plddt": iface.get("iface_plddt"),
             "af3_iface_contact_density": iface.get("contact_density"),
+            # second-source convergence flag
+            "converge_nd_rmsd": round(nd_rmsd, 2) if nd_rmsd == nd_rmsd else np.nan,
+            "pose_confirmed": pose_confirmed,
+            "esm_cif": esm_cif if isinstance(esm_cif, str) else "",
             "af3_zip": rec["af3_zip"], "cif_member": rec["cif_member"],
         })
 
@@ -408,10 +519,24 @@ def build_table() -> pd.DataFrame:
         })
     df["binding_prior"] = df.apply(_row_prior, axis=1)
     df["composite"] = df["binding_prior"].fillna(0.0)
+
+    # --- Second-source convergence down-weight ---------------------------------
+    # AF3 poses ESMFold2 won't reproduce (pose_confirmed == False) are demoted by
+    # convergence_penalty; poses we couldn't check (no ESM structure -> NaN) are left
+    # untouched (never penalize the unknown). binding_prior stays raw for transparency.
+    if "pose_confirmed" not in df.columns:
+        df["pose_confirmed"] = None
+        df["converge_nd_rmsd"] = np.nan
+    unconfirmed = df["pose_confirmed"].eq(False)   # True only where explicitly False
+    df.loc[unconfirmed, "composite"] = df.loc[unconfirmed, "composite"] * convergence_penalty
+
     # Fold gate: pTM ok AND backbone preserved. ESMFold2 (bb_rmsd=NaN) can't pass
     # the backbone check, so it is gated out of "orderable" by default — AF3 only.
     df["fold_ok"] = (df["ptm"].fillna(0) >= PTM_MIN) & (df["bb_rmsd"] <= RMSD_MAX)
     df["orderable"] = df["fold_ok"] & (df["iptm"].fillna(0) >= IPTM_MIN) & (df["source"] == "AF3")
+    # Optional HARD gate: an unconfirmed pose can't be ordered at all.
+    if convergence_gate:
+        df["orderable"] = df["orderable"] & ~unconfirmed
 
     # --- optional: the calibrated multi-term recipe score (binding_recipe.py).
     # Carried ALONGSIDE `composite`, never replacing it. Off-target metrics come from
@@ -439,8 +564,16 @@ def build_table() -> pd.DataFrame:
 def _fmt(r):
     pae = "n/a" if pd.isna(r["loop_pae"]) else f"{r['loop_pae']:.1f}"
     rmsd = "n/a" if pd.isna(r["bb_rmsd"]) else f"{r['bb_rmsd']:.2f}"
+    pc = r.get("pose_confirmed", None)
+    ndr = r.get("converge_nd_rmsd", np.nan)
+    if pc == True:                       # noqa: E712  (matches bool and np.bool_)
+        conv = f" 2src=OK({ndr:.1f}A)"
+    elif pc == False:                    # noqa: E712
+        conv = f" 2src=UNCONFIRMED({ndr:.1f}A)"
+    else:
+        conv = " 2src=n/a"
     return (f"ipTM={r['iptm']:.2f} LpLDDT={r['lplddt']:.0f} loopPAE={pae} "
-            f"pTM={r['ptm']:.2f} bbRMSD={rmsd}A [{r['source']}]")
+            f"pTM={r['ptm']:.2f} bbRMSD={rmsd}A [{r['source']}]{conv}")
 
 
 def select(df: pd.DataFrame, criteria: str, n: int, spec: pd.DataFrame = None) -> list:
@@ -550,11 +683,17 @@ def main():
                          "ESMFold2 for the specificity analysis, then exit.")
     ap.add_argument("--specificity-scores", default=None,
                     help="CSV of cross-fold ipTM (design_id, binder_seq, target, <ipTM per target>).")
+    ap.add_argument("--convergence-max", type=float, default=CONVERGENCE_MAX,
+                    help="Å N-domain AF3<->ESMFold2 RMSD below which a pose is 'second-source confirmed'.")
+    ap.add_argument("--convergence-penalty", type=float, default=CONVERGENCE_PENALTY,
+                    help="composite multiplier for AF3 poses ESMFold2 won't reproduce (1.0 = flag only, no penalty).")
+    ap.add_argument("--convergence-gate", action="store_true",
+                    help="HARD gate: an unconfirmed AF3 pose is not orderable (default: soft down-weight).")
     args = ap.parse_args()
 
     ORDER_DIR.mkdir(parents=True, exist_ok=True)
     print("Building candidate table (AF3 preferred, ESMFold2 fallback)...")
-    df = build_table()
+    df = build_table(args.convergence_max, args.convergence_penalty, args.convergence_gate)
     if df.empty:
         sys.exit("No designs found. Run the pipeline first.")
 
@@ -562,6 +701,14 @@ def main():
     print(f"  {len(df)} unique designs | {n_af3} AF3-folded | "
           f"{int(df.orderable.sum())} pass quality gates "
           f"(pTM>={PTM_MIN}, bbRMSD<={RMSD_MAX}A, ipTM>={IPTM_MIN})")
+    # Second-source convergence summary (AF3 designs only).
+    af3_df = df[df.source == "AF3"]
+    n_conf = int((af3_df["pose_confirmed"] == True).sum())    # noqa: E712
+    n_unconf = int((af3_df["pose_confirmed"] == False).sum())  # noqa: E712
+    n_unk = len(af3_df) - n_conf - n_unconf
+    mode = "HARD GATE" if args.convergence_gate else f"soft x{args.convergence_penalty:g}"
+    print(f"  2nd-source (ESMFold2) pose check [{mode}, <{args.convergence_max:g}A N-domain]: "
+          f"{n_conf} confirmed, {n_unconf} unconfirmed (demoted), {n_unk} uncheckable")
 
     # Save the full scored table for transparency
     df.sort_values("composite", ascending=False).to_csv(ORDER_DIR / "all_candidates_scored.csv", index=False)
