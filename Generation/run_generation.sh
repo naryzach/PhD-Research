@@ -49,7 +49,9 @@ INIT_TEMPERATURE=0.60               # HOT start (fresh run only)
 MIN_TEMPERATURE=0.10                # COLD confident floor
 TEMP_DECAY=0.94                     # slow cool -> ~29 iters to reach the floor
 MAX_ITERATIONS=40                   # full anneal + ~11 exploit iterations at the floor
-ESMFOLD2_GPUS=auto                  # shard ESMFold2 across all free GPUs
+ESMFOLD2_GPUS="${ESMFOLD2_GPUS:-auto}"  # shard ESMFold2 across free GPUs; set =1 (env) when co-
+                                    # running with another campaign pinned to a different GPU, since
+                                    # 'auto' detects via nvidia-smi and ignores CUDA_VISIBLE_DEVICES
 MAX_RETRIES=5                       # auto-restart budget on hard crashes
 # ── SV structural battery (sv_bridge) ──
 SV_BATTERY=1                        # 1 = log the full Structural-Validation interface battery (sv_* cols); 0 = off

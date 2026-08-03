@@ -82,7 +82,16 @@ for _noisy in ("transforms", "atomworks.io", "atomworks.ml", "foundry", "lightni
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 _HERE    = Path(__file__).parent.resolve()
-OUT_BASE = _HERE / ".." / "Local" / "specificity_refinement"
+OUT_BASE = Path(os.environ.get("SPEC_OUT_BASE") or (_HERE / ".." / "Local" / "specificity_refinement"))
+
+# CRITICAL ISOLATION FIX: the inherited IterativeRefiner methods (run_iteration,
+# _write_round_summary, update_hof, export_for_af3, ...) reference iterative_
+# refinement's MODULE-GLOBAL OUT_BASE — NOT this one. Without redirecting it,
+# specificity's it_N / round_summary.csv / hof_summary.csv land in
+# Local/iterative_refinement and COLLIDE with a concurrent generation run (this
+# happened 07-28: the iterative dir became a generation+specificity mix). Point the
+# parent module's OUT_BASE at ours so ALL specificity output stays in one place.
+ir.OUT_BASE = OUT_BASE
 
 # ── Specificity pair definitions ──────────────────────────────────────────────
 SPECIFICITY_PAIRS = {

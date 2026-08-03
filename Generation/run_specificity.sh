@@ -30,12 +30,15 @@ INIT_TEMPERATURE=0.60
 MIN_TEMPERATURE=0.10
 TEMP_DECAY=0.94
 MAX_ITERATIONS=40
-ESMFOLD2_GPUS=auto
+ESMFOLD2_GPUS="${ESMFOLD2_GPUS:-auto}"  # =1 (env) when co-running pinned to a different GPU
 MAX_RETRIES=5
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT_BASE="$HERE/../Local/specificity_refinement"
+# Output root — overridable via SPEC_OUT_BASE. Exported so specificity_refinement.py
+# uses the SAME root (it redirects the inherited iterative OUT_BASE to this).
+export SPEC_OUT_BASE="${SPEC_OUT_BASE:-$HERE/../Local/specificity_refinement}"
+OUT_BASE="$SPEC_OUT_BASE"
 STATE="$OUT_BASE/specificity_state.json"
 LOG_DIR="$OUT_BASE/logs"
 mkdir -p "$LOG_DIR"

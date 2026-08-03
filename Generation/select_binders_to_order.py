@@ -579,14 +579,23 @@ def _fmt(r):
             f"pTM={r['ptm']:.2f} bbRMSD={rmsd}A [{r['source']}]{conv}")
 
 
-def select(df: pd.DataFrame, criteria: str, n: int, spec: pd.DataFrame = None) -> list:
+def select(df: pd.DataFrame, criteria: str, n: int, spec: pd.DataFrame = None,
+           select_targets: list = None) -> list:
+    """
+    `select_targets` (e.g. ["MMP9","ADAM17"]) restricts the harvest to designs
+    whose OWN target is in that set — used to pull the MMP9/ADAM17-selective binders
+    out of the general pool (Track 1). None = all targets.
+    """
     picks = {}   # design_id -> {row, reasons}
+    st = set(select_targets) if select_targets else None
 
     def add(sub, tag):
         for _, r in sub.iterrows():
             picks.setdefault(r["design_id"], {"row": r, "reasons": []})["reasons"].append(tag)
 
     pool = df[df["orderable"]].copy()
+    if st:
+        pool = pool[pool["target"].isin(st)]
 
     if criteria in ("best_overall", "all"):
         add(pool.sort_values("composite", ascending=False).head(n), "best_overall")
@@ -595,12 +604,16 @@ def select(df: pd.DataFrame, criteria: str, n: int, spec: pd.DataFrame = None) -
 
     if criteria in ("negative_control", "all"):
         neg = df[df["fold_ok"] & df["iptm"].between(NEG_IPTM_LO, NEG_IPTM_HI)]
+        if st:
+            neg = neg[neg["target"].isin(st)]
         add(neg.sort_values("iptm", ascending=False).head(max(2, n // 4)), "negative_control(folds,weak_binding)")
 
     if criteria in ("best_specificity", "all") and spec is not None and not spec.empty:
-        # spec: per original design_id, selectivity gap = ipTM(on-target) - mean(off-targets)
+        # spec: per original design_id, selectivity gap = ipTM(on-target) - mean(off-targets).
+        # Restrict to on_target in select_targets so we harvest the intended selectivities.
+        sp = spec[spec["on_target"].isin(st)] if st else spec
         by_id = df.set_index("design_id")
-        for _, r in spec.sort_values("sel_gap", ascending=False).head(n).iterrows():
+        for _, r in sp.sort_values("sel_gap", ascending=False).head(n).iterrows():
             did = r["design_id"]
             if did in by_id.index and bool(by_id.loc[did, "orderable"]):
                 picks.setdefault(did, {"row": df[df.design_id == did].iloc[0], "reasons": []}
@@ -686,6 +699,11 @@ def main():
                          "ESMFold2 for the specificity analysis, then exit.")
     ap.add_argument("--specificity-scores", default=None,
                     help="CSV of cross-fold ipTM (design_id, binder_seq, target, <ipTM per target>).")
+    ap.add_argument("--select-targets", nargs="+", default=None, metavar="TARGET",
+                    help="Restrict the harvest to designs whose OWN target is in this set "
+                         "(e.g. --select-targets MMP9 ADAM17 to pull the MMP9/ADAM17-selective "
+                         "binders out of the general pool). Scopes both --emit-crossfold-input "
+                         "and best_specificity/best_overall selection. Default: all targets.")
     ap.add_argument("--convergence-max", type=float, default=CONVERGENCE_MAX,
                     help="Å N-domain AF3<->ESMFold2 RMSD below which a pose is 'second-source confirmed'.")
     ap.add_argument("--convergence-penalty", type=float, default=CONVERGENCE_PENALTY,
@@ -720,7 +738,10 @@ def main():
     rerank_text = write_rerank_delta(df, args.n)
 
     if args.emit_crossfold_input:
-        cand = df[df.orderable].sort_values("composite", ascending=False).head(args.n)
+        cand = df[df.orderable]
+        if args.select_targets:                       # cross-fold only the intended selectivities
+            cand = cand[cand["target"].isin(set(args.select_targets))]
+        cand = cand.sort_values("composite", ascending=False).head(args.n)
         tseqs = _target_seqs()
         targets = sorted(tseqs.keys())
         # One row per (candidate × target), ready for score_with_esmfold2.py --input.
@@ -752,7 +773,7 @@ def main():
         return
 
     spec = parse_crossfold(args.specificity_scores, df) if args.specificity_scores else None
-    selections = select(df, args.criteria, args.n, spec)
+    selections = select(df, args.criteria, args.n, spec, select_targets=args.select_targets)
 
     # Extract the actual AF3 structures for the recommended designs.
     struct_dir = ORDER_DIR / "structures"
