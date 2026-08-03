@@ -27,6 +27,12 @@ set -uo pipefail
 
 # Reduce CUDA fragmentation OOMs (the failure mode when GPUs are shared/tight).
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+# If you hit the libcue_ops.so / cublas "undefined symbol" error (cuequivariance
+# mismatch — it crippled the 2026-08-03 run: RFd3 crawled, ESMFold2 folds failed),
+# export DISABLE_CUEQUIVARIANCE=1 before launching. The code auto-sets it for V100
+# only, so set it yourself if your GPU has the mismatch but isn't a V100. Passed
+# through to the python child here.
+[[ -n "${DISABLE_CUEQUIVARIANCE:-}" ]] && export DISABLE_CUEQUIVARIANCE
 # IMPORTANT: do NOT co-schedule this with run_specificity.sh on the SAME GPUs — they
 # will starve each other's ESMFold2 (CUDA OOM) and silently leave designs unscored,
 # hitting the last-processed targets hardest. Pin each run to its own device(s):
@@ -52,7 +58,11 @@ SV_OCCLUSION_MIN=""                 # optional: override catalytic-occlusion thr
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT_BASE="$HERE/../Local/iterative_refinement"
+# Output root — overridable via REFINE_OUT_BASE so a fresh anneal can run in its own
+# directory without clobbering a preserved/salvaged pool. Exported so the python
+# child (iterative_refinement.py) uses the SAME root.
+export REFINE_OUT_BASE="${REFINE_OUT_BASE:-$HERE/../Local/iterative_refinement}"
+OUT_BASE="$REFINE_OUT_BASE"
 STATE="$OUT_BASE/refinement_state.json"
 LOG_DIR="$OUT_BASE/logs"
 mkdir -p "$LOG_DIR"
@@ -76,10 +86,18 @@ else
   echo "ESMFold2 backend (esm) import OK." | tee -a "$LOG"
 fi
 
-if [[ "${FRESH:-0}" == "1" && -f "$STATE" ]]; then
-  bak="$STATE.$(date +%Y%m%d_%H%M%S).bak"
-  mv "$STATE" "$bak"
-  echo "FRESH: archived existing state -> $bak (anneal will start hot at T=$INIT_TEMPERATURE)" | tee -a "$LOG"
+if [[ "${FRESH:-0}" == "1" ]]; then
+  # Archive the WHOLE prior run — state AND it_* dirs + hof_summary — so a fresh
+  # anneal can't inherit stale iteration dirs (which would contaminate the pool
+  # and the stratified export). Moved, not deleted.
+  if compgen -G "$OUT_BASE/it_*" > /dev/null || [[ -f "$STATE" ]]; then
+    arch="$OUT_BASE/_archived_$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$arch"
+    [[ -f "$STATE" ]] && mv "$STATE" "$arch"/
+    [[ -f "$OUT_BASE/hof_summary.csv" ]] && mv "$OUT_BASE/hof_summary.csv" "$arch"/
+    for d in "$OUT_BASE"/it_*; do [[ -e "$d" ]] && mv "$d" "$arch"/; done
+    echo "FRESH: archived prior run -> $arch (anneal starts hot at T=$INIT_TEMPERATURE)" | tee -a "$LOG"
+  fi
 fi
 if [[ -f "$STATE" ]]; then
   echo "RESUMING: $STATE exists — the anneal continues from the saved iteration/temperature." | tee -a "$LOG"

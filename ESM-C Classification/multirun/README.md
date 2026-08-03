@@ -21,8 +21,18 @@ window -- since a single 6-position sweep only covers one graft window.
 ```bash
 python multirun/prepare_variant_datasets.py   # one-time; run_all.py also does this automatically
 python multirun/run_all.py --list             # see the plan without running anything
-python multirun/run_all.py                    # everything, sequentially, ~5 days on one GPU
+python multirun/run_all.py                    # everything, sequentially
 ```
+
+**Enumeration is the long pole, not training.** Fine-tuning + SHAP + UMAP for all 5
+variants together is a few hours. Each 64M-sequence enumeration sweep, by contrast, has
+been observed at ~76-88 seq/s (batch-size 512, fp16 on a non-Ampere GPU) -> **~180-230
+hours per sweep**, and there are 7 sweeps total (2 each for `all3_original` and
+`everything_combined`, 1 each for the rest). Before committing a long job to this:
+raise `--enum-batch-size` well past the default 512 if VRAM allows (inference-only, no
+optimizer state, so headroom is much larger than during training), and prefer an
+Ampere+ (A100/H100) partition if your cluster has one (bf16, much faster than the
+fp16 path older GPUs fall back to).
 
 To fan out across GPUs/nodes instead of one long sequential job, submit one
 `sbatch` per variant (see `../../SLURM/run_esmc_multirun.sh`):
@@ -35,12 +45,21 @@ sbatch run_esmc_multirun.sh --variants all3_original
 sbatch run_esmc_multirun.sh --variants everything_combined
 ```
 
-Each step is skipped if its output already exists (`--force` to rerun
-anyway), so a crashed job can just be resubmitted. Useful flags:
+Each step is skipped if its output already exists (`--force` to rerun anyway),
+so a crashed job can just be resubmitted. **`enumerate` additionally
+checkpoints mid-sweep**: `enumerate_cloop.py` saves its progress (current
+index + the running top-K heaps) to `<enum_dir>/checkpoint.json` every
+`--enum-checkpoint-every` sequences (default 1,000,000; atomic write, so a
+kill mid-write can't corrupt it). Re-running the *exact same* `run_all.py`
+invocation after a crash resumes each sweep from its last checkpoint instead
+of restarting from 0 -- no flag needed, this is automatic. `--force` clears
+checkpoints and starts every sweep clean instead.
+
+Useful flags:
 
 - `--steps data,train` / `--steps shap,enumerate,analyze` / `--steps visualize` -- run a subset
 - `--smoke` -- tiny fast pass through every step (sanity-checks the whole chain)
-- `--topk` / `--enum-batch-size` -- enumerate_cloop.py tuning
+- `--topk` / `--enum-batch-size` / `--enum-checkpoint-every` -- enumerate_cloop.py tuning
 - `--n-explain` / `--background-size` -- shap_hotspots.py tuning
 - `--dry-run` -- print the exact commands without running them
 

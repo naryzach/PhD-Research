@@ -32,6 +32,7 @@ GH=10`. Targets: `MMP2 MMP3 MMP9 MMP10 ADAM10 ADAM17`.
 | `loop_probe.py` | GPU `foundry` | one target, one fixed-length config → sequences + heatmaps |
 | `loop_probe_sweep.py` | GPU `foundry` | sweeps loop **lengths** and iterates **targets** |
 | `loop_probe_analysis.py` | any (numpy/pandas/matplotlib) | counting + heatmap engine; rebuild figures from CSVs anywhere |
+| `loop_probe_audit.py` | any (stdlib only) | check a sweep for completeness/silent failures; `--clean` incomplete runs before resume |
 | `sweep_config.example.yaml` | — | annotated config template |
 
 ## Templates (any structure, any chain order)
@@ -145,6 +146,35 @@ Because the sweep resumes by default, if it's killed you just rerun the same
 command and it continues. Time the first unit, multiply by the planned run count
 (printed at startup and in `sweep_manifest.json`), and confirm it fits your
 window before committing.
+
+**Pin `out_dir`.** Resume only skips work inside the *same* output directory. If
+you leave `out_dir` unset it defaults to `sweep_<timestamp>/`, so every restart
+starts a fresh directory and resume never engages — progress ends up scattered
+across timestamped dirs. Set `out_dir` in your config (or `--out-dir`) so every
+restart of that run points at the same place.
+
+### Recovering an interrupted run
+
+1. **Audit** what survived and find incomplete/silently-failed configs:
+   ```bash
+   python Generation/Loop-Probe/loop_probe_audit.py Local/loop_probe/<sweep_dir>
+   ```
+   It reports OK / SUSPECT / MISSING against the sweep's manifest (SUSPECT =
+   summary.json present but design shortfall, a loop with zero/low usable seqs,
+   parse-fail spike, unreadable JSON, or a missing counts CSV).
+2. **Clean** the incomplete/suspect run dirs so resume recomputes exactly those
+   (keeps the good ones):
+   ```bash
+   python Generation/Loop-Probe/loop_probe_audit.py Local/loop_probe/<sweep_dir> --clean
+   ```
+3. **Resume** with the same command and the same pinned `out_dir` (the manifest
+   in the dir records the original config — reproduce it exactly, especially
+   `template_set`/`scaffold_len`, since built-in defaults may have changed since
+   the run started):
+   ```bash
+   python Generation/Loop-Probe/loop_probe_sweep.py --config <your_run>.yaml
+   ```
+   Completed runs are skipped; only cleaned/missing configs hit the GPU.
 
 ### Options
 

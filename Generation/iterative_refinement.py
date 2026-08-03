@@ -114,7 +114,11 @@ _HERE     = Path(__file__).parent.resolve()
 # Regenerate templates with Generation/prep_af3_templates.py. Revert: point back to
 # "HADDOCK_Outputs", set binder_chain="B"/target_chain="A", scaffold_len=121.
 DATA_DIR  = _HERE / ".." / "Data" / "TIMP_Complexes" / "AF3_Templates"
-OUT_BASE  = _HERE / ".." / "Local" / "iterative_refinement"
+# Output root is overridable via REFINE_OUT_BASE so an unrelated run (e.g. a fresh
+# anneal) can target a separate directory without clobbering a preserved/ salvaged
+# pool. Defaults to Local/iterative_refinement. rescore_pool.py and
+# select_binders_to_order.py honor the same variable.
+OUT_BASE  = Path(os.environ.get("REFINE_OUT_BASE") or (_HERE / ".." / "Local" / "iterative_refinement"))
 CKPT_DIR  = _HERE / ".." / "Tools" / "foundry_checkpoints"
 
 # ── Target definitions ────────────────────────────────────────────────────────

@@ -106,6 +106,9 @@ def main():
     ap.add_argument("--enum-batch-size", type=int, default=512)
     ap.add_argument("--enum-start", type=int, default=0, help="shard start (passed to enumerate_cloop.py)")
     ap.add_argument("--enum-end", type=int, default=20**6, help="shard end (passed to enumerate_cloop.py)")
+    ap.add_argument("--enum-checkpoint-every", type=int, default=1_000_000,
+                    help="save enumerate_cloop.py progress every N sequences so a crash only "
+                         "loses work since the last checkpoint, not the whole sweep (0 disables)")
     # shap_hotspots.py passthrough
     ap.add_argument("--n-explain", type=int, default=300)
     ap.add_argument("--background-size", type=int, default=50)
@@ -201,7 +204,10 @@ def main():
                           "--loop-subtype", subtype, "--topk", str(args.topk),
                           "--batch-size", str(args.enum_batch_size),
                           "--start", str(args.enum_start), "--end", str(args.enum_end),
+                          "--checkpoint-every", str(args.enum_checkpoint_every),
                           "--out", out_name]
+                    if args.force:
+                        cmd += ["--no-resume"]  # --force means start clean, not "resume anyway"
                     run(cmd, log_dir / f"enumerate_{tag}.log", args.dry_run)
 
             if "analyze" in steps:

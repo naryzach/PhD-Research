@@ -105,7 +105,10 @@ def _target_seqs() -> dict:
     return mp
 
 HERE     = Path(__file__).parent.resolve()
-OUT_BASE = (HERE / ".." / "Local" / "iterative_refinement").resolve()
+# Honor REFINE_OUT_BASE so ordering can point at a salvaged/alternate pool dir
+# (matches iterative_refinement.py). Defaults to Local/iterative_refinement.
+import os as _os
+OUT_BASE = Path(_os.environ.get("REFINE_OUT_BASE") or (HERE / ".." / "Local" / "iterative_refinement")).resolve()
 DATA_DIR = (HERE / ".." / "Data" / "TIMP_Complexes" / "AF3_Templates").resolve()
 ORDER_DIR = OUT_BASE / "ordering"
 
