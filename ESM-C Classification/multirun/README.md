@@ -46,21 +46,35 @@ sbatch run_esmc_multirun.sh --variants everything_combined
 ```
 
 Each step is skipped if its output already exists (`--force` to rerun anyway),
-so a crashed job can just be resubmitted. **`enumerate` additionally
-checkpoints mid-sweep**: `enumerate_cloop.py` saves its progress (current
-index + the running top-K heaps) to `<enum_dir>/checkpoint.json` every
-`--enum-checkpoint-every` sequences (default 1,000,000; atomic write, so a
-kill mid-write can't corrupt it). Re-running the *exact same* `run_all.py`
-invocation after a crash resumes each sweep from its last checkpoint instead
-of restarting from 0 -- no flag needed, this is automatic. `--force` clears
-checkpoints and starts every sweep clean instead.
+so a crashed job can just be resubmitted. **`enumerate` and `shap` both
+checkpoint mid-run**, so a kill only costs the time since the last checkpoint,
+not the whole step:
+
+- `enumerate_cloop.py` saves progress (current index + the running top-K
+  heaps) to `<enum_dir>/checkpoint.json` every `--enum-checkpoint-every`
+  sequences (default 1,000,000; atomic write).
+- `shap_hotspots.py` explains loops in chunks (`--shap-chunk-size`, default
+  10) and appends each chunk's rows to `<shap_dir>/shap_values.csv` as it
+  goes (flushed + fsynced per chunk), printing a progress line after every
+  chunk -- SHAP's own `KernelExplainer` call gives zero output otherwise, so
+  without this a multi-hour run looks identical whether it's healthy or
+  hung. Each explained loop needs ~(2^6) x background_size forward passes,
+  so 300 explained loops is genuinely GPU-hours, not seconds -- check the
+  log's progress lines (or `nvidia-smi` utilization) before assuming a quiet
+  run is stuck.
+
+Re-running the *exact same* `run_all.py` invocation after a crash resumes
+each sweep/explain-set from its last checkpoint instead of restarting from 0
+-- no flag needed, this is automatic (matched against the run's saved
+parameters, so it won't silently resume onto a mismatched config). `--force`
+clears any checkpoint and starts clean instead.
 
 Useful flags:
 
 - `--steps data,train` / `--steps shap,enumerate,analyze` / `--steps visualize` -- run a subset
 - `--smoke` -- tiny fast pass through every step (sanity-checks the whole chain)
 - `--topk` / `--enum-batch-size` / `--enum-checkpoint-every` -- enumerate_cloop.py tuning
-- `--n-explain` / `--background-size` -- shap_hotspots.py tuning
+- `--n-explain` / `--background-size` / `--shap-chunk-size` -- shap_hotspots.py tuning
 - `--dry-run` -- print the exact commands without running them
 
 ## Outputs

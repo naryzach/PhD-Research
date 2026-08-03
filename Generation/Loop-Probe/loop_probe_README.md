@@ -23,7 +23,9 @@ loop–loop interactions are always modelled. Position *i* of a loop is therefor
 comparable across every design.
 
 Loops (`iterative_refinement.LOOP_CONFIGS`), native lengths: `AB=6, C=6, EF=4,
-GH=10`. Targets: `MMP2 MMP3 MMP9 MMP10 ADAM10 ADAM17`.
+GH=10, MTL=10`. `GH` and `MTL` are C-terminal-domain loops that need the
+full-length construct (the default) — they're unavailable under `--scaffold-len
+121`. Targets: `MMP2 MMP3 MMP9 MMP10 ADAM10 ADAM17`.
 
 ## Files
 

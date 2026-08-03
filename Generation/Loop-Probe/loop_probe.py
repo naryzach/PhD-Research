@@ -48,7 +48,9 @@ Example
     python Generation/Loop-Probe/loop_probe.py --target MMP2 --loops AB C EF
     python Generation/Loop-Probe/loop_probe.py --config my_run.yaml --target MMP2
 
-Native loop lengths (default) come from LOOP_CONFIGS: AB=6, C=6, EF=4, GH=10.
+Native loop lengths (default) come from LOOP_CONFIGS: AB=6, C=6, EF=4, GH=10,
+MTL=10.  (GH and MTL are C-terminal-domain loops, so they need the full-length
+TIMP3 construct — the default; they are unavailable under `--scaffold-len 121`.)
 """
 
 from __future__ import annotations

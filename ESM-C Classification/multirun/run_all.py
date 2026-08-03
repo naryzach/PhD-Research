@@ -112,6 +112,9 @@ def main():
     # shap_hotspots.py passthrough
     ap.add_argument("--n-explain", type=int, default=300)
     ap.add_argument("--background-size", type=int, default=50)
+    ap.add_argument("--shap-chunk-size", type=int, default=10,
+                    help="save shap_hotspots.py progress every N explained loops so a crash "
+                         "only loses the current chunk, not the whole run")
     args = ap.parse_args()
 
     variants = args.variants.split(",") if args.variants else VARIANT_NAMES
@@ -192,7 +195,10 @@ def main():
                 else:
                     cmd = [sys.executable, "shap_hotspots.py", "--config", cfg_rel,
                           "--loop-subtype", subtype, "--n-explain", str(args.n_explain),
-                          "--background-size", str(args.background_size)]
+                          "--background-size", str(args.background_size),
+                          "--shap-chunk-size", str(args.shap_chunk_size)]
+                    if args.force:
+                        cmd += ["--no-resume"]  # --force means start clean, not "resume anyway"
                     run(cmd, log_dir / f"shap_{tag}.log", args.dry_run)
 
             if "enumerate" in steps:

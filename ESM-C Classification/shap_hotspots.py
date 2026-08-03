@@ -12,6 +12,17 @@ Background + explained sequences are drawn from the lab's own measured data
 for the given loop subtype, so the attributions explain real observed binding
 signal, not the unconstrained sequence space.
 
+Each explained loop still needs ~(2^L) x background_size forward passes
+through the model, so at 300 explained loops this is genuinely GPU-hours, not
+seconds. To avoid a multi-hour silent black box: the explain loop is chunked
+(--shap-chunk-size, default 10), progress prints after every chunk, and
+shap_values.csv is written incrementally (flushed + fsynced per chunk) so a
+kill mid-run only loses the current chunk. Re-running the same command
+auto-resumes from shap_values.csv (same explain-set, since it's derived
+deterministically from --seed) instead of starting over; pass --no-resume to
+force a clean restart. Chunking does not change the SHAP values themselves --
+each explained loop is computed independently either way.
+
 Usage
 -----
     python shap_hotspots.py --config config.yaml --loop-subtype C-loop
@@ -22,6 +33,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import time
 from pathlib import Path
 
 import matplotlib
@@ -61,6 +74,40 @@ def load_measured_loops(cfg, loop_subtype, template_csv):
     return loops.tolist()
 
 
+def shap_cols(targets, L):
+    return [f"shap_{t}_pos{p+1}" for t in targets for p in range(L)]
+
+
+def load_resume_state(csv_path, run_meta_path, expected_meta, explain_loops, targets, L):
+    """Return (n_done, shap_vals_partial) if a valid, matching partial run exists."""
+    if not (csv_path.exists() and run_meta_path.exists()):
+        return 0, None
+    try:
+        prev_meta = json.loads(run_meta_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return 0, None
+    if any(prev_meta.get(k) != v for k, v in expected_meta.items()):
+        print("[warn] existing run_meta.json doesn't match this run's parameters; starting fresh")
+        return 0, None
+    try:
+        prev = pd.read_csv(csv_path)
+    except (pd.errors.EmptyDataError, OSError):
+        return 0, None
+    n_explain = len(explain_loops)
+    n_prev = min(len(prev), n_explain)
+    if n_prev == 0:
+        return 0, None
+    if list(prev["loop"].iloc[:n_prev]) != list(explain_loops[:n_prev]):
+        print("[warn] existing shap_values.csv doesn't match this run's explain-loop order "
+              "(measured data may have changed); starting fresh")
+        return 0, None
+    shap_vals = np.full((n_explain, L, len(targets)), np.nan)
+    for ti, t in enumerate(targets):
+        for p in range(L):
+            shap_vals[:n_prev, p, ti] = prev[f"shap_{t}_pos{p+1}"].iloc[:n_prev].to_numpy()
+    return n_prev, shap_vals
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.yaml")
@@ -78,6 +125,11 @@ def main():
     ap.add_argument("--batch-size", type=int, default=256)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--out", default=None, help="output subfolder name (default: loop_subtype tag)")
+    ap.add_argument("--shap-chunk-size", type=int, default=10,
+                    help="explain this many loops per KernelSHAP call, checkpointing "
+                         "shap_values.csv after each (progress visibility + crash safety)")
+    ap.add_argument("--no-resume", action="store_true",
+                    help="ignore any existing shap_values.csv and start this run from scratch")
     args = ap.parse_args()
 
     import shap  # deferred: heavy import, only needed here
@@ -109,7 +161,7 @@ def main():
     bg_loops = rng.choice(measured, size=args.background_size, replace=False)
     remaining = [l for l in measured if l not in set(bg_loops)]
     n_explain = min(args.n_explain, len(remaining))
-    explain_loops = rng.choice(remaining, size=n_explain, replace=False)
+    explain_loops = rng.choice(remaining, size=n_explain, replace=False).tolist()
 
     background = loops_to_matrix(bg_loops)
 
@@ -117,35 +169,70 @@ def main():
         return score(matrix_to_loops(X))
 
     print(f"Running KernelSHAP: background={len(bg_loops)}, explain={n_explain}, "
-          f"positions={L} (=> {2**L} coalitions/instance)")
+          f"positions={L} (=> {2**L} coalitions/instance), chunk_size={args.shap_chunk_size}")
     explainer = shap.KernelExplainer(f, background)
-    explain_X = loops_to_matrix(explain_loops)
-    shap_vals = explainer.shap_values(explain_X, nsamples="auto", silent=True)
-    # shap_vals: list[n_targets] of (n_explain, L), or a single (n_explain, L, n_targets) array
-    if isinstance(shap_vals, list):
-        shap_vals = np.stack(shap_vals, axis=-1)  # (n_explain, L, n_targets)
-    elif shap_vals.ndim == 2:
-        shap_vals = shap_vals[:, :, None]
 
     out_dir = (resolve_path(cfg, cfg["output_dir"]) / "shap" /
               (args.out or (subtype or "all").replace("-", "").lower()))
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "run_meta.json").write_text(json.dumps({
-        "loop_subtype": subtype, "start_char": start_char, "loop_len": L,
-        "targets": targets, "n_explain": n_explain, "background_size": args.background_size,
-        "seed": args.seed,
-    }, indent=2))
+    csv_path = out_dir / "shap_values.csv"
+    run_meta_path = out_dir / "run_meta.json"
+    run_meta = {"loop_subtype": subtype, "start_char": start_char, "loop_len": L,
+                "targets": targets, "n_explain": n_explain, "background_size": args.background_size,
+                "seed": args.seed}
 
-    # --- raw values -----------------------------------------------------
-    rows = []
-    for i, loop in enumerate(explain_loops):
-        row = {"loop": loop}
-        for ti, t in enumerate(targets):
-            for p in range(L):
-                row[f"shap_{t}_pos{p+1}"] = float(shap_vals[i, p, ti])
-        rows.append(row)
-    pd.DataFrame(rows).to_csv(out_dir / "shap_values.csv", index=False)
+    n_done, shap_vals = (0, None)
+    if not args.no_resume:
+        n_done, shap_vals = load_resume_state(csv_path, run_meta_path, run_meta,
+                                              explain_loops, targets, L)
+    if shap_vals is None:
+        shap_vals = np.full((n_explain, L, len(targets)), np.nan)
+    if n_done:
+        print(f"[resume] {n_done}/{n_explain} loops already explained, continuing")
+    else:
+        if csv_path.exists():
+            csv_path.unlink()
+        run_meta_path.write_text(json.dumps(run_meta, indent=2))
 
+    cols = ["loop"] + shap_cols(targets, L)
+    t0 = time.time()
+    idx = n_done
+    while idx < n_explain:
+        j = min(idx + args.shap_chunk_size, n_explain)
+        chunk_loops = explain_loops[idx:j]
+        chunk_X = loops_to_matrix(chunk_loops)
+        sv_chunk = explainer.shap_values(chunk_X, nsamples="auto", silent=True)
+        if isinstance(sv_chunk, list):
+            sv_chunk = np.stack(sv_chunk, axis=-1)  # (n_chunk, L, n_targets)
+        elif sv_chunk.ndim == 2:
+            sv_chunk = sv_chunk[:, :, None]
+        shap_vals[idx:j] = sv_chunk
+
+        rows = []
+        for k, loop in enumerate(chunk_loops):
+            row = {"loop": loop}
+            for ti, t in enumerate(targets):
+                for p in range(L):
+                    row[f"shap_{t}_pos{p+1}"] = float(sv_chunk[k, p, ti])
+            rows.append(row)
+        write_header = idx == 0 and not csv_path.exists()
+        with open(csv_path, "a", newline="", encoding="utf-8") as fh:
+            pd.DataFrame(rows, columns=cols).to_csv(fh, index=False, header=write_header)
+            fh.flush()
+            os.fsync(fh.fileno())
+
+        idx = j
+        el = time.time() - t0
+        done_now = idx - n_done
+        rate = done_now / max(el, 1e-9)
+        eta_min = (n_explain - idx) / max(rate, 1e-9) / 60
+        print(f"  {idx}/{n_explain} explained  {rate*60:.2f} loops/min  "
+              f"ETA {eta_min:.1f} min", flush=True)
+
+    if n_done >= n_explain:
+        print(f"[resume] all {n_explain} loops already explained; regenerating plots/summary only")
+
+    # --- raw values (already fully written incrementally above; re-derive probs) ---
     probs = score(list(explain_loops))
     summary = {"loop_subtype": subtype, "targets": targets, "n_explain": n_explain}
 
@@ -187,33 +274,33 @@ def main():
                                base_values=np.full(sv.shape[0], base_val),
                                data=features_str,
                                feature_names=feature_names)
-        
+
         # 1. Waterfall Plot (first sample)
         plt.figure()
         shap.plots.waterfall(exp[0], show=False)
         plt.savefig(out_dir / f"waterfall_sample_0_{t}.png", bbox_inches='tight', dpi=150)
         plt.close()
-        
+
         # 2. Individual Force Plot (first sample)
         shap.plots.force(exp[0], show=False, matplotlib=True)
         plt.savefig(out_dir / f"force_sample_0_{t}.png", bbox_inches='tight', dpi=150)
         plt.close()
-        
+
         # 3. Stacked/Global Force Plot (Interactive HTML)
         try:
             force_html = shap.plots.force(base_val, sv, features_str, feature_names=feature_names, show=False)
             shap.save_html(str(out_dir / f"stacked_force_plot_{t}.html"), force_html)
         except Exception as e:
             print(f"Could not generate stacked force HTML for {t}: {e}")
-            
+
         # 4. Beeswarm Plot
         try:
             plt.figure()
             # Bypassing color mapping issues with strings by converting them to numeric indices for coloring
             numeric_features = np.vectorize(AA_IDX.get)(features_str)
-            exp_numeric = shap.Explanation(values=sv, 
-                                           base_values=np.full(sv.shape[0], base_val), 
-                                           data=numeric_features, 
+            exp_numeric = shap.Explanation(values=sv,
+                                           base_values=np.full(sv.shape[0], base_val),
+                                           data=numeric_features,
                                            feature_names=feature_names)
             shap.plots.beeswarm(exp_numeric, show=False, color_bar=False)
             plt.title(f'{t}: SHAP Beeswarm Plot (Color=AA index)')

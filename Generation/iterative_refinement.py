@@ -155,10 +155,15 @@ DESIGN_TARGET_CHAIN = "B"
 # normal/max: native and maximum loop length for the contig string.
 # left/right: flanking tripeptides for regex-based loop extraction from sequences.
 LOOP_CONFIGS = {
-    "AB": {"normal": 6,  "max": 15, "pos": 30,  "left": "LVK", "right": "LVY"},
-    "C":  {"normal": 6,  "max": 15, "pos": 62,  "left": "HTE", "right": "GLK"},
-    "EF": {"normal": 4,  "max": 10, "pos": 92,  "left": "MYT", "right": "FVE"},
-    "GH": {"normal": 10, "max": 20, "pos": 127, "left": "KSC", "right": "NEC"},
+    "AB":  {"normal": 6,  "max": 15, "pos": 30,  "left": "LVK", "right": "LVY"},
+    "C":   {"normal": 6,  "max": 15, "pos": 62,  "left": "HTE", "right": "GLK"},
+    "EF":  {"normal": 4,  "max": 10, "pos": 92,  "left": "MYT", "right": "FVE"},
+    "GH":  {"normal": 10, "max": 20, "pos": 127, "left": "KSC", "right": "NEC"},
+    # MTL = the C-terminal Multiple-Turn Loop (native DMLSNFGYPG). Lives in the
+    # C-terminal domain (pos 143), so it requires the full-length TIMP3 construct
+    # (not the 121-aa N-terminal design construct). Same loop the RFd_Batch /
+    # RFd3_batch scripts label "Multi".
+    "MTL": {"normal": 10, "max": 20, "pos": 143, "left": "LWT", "right": "YQS"},
 }
 
 # ── Hyperparameters ───────────────────────────────────────────────────────────
