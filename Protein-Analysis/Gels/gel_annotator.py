@@ -311,6 +311,9 @@ def recolor_gel(
     surround: str = "auto",
     low_pct: float = 1.0,
     high_pct: float = 99.0,
+    remap_saturated: bool = True,
+    saturated_color="auto",
+    saturated_tol: int = 24,
 ) -> np.ndarray:
     """
     Repaint a greyscale-scanned gel to resemble a physical stain.
@@ -334,10 +337,33 @@ def recolor_gel(
                            membrane background to pure white so only the bands
                            carry colour (the "membrane on black" presentation).
 
+    ChemiDoc/Image Lab's own preview JPGs flag CCD-saturated pixels by painting
+    them a flat, non-greyscale colour (typically pure red, e.g. RGB (254,0,0))
+    on top of an otherwise true-greyscale capture (R==G==B everywhere else).
+    Naively converting that through RGB2GRAY misreads red as a dim ~76 grey and
+    paints it a spurious mid-LUT colour instead of a true saturation white.  With
+    `remap_saturated=True` (default), any pixel whose R/G/B channels disagree by
+    more than `saturated_tol` (i.e. it isn't real greyscale data) is detected as
+    a saturation-flag pixel and repainted `saturated_color` instead of being run
+    through the greyscale LUT. `saturated_color="auto"` (default) uses this
+    stain's own 255-grey colour (white for etbr/etbr_uv and most stains); pass an
+    explicit colour (name / '#rrggbb' / (r,g,b)) to override, e.g. to keep the
+    saturation flag visibly distinct instead of folding it into the background.
+    Set `remap_saturated=False` to disable and pass the raw colour through
+    RGB2GRAY as before.
+
     Returns an RGB uint8 array the same size as the input.
     """
     lut = _build_lut(STAIN_LUTS[resolve_stain(stain)])
     surround = surround.strip().lower()
+
+    sat_mask = None
+    if remap_saturated:
+        rgb_i = gel_rgb.astype(np.int16)
+        color_dev = (np.abs(rgb_i[..., 0] - rgb_i[..., 1])
+                     + np.abs(rgb_i[..., 1] - rgb_i[..., 2])
+                     + np.abs(rgb_i[..., 0] - rgb_i[..., 2]))
+        sat_mask = color_dev > saturated_tol
 
     gray = cv2.cvtColor(gel_rgb, cv2.COLOR_RGB2GRAY).astype(np.float32)
     mask = _membrane_mask(gray) if mask_background else None
@@ -358,6 +384,9 @@ def recolor_gel(
 
     idx = np.clip(np.round(gray), 0, 255).astype(np.intp)
     out = lut[idx]
+    if sat_mask is not None and sat_mask.any():
+        sat_rgb = tuple(int(c) for c in lut[255]) if saturated_color == "auto" else parse_color(saturated_color)
+        out[sat_mask] = sat_rgb
     if mask is not None:
         out[~mask] = (0, 0, 0) if surround == "black" else lut[255]
     return out
@@ -1101,6 +1130,8 @@ def annotate(input_path: Path, config_path: Path, output_path: Optional[Path] = 
                 auto_stretch=bool(cfg.get("stain_autostretch", False)),
                 mask_background=bool(cfg.get("stain_mask_bg", True)),
                 surround=str(surround_opt),
+                remap_saturated=bool(cfg.get("stain_remap_saturated", True)),
+                saturated_color=cfg.get("stain_saturated_color", "auto"),
             )
             print(f"Recoloured gel with '{key}' stain palette (surround={surround_opt}).")
         except KeyError as e:

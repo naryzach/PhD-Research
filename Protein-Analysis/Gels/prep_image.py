@@ -45,14 +45,22 @@ def _slab_mask(gray):
     return filled, white
 
 
-def _border_trim(gray):
+def _border_trim(gray, outlier_pct=0.5):
+    """Row/column background classification via a robust percentile rather than
+    strict min/max, so a handful of dust specks or hot pixels in an otherwise
+    uniform margin (common on ChemiDoc scans) don't block the trim -- a single
+    stray bright pixel used to make `gray.max(axis=0)` fail the whole column,
+    leaving a loose, un-trimmed margin (and downstream lane misalignment on
+    wide multi-lane gels)."""
     corners = np.concatenate([gray[:20, :20].ravel(), gray[:20, -20:].ravel(),
                               gray[-20:, :20].ravel(), gray[-20:, -20:].ravel()])
     bg = np.median(corners)
     if bg > 110:
-        rbg = gray.min(axis=1) > bg - 12; cbg = gray.min(axis=0) > bg - 12
+        rbg = np.percentile(gray, outlier_pct, axis=1) > bg - 12
+        cbg = np.percentile(gray, outlier_pct, axis=0) > bg - 12
     else:
-        rbg = gray.max(axis=1) < bg + 12; cbg = gray.max(axis=0) < bg + 12
+        rbg = np.percentile(gray, 100 - outlier_pct, axis=1) < bg + 12
+        cbg = np.percentile(gray, 100 - outlier_pct, axis=0) < bg + 12
     r = np.where(~rbg)[0]; c = np.where(~cbg)[0]
     if len(r) == 0 or len(c) == 0:
         return 0, gray.shape[0], 0, gray.shape[1]

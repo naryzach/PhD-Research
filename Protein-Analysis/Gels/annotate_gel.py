@@ -112,13 +112,21 @@ def annotate_scan(source, out_tif, png_dirs, *, stain=None, stain_surround=None,
                   ladder_type=None, ladder_lane=1, labels=None, count=None,
                   flip=False, anchor_ladder=False, ladder_side="right",
                   bands_y=None, gel_type="protein", already_prepped=False,
-                  whiten_bg=True):
+                  whiten_bg=True, remap_saturated=True, saturated_color="auto"):
     """Prep (unless already_prepped) -> annotate -> save TIFF + PNG copies.
 
     whiten_bg (default True): for absorptive stains (Ponceau/Coomassie/silver/
     etc.), auto-flatten a gray membrane background to white when the scan is
     under-exposed; no-op for well-exposed blots and for merges. Set False to
-    force the faithful direct-LUT rendering."""
+    force the faithful direct-LUT rendering.
+
+    remap_saturated (default True): the raw ChemiDoc/Image Lab preview JPG flags
+    CCD-saturated pixels with a flat, non-greyscale colour (typically pure red)
+    on top of an otherwise true-greyscale (R==G==B) capture. Left alone, RGB2GRAY
+    misreads that flag colour as a dim mid-grey and paints it a spurious mid-LUT
+    colour. With this on, those pixels are detected and repainted
+    `saturated_color` instead ("auto" = this stain's own 255-grey colour, e.g.
+    white for etbr/etbr_uv). Set False to disable and use the raw RGB2GRAY read."""
     G.detect_gel_corners = lambda img: None
     src = Path(source)
     prepped = src if already_prepped else Path(tempfile.NamedTemporaryFile(suffix=".png", delete=False).name)
@@ -151,6 +159,8 @@ def annotate_scan(source, out_tif, png_dirs, *, stain=None, stain_surround=None,
         cfg["stain"] = stain
         if stain_surround:
             cfg["stain_surround"] = stain_surround
+        cfg["stain_remap_saturated"] = bool(remap_saturated)
+        cfg["stain_saturated_color"] = saturated_color
     else:
         cfg["stain"] = "none"
     ladder = {}
