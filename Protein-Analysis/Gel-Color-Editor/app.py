@@ -169,6 +169,30 @@ def apply_lut(gray_img: np.ndarray, lut: np.ndarray, invert: bool = False) -> np
         idx = 255 - idx
     return lut[idx]
 
+def detect_saturated(rgb_img: np.ndarray, tol: int = 24) -> np.ndarray:
+    """Flag ChemiDoc/Image Lab CCD-saturation-overlay pixels.
+
+    The raw ChemiDoc preview JPG marks saturated pixels with a flat,
+    non-greyscale colour (typically pure red, e.g. RGB(254,0,0)) baked directly
+    into an otherwise true-greyscale (R==G==B) capture. A naive RGB→gray
+    conversion misreads that flag colour as a dim mid-grey and paints it a
+    spurious mid-LUT colour instead of true saturation. Detect it here by
+    per-pixel colour-channel deviation (same test used in gel_annotator.py's
+    recolor_gel) so it can be repainted before/after the LUT is applied.
+    """
+    rgb_i = rgb_img.astype(np.int16)
+    color_dev = (np.abs(rgb_i[..., 0] - rgb_i[..., 1])
+                + np.abs(rgb_i[..., 1] - rgb_i[..., 2])
+                + np.abs(rgb_i[..., 0] - rgb_i[..., 2]))
+    return color_dev > tol
+
+def remap_saturated_pixels(colored: np.ndarray, sat_mask: np.ndarray,
+                           color: tuple) -> np.ndarray:
+    out = colored.copy()
+    if sat_mask.any():
+        out[sat_mask] = color
+    return out
+
 def make_swatch(lut: np.ndarray, invert: bool = False,
                 width: int = 900, height: int = 72) -> np.ndarray:
     lo, hi = (255, 0) if invert else (0, 255)
@@ -230,6 +254,14 @@ if "stops" not in st.session_state:
     st.session_state.stops = [make_stop(g, rgb) for g, rgb in PRESET_DATA["etbr_uv"]]
 if "invert" not in st.session_state:
     st.session_state.invert = False
+if "remap_saturated" not in st.session_state:
+    st.session_state.remap_saturated = True
+if "saturated_mode" not in st.session_state:
+    st.session_state.saturated_mode = "Auto (255 stop colour)"
+if "saturated_hex" not in st.session_state:
+    st.session_state.saturated_hex = "#ffffff"
+if "saturated_tol" not in st.session_state:
+    st.session_state.saturated_tol = 24
 
 # ── Sidebar: stop editor ──────────────────────────────────────────────────────
 with st.sidebar:
@@ -248,6 +280,45 @@ with st.sidebar:
             key="preset_sel", label_visibility="collapsed",
         )
     st.button("↩ Load preset", width='stretch', on_click=cb_load_preset)
+
+    st.divider()
+
+    st.markdown("## 🔺 Saturated Pixels")
+    st.session_state.remap_saturated = st.toggle(
+        "Remap saturated pixels",
+        value=st.session_state.remap_saturated,
+        help=("The raw ChemiDoc/Image Lab preview flags CCD-saturated pixels with a "
+              "flat, non-greyscale colour (usually pure red) on top of an otherwise "
+              "true-greyscale capture. Left alone, that flag colour gets misread as a "
+              "dim mid-grey and painted a spurious mid-LUT colour. Turn this on to "
+              "detect and repaint those pixels instead."),
+    )
+    if st.session_state.remap_saturated:
+        st.session_state.saturated_mode = st.radio(
+            "Remap to",
+            ["Auto (255 stop colour)", "Custom colour"],
+            index=["Auto (255 stop colour)", "Custom colour"].index(st.session_state.saturated_mode),
+            help="Auto uses this LUT's own colour at gray=255 (white for etbr_uv). "
+                 "Custom lets you pick any colour.",
+        )
+        if st.session_state.saturated_mode == "Custom colour":
+            st.session_state.saturated_hex = st.color_picker(
+                "Saturated-pixel colour",
+                value=st.session_state.saturated_hex,
+                key="saturated_color_picker",
+            )
+        st.session_state.saturated_tol = st.number_input(
+            "Detection tolerance",
+            min_value=1, max_value=255, step=1,
+            value=st.session_state.saturated_tol,
+            help="Sum of |R-G|+|G-B|+|R-B|. Higher = only flag more strongly-colored "
+                 "(more clearly non-greyscale) pixels as saturated.",
+        )
+        st.caption(
+            "Matches `gel_annotator.py`'s `stain_remap_saturated` / "
+            "`stain_saturated_color` config keys (also available in "
+            "`annotate_gel.annotate_scan(remap_saturated=, saturated_color=)`)."
+        )
 
     st.divider()
 
@@ -357,10 +428,23 @@ elif file_path.strip():
 if img_src is not None:
     gray    = cv2.cvtColor(img_src, cv2.COLOR_RGB2GRAY)
     colored = apply_lut(gray, lut, st.session_state.invert).astype(np.uint8)
+
+    sat_mask = None
+    if st.session_state.remap_saturated:
+        sat_mask = detect_saturated(img_src, tol=int(st.session_state.saturated_tol))
+        if st.session_state.saturated_mode == "Auto (255 stop colour)":
+            sat_color = tuple(int(c) for c in lut[255])
+        else:
+            sat_color = hex_to_rgb(st.session_state.saturated_hex)
+        colored = remap_saturated_pixels(colored, sat_mask, sat_color)
+
     c1, c2  = st.columns(2)
     c1.markdown("**Original (grayscale)**")
     c1.image(img_src, width='stretch')
     c2.markdown("**Colorized**")
     c2.image(colored, width='stretch')
+    if sat_mask is not None and sat_mask.any():
+        st.caption(f"🔺 {int(sat_mask.sum()):,} saturated pixel(s) detected and remapped "
+                   f"to {rgb_to_hex(*sat_color)}.")
 else:
     st.info("⬆ Upload a gel image or enter a file path above to see the live preview.")
