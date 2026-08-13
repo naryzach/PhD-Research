@@ -42,6 +42,28 @@ from iterative_refinement import (
 )
 
 
+def _wait_for_gpu_release(timeout_s: int = 180, poll_s: int = 10) -> None:
+    """Block until at least one GPU drops below the free threshold, or timeout.
+
+    Reports what it sees either way — a run that silently starts unpinned on a busy
+    card looks identical to a healthy one until you notice it is 8x slow.
+    """
+    import time
+    for waited in range(0, timeout_s + 1, poll_s):
+        free = ir.get_free_gpus()
+        if free:
+            print(f"GPU check: free GPUs {free}"
+                  + (f" (after {waited}s wait)" if waited else ""), flush=True)
+            return
+        if waited == 0:
+            print("GPU check: no GPU under the free threshold yet — waiting for the "
+                  "preflight to release memory...", flush=True)
+        time.sleep(poll_s)
+    print(f"GPU check: WARNING — still no free GPU after {timeout_s}s. Proceeding, but "
+          "expect a single unpinned shard and much slower folding. Check nvidia-smi.",
+          flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Recover ESMFold2 scores for unscored designs.")
     ap.add_argument("--targets", nargs="+", default=["MMP2", "MMP9", "ADAM10", "ADAM17"])
@@ -110,7 +132,13 @@ def main():
         if rc != 0:
             sys.exit("\nABORTING: ESMFold2 could not fold (see the error above).\n"
                      "  Nothing was modified.")
-        print("Preflight OK.\n", flush=True)
+        print("Preflight OK.", flush=True)
+        # The preflight's own child briefly holds ~16 GiB. get_free_gpus() uses a
+        # 2000 MiB threshold, so calling it too soon sees NO free card, falls back to
+        # an unpinned single shard, and folds ~6-8x slower on a crowded device. Wait
+        # for the memory to come back before resolving the GPU set.
+        _wait_for_gpu_release()
+        print("", flush=True)
 
     # Re-fold with ESMFold2 (reuses the pipeline's GPU-sharded scorer), in chunks so
     # that a hard kill costs one chunk instead of the whole pool — the failure mode
@@ -122,7 +150,10 @@ def main():
 
     n_filled, n_empty_streak = 0, 0
     for ci, chunk in enumerate(chunks, 1):
-        out_dir = OUT_BASE / "rescore" / f"chunk_{ci:04d}"
+        # Scope chunk dirs by target set: chunk_0001 of an all-targets run holds
+        # completely different designs than chunk_0001 of an ADAM10/ADAM17 run, and
+        # --resume would otherwise read the wrong run's leftovers as "already done".
+        out_dir = OUT_BASE / "rescore" / "-".join(sorted(args.targets)) / f"chunk_{ci:04d}"
         out_dir.mkdir(parents=True, exist_ok=True)
         scores = refiner._score_sequences_esmfold2(chunk, out_dir)
         print(f"[chunk {ci}/{len(chunks)}] ESMFold2 returned {len(scores)}/{len(chunk)} scores.",

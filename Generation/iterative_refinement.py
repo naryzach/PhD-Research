@@ -69,6 +69,7 @@ import torch
 from biotite.structure import superimpose, rmsd as bio_rmsd
 from biotite.structure.io.pdb import PDBFile
 from biotite.structure.io.pdbx import CIFFile
+import biotite.structure.io.pdbx as pdbx
 from biotite.sequence import ProteinSequence
 from atomworks.io.utils.io_utils import to_cif_file
 from atomworks.constants import PROTEIN_BACKBONE_ATOM_NAMES
@@ -181,6 +182,17 @@ TEMP_DECAY             = 0.85  # Temperature multiplier applied each iteration
 HOF_SIZE_PER_TARGET    = 75    # Max Hall of Fame entries per target
 ADAPTIVE_BIAS_START    = 3     # First iteration to apply adaptive loop-length bias
 ADAPTIVE_BIAS_PCT      = 25    # Use top-N% HOF lengths to define new contig range
+# ── HOF backbone reuse: the EXPLOIT half of the anneal ───────────────────────
+# Without this the HOF's only influence on generation is _adaptive_loop_ranges,
+# which is a no-op in practice (min/max over the top-k spans the entire sampled
+# loop-length range, excluding 0% of designs) -- so every iteration is an
+# independent draw and the cooling temperature has nothing to exploit. Measured
+# on the Aug-3 pool: composite vs iteration rho = -0.09 over 37 rounds, i.e. no
+# refinement at all. Reusing the backbones behind the best designs gives
+# LigandMPNN a proven scaffold to re-sample at the current temperature, which is
+# what makes hot->cold annealing mean something. Set frac to 0.0 to disable.
+HOF_BACKBONE_REUSE_FRAC = 0.5  # share of each iteration's backbones drawn from the HOF
+HOF_REUSE_START         = 3    # first iteration to reuse (HOF needs to be populated)
 # AF3_EXPORT_EVERY_N: with RF3 + Boltz-2 both running, each iteration is roughly
 # 6–10 h on an A100.  N=2 targets ~12–20 h between submissions, matching the
 # 30 AF3 jobs/day Google-server cap.
@@ -743,6 +755,61 @@ class IterativeRefiner:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.state_path, "w") as f:
             json.dump(self.state, f, indent=2)
+
+    # ── HOF backbone reuse (exploit) ──────────────────────────────────────────
+
+    def _hof_backbones(self, target_name: str, n_want: int) -> list:
+        """
+        Load the RFd3 backbones behind this target's best designs so LigandMPNN can
+        re-sample sequences on them at the current temperature.
+
+        design_id is "<target>_it<N>_d<idx>[_s<k>]", and run_iteration writes each
+        backbone to it_<N>/rfd3/<target>/bb_<idx>.cif using that SAME idx, so every
+        HOF entry maps back to the exact backbone it came from. Multiple sequences
+        share one backbone, so dedupe by (iteration, idx).
+
+        Returns fewer than n_want (possibly zero) if the HOF is thin or the CIFs are
+        missing; the caller makes up the difference with fresh RFd3 backbones, so a
+        failure here degrades to the previous all-fresh behaviour rather than
+        breaking the run.
+        """
+        if n_want <= 0:
+            return []
+        entries = sorted(self.state["hof"].get(target_name, []),
+                         key=lambda e: e.get("composite_score", 0) or 0, reverse=True)
+        seen, arrays = set(), []
+        for e in entries:
+            m = re.search(r"_it(\d+)_d(\d+)", str(e.get("design_id", "")))
+            if not m:
+                continue
+            key = (int(m.group(1)), int(m.group(2)))
+            if key in seen:
+                continue
+            seen.add(key)
+            cif = OUT_BASE / f"it_{key[0]}" / "rfd3" / target_name / f"bb_{key[1]}.cif"
+            if not cif.exists():
+                continue
+            try:
+                arr = pdbx.get_structure(CIFFile.read(str(cif)), model=1)
+            except Exception as exc:
+                logger.debug(f"[{target_name}] could not read {cif.name}: {exc}")
+                continue
+            # The round-trip through mmCIF must still give LigandMPNN both chains;
+            # skip anything that came back malformed rather than feeding it in.
+            chains = set(np.unique(arr.chain_id))
+            if not {DESIGN_BINDER_CHAIN, DESIGN_TARGET_CHAIN} <= chains:
+                logger.debug(f"[{target_name}] {cif.name} missing a chain {chains}; skipping.")
+                continue
+            arrays.append(arr)
+            if len(arrays) >= n_want:
+                break
+        if arrays:
+            best = entries[0].get("composite_score", 0) or 0
+            logger.info(f"[{target_name}] reusing {len(arrays)}/{n_want} HOF backbone(s) "
+                        f"(best composite {best:.3f})")
+        else:
+            logger.info(f"[{target_name}] no HOF backbones available; all-fresh this round.")
+        return arrays
 
     # ── Adaptive contig bias ──────────────────────────────────────────────────
 
@@ -1588,10 +1655,18 @@ class IterativeRefiner:
             return
         pool[sm] = pd.to_numeric(pool[sm], errors="coerce")
         pool = pool.dropna(subset=[sm]).drop_duplicates(subset=["full_seq"])
-        # Drop UNSCORED designs: an ESMFold2 failure (e.g. OOM) leaves esm_iptm NaN
-        # and composite_score == 0. Including them would fill the LO band with junk
-        # rather than genuinely predicted-weak designs. Require a real ESMFold2 score.
-        if "esm_iptm" in pool.columns:
+        # Drop UNSCORED designs: an ESMFold2 failure (e.g. OOM) leaves the ESM
+        # columns NaN and composite_score == 0. Including them would fill the LO
+        # band with junk rather than genuinely predicted-weak designs.
+        # Gate on esm_plddt, NOT esm_iptm: esm_plddt (+ the interface features) is
+        # what the composite actually reads, and designs recovered from saved CIFs
+        # by recover_from_cifs.py have a real esm_plddt but a blank esm_iptm (a
+        # model-head output that no structure can supply). Gating on esm_iptm would
+        # silently discard every CIF-recovered design — ~9,400 of them after the
+        # Aug-3 recovery — and stratify over only the freshly re-folded remainder.
+        if "esm_plddt" in pool.columns:
+            pool = pool[pd.to_numeric(pool["esm_plddt"], errors="coerce").notna()]
+        elif "esm_iptm" in pool.columns:
             pool = pool[pd.to_numeric(pool["esm_iptm"], errors="coerce").notna()]
         if sm == "composite_score":
             pool = pool[pool[sm] > 0]
@@ -1886,10 +1961,21 @@ class IterativeRefiner:
                     logger.warning(f"Skipping {tname}: PDB not found at {pdb_path}")
                     continue
 
-                # 1. Backbone generation
+                # 1. Backbone generation — part exploit (re-sample the HOF's best
+                #    backbones), part explore (fresh RFd3 from the template). The
+                #    reused share is what lets the cooling temperature actually
+                #    exploit; all-fresh backbones make every iteration i.i.d.
+                #    Reuse also skips RFd3 for those slots, the dominant per-
+                #    iteration cost (~3-4 min/batch).
                 rfd3_dir = it_dir / "rfd3" / tname
                 rfd3_dir.mkdir(parents=True, exist_ok=True)
-                backbones = self.run_rfd3(tname, pdb_path, BACKBONES_PER_TARGET, adaptive_ranges)
+                n_reuse = (int(BACKBONES_PER_TARGET * HOF_BACKBONE_REUSE_FRAC)
+                           if it >= HOF_REUSE_START else 0)
+                reused  = self._hof_backbones(tname, n_reuse)
+                # Always generate at least one fresh backbone so the pool cannot
+                # collapse onto the incumbent HOF.
+                n_fresh = max(1, BACKBONES_PER_TARGET - len(reused))
+                backbones = self.run_rfd3(tname, pdb_path, n_fresh, adaptive_ranges) + reused
 
                 # Save backbone CIFs (the structural record of each design)
                 for bi, arr in enumerate(backbones):
@@ -1971,7 +2057,7 @@ def main():
     # "name used prior to global declaration" rule.
     global RF3_ENABLE, ESMFOLD2_GPUS, INIT_TEMPERATURE, MIN_TEMPERATURE, TEMP_DECAY, ADAPTIVE_BIAS_START
     global SV_BATTERY, SV_OCCLUSION_FILTER, SV_OCCLUSION_MIN
-    global BACKBONES_PER_TARGET, LMPNN_SEQS_PER_BACKBONE
+    global BACKBONES_PER_TARGET, LMPNN_SEQS_PER_BACKBONE, HOF_BACKBONE_REUSE_FRAC
 
     parser = argparse.ArgumentParser(description="Iterative TIMP3 binder design.")
     parser.add_argument(
@@ -2048,6 +2134,11 @@ def main():
     parser.add_argument("--no-adaptive-bias", action="store_true",
                         help="Disable adaptive loop-length narrowing — keeps the full loop-length "
                              "range every iteration (more structural diversity).")
+    parser.add_argument("--hof-reuse-frac", type=float, default=None, metavar="F",
+                        help=f"Share of each iteration's backbones re-sampled from the HOF's best "
+                             f"designs (default {HOF_BACKBONE_REUSE_FRAC}); the rest are fresh RFd3. "
+                             "This is the exploit half of the anneal — 0.0 reverts to the old "
+                             "all-fresh behaviour, where iterations are independent draws.")
     # ── Throughput controls ──
     parser.add_argument("--backbones-per-target", type=int, default=None,
                         help=f"RFd3 backbones per target per iteration (default {BACKBONES_PER_TARGET}). "
@@ -2075,6 +2166,8 @@ def main():
         TEMP_DECAY = args.temp_decay
     if args.no_adaptive_bias:
         ADAPTIVE_BIAS_START = 10**9   # effectively never
+    if args.hof_reuse_frac is not None:
+        HOF_BACKBONE_REUSE_FRAC = max(0.0, min(0.9, args.hof_reuse_frac))
     if args.backbones_per_target is not None:
         BACKBONES_PER_TARGET = args.backbones_per_target
     if args.seqs_per_backbone is not None:

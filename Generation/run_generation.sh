@@ -49,6 +49,11 @@ INIT_TEMPERATURE=0.60               # HOT start (fresh run only)
 MIN_TEMPERATURE=0.10                # COLD confident floor
 TEMP_DECAY=0.94                     # slow cool -> ~29 iters to reach the floor
 MAX_ITERATIONS=40                   # full anneal + ~11 exploit iterations at the floor
+HOF_REUSE_FRAC=0.5                  # share of each round's backbones re-sampled from the HOF's
+                                    # best designs (rest are fresh RFd3). This is the EXPLOIT half
+                                    # of the anneal -- with 0.0 every iteration is an independent
+                                    # draw and cooling the temperature achieves nothing (measured:
+                                    # rho = -0.09 composite vs iteration over 37 rounds).
 ESMFOLD2_GPUS="${ESMFOLD2_GPUS:-auto}"  # shard ESMFold2 across free GPUs; set =1 (env) when co-
                                     # running with another campaign pinned to a different GPU, since
                                     # 'auto' detects via nvidia-smi and ignores CUDA_VISIBLE_DEVICES
@@ -135,7 +140,7 @@ sv_flags=()
 echo "Log: $LOG"
 echo "Targets: $TARGETS | Loops: $LOOPS | ${BACKBONES_PER_TARGET}bb x ${SEQS_PER_BACKBONE}seq | " \
      "T:${INIT_TEMPERATURE}->${MIN_TEMPERATURE} decay ${TEMP_DECAY} | ${MAX_ITERATIONS} iters | " \
-     "SV: ${sv_flags[*]:-none}" | tee -a "$LOG"
+     "SV: ${sv_flags[*]:-none} | HOF backbone reuse: ${HOF_REUSE_FRAC}" | tee -a "$LOG"
 
 # ── Run with crash-resume ────────────────────────────────────────────────────
 attempt=0
@@ -151,6 +156,7 @@ while (( attempt <= MAX_RETRIES )); do
     --temp-decay "$TEMP_DECAY" \
     --esmfold2-gpus "$ESMFOLD2_GPUS" \
     --max-iterations "$MAX_ITERATIONS" \
+    --hof-reuse-frac "$HOF_REUSE_FRAC" \
     ${sv_flags[@]+"${sv_flags[@]}"} \
     >> "$LOG" 2>&1
   rc=$?
