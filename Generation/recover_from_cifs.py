@@ -139,7 +139,11 @@ def main():
     ap.add_argument("--dry-run", action="store_true",
                     help="Report how many rows are recoverable and exit.")
     ap.add_argument("--rebuild-hof", action="store_true",
-                    help="Also rebuild hof_summary.csv (needs the pipeline env).")
+                    help="Also rebuild hof_summary.csv + refinement_state.json from the scored "
+                         "pool (needs the pipeline env).")
+    ap.add_argument("--loops", nargs="+", default=["AB", "C", "EF"],
+                    help="Loops the run redesigned — must match the run being rebuilt, since the "
+                         "HOF's loop-length bookkeeping is per-loop (default: AB C EF).")
     ap.add_argument("--pair-mode", action="store_true",
                     help="Specificity pool: each design was folded against BOTH targets "
                          "(<id>::on / <id>::off). Recovers both sides and scores with the "
@@ -159,6 +163,7 @@ def main():
     n_rows = n_have_cif = n_recovered = n_already = 0
     per_target = {}
     missing = {}
+    seen_targets = set()   # every target in the pool, not just newly-recovered ones
 
     for csv in csvs:
         df = pd.read_csv(csv)
@@ -166,6 +171,8 @@ def main():
         changed = False
         for i, r in df.iterrows():
             n_rows += 1
+            if isinstance(r.get("target_name"), str):
+                seen_targets.add(r["target_name"])
             # "Scored" means the ranking inputs are present — NOT esm_iptm, which
             # the composite never reads.
             if "esm_plddt" in df.columns and pd.notna(r.get("esm_plddt")):
@@ -225,23 +232,49 @@ def main():
         return
 
     if args.rebuild_hof:
+        # Targets come from the pool itself, not from per_target — that only counts
+        # rows recovered on THIS pass, and is empty on a re-run where everything is
+        # already scored (exactly when you still want the HOF rebuilt).
+        targets = sorted(seen_targets)
+        if not targets:
+            print("HOF rebuild skipped: no target_name values found in the round summaries.")
+            return
         try:
             import iterative_refinement as ir
             ir.OUT_BASE = out_base
-            refiner = ir.IterativeRefiner(
-                active_targets=sorted({t for t in per_target if isinstance(t, str)}) or None)
+            refiner = ir.IterativeRefiner(active_targets=targets, active_loops=args.loops,
+                                          state_path=out_base / "refinement_state.json")
             scored = []
             for csv in csvs:
                 d = pd.read_csv(csv)
                 d = d[pd.to_numeric(d.get("esm_plddt"), errors="coerce").notna()]
                 scored.extend(d.to_dict("records"))
-            for t in refiner.active_targets:
+            for t in targets:
                 refiner.state["hof"][t] = []
             refiner.update_hof(scored)
             refiner._save_state()
-            print(f"HOF rebuilt from {len(scored)} scored designs.")
+            sizes = {t: len(refiner.state["hof"].get(t, [])) for t in targets}
+            print(f"HOF rebuilt from {len(scored)} scored designs. Sizes: {sizes}")
+            # The whole point of the rebuild is to seed HOF backbone reuse, so verify
+            # the backbones those entries point at actually exist on disk.
+            import re as _re
+            ok = tot = 0
+            for t in targets:
+                for e in refiner.state["hof"].get(t, []):
+                    m = _re.search(r"_it(\d+)_d(\d+)", str(e.get("design_id", "")))
+                    if not m:
+                        continue
+                    tot += 1
+                    if (out_base / f"it_{m.group(1)}" / "rfd3" / t /
+                            f"bb_{m.group(2)}.cif").exists():
+                        ok += 1
+            print(f"HOF backbones resolvable for reuse: {ok}/{tot}"
+                  + ("" if ok == tot else "  <-- missing CIFs will fall back to fresh RFd3"))
         except Exception as exc:
-            print(f"HOF rebuild skipped ({exc}). rescore_pool.py rebuilds it at the end.")
+            print(f"HOF rebuild FAILED ({exc}).")
+            print("  Backbone reuse needs a populated HOF — do not start the new run until "
+                  "this succeeds.")
+            return
 
     print("\nNext: python Generation/rescore_pool.py --dry-run   "
           "(should now list only the designs with no CIF).")
