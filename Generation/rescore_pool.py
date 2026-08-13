@@ -7,7 +7,7 @@ LigandMPNN, computes the calibrated interface features, fills the affected
 round_summary.csv rows in place (each backed up to <name>.bak), and rebuilds the
 per-target HOF from the now-complete pool.
 
-Use this after a run where round summaries show many rows with esm_iptm = NaN
+Use this after a run where round summaries show many rows with esm_plddt = NaN
 (composite_score = 0). Typical case: ADAM10/ADAM17 starved by OOM while the MMPs
 scored fine.
 
@@ -65,12 +65,16 @@ def main():
 
     frames = {c: pd.read_csv(c) for c in csvs}
 
-    # Collect unscored rows (esm_iptm NaN) for the requested targets.
+    # Collect unscored rows (no esm_plddt) for the requested targets.
     to_score = {}   # design_id -> row dict for the scorer
     per_target = {}
     for c, df in frames.items():
-        if "esm_iptm" in df.columns:
-            need = df["esm_iptm"].isna()
+        # Key on esm_plddt, NOT esm_iptm: esm_plddt (with the interface features) is
+        # what calc_composite's ESMFold2 branch actually reads, and recover_from_cifs.py
+        # fills it from saved structures while leaving esm_iptm blank by design. Keying
+        # on esm_iptm would re-fold every CIF-recovered design for nothing.
+        if "esm_plddt" in df.columns:
+            need = df["esm_plddt"].isna()
         else:
             need = pd.Series(True, index=df.index)
         need &= df["target_name"].isin(args.targets)
@@ -134,7 +138,7 @@ def main():
             changed = False
             for i, r in df.iterrows():
                 did = r.get("design_id")
-                already = ("esm_iptm" in df.columns) and pd.notna(r.get("esm_iptm"))
+                already = ("esm_plddt" in df.columns) and pd.notna(r.get("esm_plddt"))
                 if did in feats and not already:
                     m = feats[did]
                     merged = {**r.to_dict(), **m, "source": "ESMFold2"}
@@ -161,7 +165,7 @@ def main():
     all_scored = []
     for c in csvs:
         df = pd.read_csv(c)
-        df = df[pd.to_numeric(df.get("esm_iptm"), errors="coerce").notna()]
+        df = df[pd.to_numeric(df.get("esm_plddt"), errors="coerce").notna()]
         all_scored.extend(df.to_dict("records"))
     for t in refiner.active_targets:
         refiner.state["hof"][t] = []
