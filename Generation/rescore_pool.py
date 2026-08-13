@@ -211,8 +211,13 @@ def main():
     all_scored = []
     for c in csvs:
         df = pd.read_csv(c)
-        df = df[pd.to_numeric(df.get("esm_plddt"), errors="coerce").notna()]
-        all_scored.extend(df.to_dict("records"))
+        # Column check, not df.get(): a summary with no scored rows has no esm_plddt
+        # column, and pd.to_numeric(None) returns a numpy scalar with no .notna().
+        if "esm_plddt" not in df.columns:
+            continue
+        df = df[pd.to_numeric(df["esm_plddt"], errors="coerce").notna()]
+        all_scored.extend({k: (v.item() if isinstance(v, np.generic) else v)
+                           for k, v in rec.items()} for rec in df.to_dict("records"))
     for t in refiner.active_targets:
         refiner.state["hof"][t] = []
     refiner.update_hof(all_scored)

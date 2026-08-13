@@ -752,9 +752,21 @@ class IterativeRefiner:
         self._save_state()
 
     def _save_state(self) -> None:
+        # numpy scalars reach the HOF whenever entries originate from a DataFrame
+        # (AF3/ESM imports, rescore_pool, recover_from_cifs) and json.dump cannot
+        # serialize them — losing the whole state file over one int64.
+        def _jsonable(o):
+            if isinstance(o, np.generic):
+                return o.item()
+            if isinstance(o, (np.ndarray, set)):
+                return list(o)
+            if isinstance(o, Path):
+                return str(o)
+            return str(o)
+
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.state_path, "w") as f:
-            json.dump(self.state, f, indent=2)
+            json.dump(self.state, f, indent=2, default=_jsonable)
 
     # ── HOF backbone reuse (exploit) ──────────────────────────────────────────
 

@@ -247,8 +247,16 @@ def main():
             scored = []
             for csv in csvs:
                 d = pd.read_csv(csv)
-                d = d[pd.to_numeric(d.get("esm_plddt"), errors="coerce").notna()]
-                scored.extend(d.to_dict("records"))
+                # Column check, not df.get(): a summary with no scored rows has no
+                # esm_plddt column at all, and pd.to_numeric(None) returns a numpy
+                # scalar whose .notna() does not exist.
+                if "esm_plddt" not in d.columns:
+                    continue
+                d = d[pd.to_numeric(d["esm_plddt"], errors="coerce").notna()]
+                # CSV records carry numpy scalars; the HOF is persisted as JSON,
+                # which cannot serialize them.
+                scored.extend({k: (v.item() if isinstance(v, np.generic) else v)
+                               for k, v in rec.items()} for rec in d.to_dict("records"))
             for t in targets:
                 refiner.state["hof"][t] = []
             refiner.update_hof(scored)
@@ -271,7 +279,9 @@ def main():
             print(f"HOF backbones resolvable for reuse: {ok}/{tot}"
                   + ("" if ok == tot else "  <-- missing CIFs will fall back to fresh RFd3"))
         except Exception as exc:
-            print(f"HOF rebuild FAILED ({exc}).")
+            import traceback
+            print(f"HOF rebuild FAILED ({type(exc).__name__}: {exc}).")
+            traceback.print_exc()
             print("  Backbone reuse needs a populated HOF — do not start the new run until "
                   "this succeeds.")
             return
