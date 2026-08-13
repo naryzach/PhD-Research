@@ -21,10 +21,17 @@ It reuses the pipeline's own ESMFold2 scorer and composite, so recovered rows ar
 identical in format to a clean run. Idempotent: already-scored rows are skipped.
 """
 import argparse
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+# Set before iterative_refinement (and therefore torch) is imported, so the scorer
+# children inherit it. Cuts the fragmentation that makes long fold batches die
+# partway — the run_generation.sh launcher already does this; a bare
+# `python rescore_pool.py` would otherwise miss out.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import pandas as pd
 import numpy as np
@@ -96,10 +103,13 @@ def main():
         print("Preflight: folding a test complex through the real scorer path (~1-2 min)...",
               flush=True)
         rc = subprocess.call([sys.executable, str(Path(ir.__file__).parent / "esmfold2_smoketest.py")])
+        if rc == 2:
+            sys.exit("\nABORTING: the GPU is out of memory — the environment is fine.\n"
+                     "  Free the card (kill the process named above, or pin this job to a free\n"
+                     "  GPU with CUDA_VISIBLE_DEVICES=<n>), then re-run. Nothing was modified.")
         if rc != 0:
-            sys.exit("\nABORTING: ESMFold2 cannot fold in this environment (see output above).\n"
-                     "  Fix the env — activate the esmfold2 env, or set ESMFOLD2_PYTHON, or\n"
-                     "  export DISABLE_CUEQUIVARIANCE=1 — then re-run. Nothing was modified.")
+            sys.exit("\nABORTING: ESMFold2 could not fold (see the error above).\n"
+                     "  Nothing was modified.")
         print("Preflight OK.\n", flush=True)
 
     # Re-fold with ESMFold2 (reuses the pipeline's GPU-sharded scorer), in chunks so
