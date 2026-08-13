@@ -144,7 +144,12 @@ def main():
         feats = {did: {**m, **_esm_iface_feats(m.get("esm_cif"))} for did, m in scores.items()}
 
         # Fill the affected round_summary rows in place (with .bak backups).
-        for c, df in frames.items():
+        # Re-read each summary fresh rather than trusting the startup snapshot: this
+        # job runs for hours, and recover_from_cifs.py (or a second rescore) may have
+        # filled rows in the meantime. Writing a stale in-memory frame back is exactly
+        # how a killed job wiped it_0/it_1's recovered scores.
+        for c in list(frames):
+            df = pd.read_csv(c)
             changed = False
             for i, r in df.iterrows():
                 did = r.get("design_id")
