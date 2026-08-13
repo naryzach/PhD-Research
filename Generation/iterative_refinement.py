@@ -259,6 +259,16 @@ ESMFOLD2_PYTHON     = os.environ.get(
 )
 ESMFOLD2_SCRIPT     = str(_HERE / "score_with_esmfold2.py")
 ESMFOLD2_TIMEOUT_S  = 3600   # whole-batch timeout (model load + N designs)
+# Extra flags appended to every scorer invocation. rescore_pool.py sets
+# ["--resume"] so a shard killed mid-batch restarts from its partial CSV
+# instead of re-folding everything it already did.
+ESMFOLD2_EXTRA_ARGS: list = []
+# Strict mode: if a whole target batch comes back with ZERO scores, the ranker is
+# dead and every further iteration is wasted GPU time producing an unranked pool
+# (the Aug-3 failure: 37 iterations, 22,200 designs, source=unscored throughout).
+# Abort with EXIT_ESMFOLD2_DEAD, which the launchers treat as non-retryable.
+ESMFOLD2_STRICT     = True
+EXIT_ESMFOLD2_DEAD  = 3
 # Save the ESMFold2-predicted complex per design. The structure is already
 # computed during folding, so this is ~free (disk I/O only, no extra GPU time);
 # it gives an inspectable predicted complex from the actual ranker, and feeds
@@ -899,6 +909,7 @@ class IterativeRefiner:
         cmd = [ESMFOLD2_PYTHON, ESMFOLD2_SCRIPT, "--input", str(in_csv), "--out", str(out_csv)]
         if SAVE_ESMFOLD2_STRUCTURES:
             cmd += ["--cif-dir", str(out_dir / "structures")]
+        cmd += ESMFOLD2_EXTRA_ARGS
 
         child_env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
         if gpu is not None:
@@ -936,22 +947,31 @@ class IterativeRefiner:
 
         merged: dict = {}
         for proc, out_csv in procs:
+            # A shard that dies (CUDA OOM, cgroup kill) or times out has still written
+            # every fold it completed to out_csv — the scorer appends per design. Log
+            # the failure but fall through and harvest the partial CSV; discarding it
+            # is what turned single-shard deaths into whole-run scoring losses.
             try:
                 _, stderr = proc.communicate(timeout=ESMFOLD2_TIMEOUT_S)
                 if proc.returncode != 0:
-                    logger.warning(f"ESMFold2 shard failed: {stderr[-400:].strip()}")
-                    continue
+                    logger.warning(f"ESMFold2 shard failed (rc={proc.returncode}); keeping "
+                                   f"any partial scores: {stderr[-400:].strip()}")
             except subprocess.TimeoutExpired:
                 proc.kill()
-                logger.warning(f"ESMFold2 shard timed out (>{ESMFOLD2_TIMEOUT_S}s)")
-                continue
+                logger.warning(f"ESMFold2 shard timed out (>{ESMFOLD2_TIMEOUT_S}s); "
+                               "keeping any partial scores")
             except FileNotFoundError:
                 logger.error(f"ESMFold2 python not found at: {ESMFOLD2_PYTHON}\n"
                              "  Set ESMFOLD2_PYTHON or ESMFOLD2_ENABLE=False.")
                 return {}
             if not out_csv.exists():
                 continue
-            df = pd.read_csv(out_csv)
+            try:
+                # on_bad_lines: a shard killed mid-append can leave a truncated last row
+                df = pd.read_csv(out_csv, on_bad_lines="skip")
+            except Exception as exc:
+                logger.warning(f"Could not read {out_csv.name}: {exc}")
+                continue
             for _, r in df.iterrows():
                 rec = {"esm_iptm": float(r.get("esm_iptm", float("nan"))),
                        "esm_ptm":   float(r.get("esm_ptm", float("nan"))),
@@ -1017,6 +1037,16 @@ class IterativeRefiner:
 
         logger.info(f"[{target_name}] ESMFold2 done in {(time.time()-t0)/60:.1f} min "
                     f"({n_done}/{len(candidates)} scored)")
+        if ESMFOLD2_STRICT and rows and n_done == 0:
+            logger.error(
+                f"[{target_name}] ESMFold2 scored 0 of {len(rows)} designs — the ranker is "
+                "not working, so the anneal has no signal and every further iteration would "
+                "just grow an unranked pool.\n"
+                f"  Verify the environment:  python {_HERE / 'esmfold2_smoketest.py'}\n"
+                "  Then relaunch — saved state means nothing generated so far is lost.\n"
+                "  (Set ESMFOLD2_STRICT=False only if you deliberately want an unranked pool.)"
+            )
+            raise SystemExit(EXIT_ESMFOLD2_DEAD)
         return candidates
 
     # ── RFd3 ─────────────────────────────────────────────────────────────────

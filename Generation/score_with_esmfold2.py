@@ -328,6 +328,9 @@ def main():
                     help="If set, write each predicted complex CIF/PDB here "
                          "(free — structure is already computed). Path recorded as esm_cif.")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--resume", action="store_true",
+                    help="Skip design_ids already present in --out (the CSV is appended to "
+                         "as each fold completes, so a killed run restarts where it stopped).")
     args = ap.parse_args()
 
     # Fail fast on a broken CUDA/torch setup BEFORE the slow model download.
@@ -359,6 +362,20 @@ def main():
     if designs.empty:
         sys.exit("No designs selected to score.")
 
+    if args.resume and Path(args.out).exists():
+        try:
+            done = set(pd.read_csv(args.out, usecols=["design_id"])["design_id"].astype(str))
+        except Exception:
+            done = set()
+        if done:
+            before = len(designs)
+            designs = designs[~designs["design_id"].astype(str).isin(done)]
+            print(f"--resume: {len(done)} already scored in {args.out}; "
+                  f"{len(designs)}/{before} left.")
+        if designs.empty:
+            print("Nothing left to score (all design_ids already in --out).")
+            return
+
     print(f"Loading ESMFold2 on {args.device} ... (large model; first load is slow)")
     model, builder = load_model(args.device)
 
@@ -368,7 +385,8 @@ def main():
         cif_dir.mkdir(parents=True, exist_ok=True)
 
     has_loops = "design_loops" in designs.columns
-    rows, n_ok = [], 0
+    out_path = Path(args.out)
+    n_ok = 0
     for i, d in enumerate(designs.itertuples(index=False), 1):
         bseq, tseq = d.full_seq, d.target_seq
         if not isinstance(bseq, str) or not isinstance(tseq, str) or not bseq or not tseq:
@@ -378,18 +396,26 @@ def main():
             stub = str(cif_dir / str(d.design_id)) if cif_dir else None
             metrics = predict_complex(model, builder, bseq, tseq, len(bseq),
                                       seed=args.seed, cif_stub=stub, design_loops=dloops)
-            rows.append({"design_id": d.design_id, "target_name": d.target_name,
-                         "full_seq": bseq, **metrics})
+            row = {"design_id": d.design_id, "target_name": d.target_name,
+                   "full_seq": bseq, "esm_iptm": np.nan, "esm_ptm": np.nan,
+                   "esm_plddt": np.nan, "esm_lplddt": np.nan, "esm_pae": np.nan,
+                   "esm_cif": "", **metrics}
+            # Append-as-we-go: a hard process kill (CUDA OOM / cgroup OOM-killer)
+            # then costs one design instead of the whole batch. Pair with --resume.
+            # The key order above is fixed so appended rows always match the header
+            # even when a structure fails to save (no esm_cif in `metrics`).
+            pd.DataFrame([row]).to_csv(out_path, mode="a", index=False,
+                                       header=not out_path.exists())
             n_ok += 1
             print(f"  [{i}/{len(designs)}] {d.design_id}: "
                   f"ipTM={metrics['esm_iptm']:.3f}  pLDDT={metrics['esm_plddt']:.1f}  "
-                  f"LpLDDT={metrics['esm_lplddt']:.1f}  loopPAE={metrics['esm_pae']:.1f}")
+                  f"LpLDDT={metrics['esm_lplddt']:.1f}  loopPAE={metrics['esm_pae']:.1f}",
+                  flush=True)
         except Exception as exc:
-            print(f"  [{i}/{len(designs)}] {d.design_id}: ERROR {exc}")
+            print(f"  [{i}/{len(designs)}] {d.design_id}: ERROR {exc}", flush=True)
 
-    if rows:
-        pd.DataFrame(rows).to_csv(args.out, index=False)
-        print(f"\nWrote {n_ok} ESMFold2 scores -> {args.out}")
+    if out_path.exists():
+        print(f"\nWrote {n_ok} ESMFold2 scores -> {out_path}")
         print("Validate against AF3 by joining an AF3 results zip to this CSV by "
               "binder sequence (Spearman + top-K vs AF3 ipTM); see filter_methods.md.")
     else:

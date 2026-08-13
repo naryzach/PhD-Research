@@ -76,16 +76,35 @@ LOG="$LOG_DIR/gen_$(date +%Y%m%d_%H%M%S).log"
 # to the active interpreter. Only set ESMFOLD2_PYTHON yourself if ESMFold2 lives in
 # a different env than the one you launch this from.
 export ESMFOLD2_PYTHON="${ESMFOLD2_PYTHON:-$(command -v python)}"
+# Unbuffered: the pipeline's own log lines go to stderr, which block-buffers into
+# the tee pipe. A hard kill (OOM) then discards the buffer — which is exactly how
+# the Aug-3 run lost every "[TARGET] ESMFold2 done (N/M scored)" line and hid a
+# total scoring failure for 9 days. Do not remove.
+export PYTHONUNBUFFERED=1
 echo "ESMFOLD2_PYTHON=$ESMFOLD2_PYTHON" | tee -a "$LOG"
-if [[ ! -x "$ESMFOLD2_PYTHON" ]]; then
-  echo "WARNING: '$ESMFOLD2_PYTHON' is not an executable python — ESMFold2 ranking will be SKIPPED." | tee -a "$LOG"
-elif ! "$ESMFOLD2_PYTHON" -c "import esm" >/dev/null 2>&1; then
-  echo "WARNING: '$ESMFOLD2_PYTHON' cannot 'import esm' — ESMFold2 ranking will be SKIPPED" | tee -a "$LOG"
-  echo "         (designs would fall back to the foldability floor only)." | tee -a "$LOG"
-  echo "         Fix: run with your ESMFold2-capable env active, or set" | tee -a "$LOG"
-  echo "           export ESMFOLD2_PYTHON=/path/to/that/env/bin/python" | tee -a "$LOG"
+
+# Reflexive fold test — NOT `import esm`. The foundry env imports esm cleanly and
+# still fails at fold time; that is how the Aug-3 run burned nine days producing
+# 22,200 designs with source=unscored. Costs ~1-2 min against a multi-day run, and
+# a failure ABORTS: an unranked pool is worse than no pool, and this script will
+# never try to patch or shim the environment into working.
+if [[ "${SKIP_ESM_PREFLIGHT:-0}" == "1" ]]; then
+  echo "WARNING: SKIP_ESM_PREFLIGHT=1 — launching WITHOUT proving ESMFold2 can fold." | tee -a "$LOG"
 else
-  echo "ESMFold2 backend (esm) import OK." | tee -a "$LOG"
+  echo "Preflight: folding a test complex through the real scorer path (~1-2 min)..." | tee -a "$LOG"
+  if python "$HERE/esmfold2_smoketest.py" >>"$LOG" 2>&1; then
+    echo "Preflight OK: ESMFold2 folded a test complex." | tee -a "$LOG"
+  else
+    {
+      echo "FATAL: ESMFold2 preflight fold FAILED — aborting before any GPU time is spent."
+      echo "       interpreter: $ESMFOLD2_PYTHON"
+      echo "       Full diagnostics are in: $LOG"
+      echo "       Re-run the check on its own with:  python $HERE/esmfold2_smoketest.py"
+      echo "       Fix the environment (activate esmfold2 / set ESMFOLD2_PYTHON /"
+      echo "       export DISABLE_CUEQUIVARIANCE=1), then relaunch."
+    } | tee -a "$LOG"
+    exit 1
+  fi
 fi
 
 if [[ "${FRESH:-0}" == "1" ]]; then
@@ -138,6 +157,15 @@ while (( attempt <= MAX_RETRIES )); do
   if (( rc == 0 )); then
     echo "=== generation completed cleanly at $(date) ===" | tee -a "$LOG"
     break
+  fi
+  if (( rc == 3 )); then   # EXIT_ESMFOLD2_DEAD — retrying cannot fix a dead ranker
+    {
+      echo "=== ABORTED at $(date): ESMFold2 scored 0 designs for a whole target ==="
+      echo "    Not retrying — this is an environment fault, not a transient crash."
+      echo "    Check:  python $HERE/esmfold2_smoketest.py"
+      echo "    Saved state is intact; relaunch (without FRESH=1) to resume."
+    } | tee -a "$LOG"
+    exit 3
   fi
   attempt=$((attempt+1))
   echo "!!! exited rc=$rc — resuming from saved state ($attempt/$MAX_RETRIES) after 30s" | tee -a "$LOG"

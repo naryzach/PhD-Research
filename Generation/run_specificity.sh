@@ -46,14 +46,26 @@ LOG="$LOG_DIR/spec_$(date +%Y%m%d_%H%M%S).log"
 
 # ── Preflight (ESMFold2 subprocess python) ───────────────────────────────────
 export ESMFOLD2_PYTHON="${ESMFOLD2_PYTHON:-$(command -v python)}"
+export PYTHONUNBUFFERED=1   # see run_generation.sh — keeps the scoring log lines
+                            # from being lost in the stderr buffer on a hard kill
 echo "ESMFOLD2_PYTHON=$ESMFOLD2_PYTHON" | tee -a "$LOG"
-if [[ ! -x "$ESMFOLD2_PYTHON" ]]; then
-  echo "WARNING: '$ESMFOLD2_PYTHON' is not an executable python — ESMFold2 ranking will be SKIPPED." | tee -a "$LOG"
-elif ! "$ESMFOLD2_PYTHON" -c "import esm" >/dev/null 2>&1; then
-  echo "WARNING: '$ESMFOLD2_PYTHON' cannot 'import esm' — ESMFold2 ranking will be SKIPPED." | tee -a "$LOG"
-  echo "         Fix: run with your ESMFold2-capable env active, or export ESMFOLD2_PYTHON=/path/to/env/bin/python" | tee -a "$LOG"
+
+# Reflexive fold test, hard gate — see run_generation.sh for the rationale.
+# `import esm` is not evidence that a fold will succeed.
+if [[ "${SKIP_ESM_PREFLIGHT:-0}" == "1" ]]; then
+  echo "WARNING: SKIP_ESM_PREFLIGHT=1 — launching WITHOUT proving ESMFold2 can fold." | tee -a "$LOG"
 else
-  echo "ESMFold2 backend (esm) import OK." | tee -a "$LOG"
+  echo "Preflight: folding a test complex through the real scorer path (~1-2 min)..." | tee -a "$LOG"
+  if python "$HERE/esmfold2_smoketest.py" >>"$LOG" 2>&1; then
+    echo "Preflight OK: ESMFold2 folded a test complex." | tee -a "$LOG"
+  else
+    {
+      echo "FATAL: ESMFold2 preflight fold FAILED — aborting before any GPU time is spent."
+      echo "       interpreter: $ESMFOLD2_PYTHON"
+      echo "       Diagnostics in: $LOG    Re-check: python $HERE/esmfold2_smoketest.py"
+    } | tee -a "$LOG"
+    exit 1
+  fi
 fi
 
 if [[ "${FRESH:-0}" == "1" && -f "$STATE" ]]; then
@@ -89,6 +101,14 @@ while (( attempt <= MAX_RETRIES )); do
   if (( rc == 0 )); then
     echo "=== specificity generation completed cleanly at $(date) ===" | tee -a "$LOG"
     break
+  fi
+  if (( rc == 3 )); then   # EXIT_ESMFOLD2_DEAD — retrying cannot fix a dead ranker
+    {
+      echo "=== ABORTED at $(date): ESMFold2 scored 0 designs for a whole target ==="
+      echo "    Not retrying — environment fault. Check: python $HERE/esmfold2_smoketest.py"
+      echo "    Saved state is intact; relaunch (without FRESH=1) to resume."
+    } | tee -a "$LOG"
+    exit 3
   fi
   attempt=$((attempt+1))
   echo "!!! exited rc=$rc — resuming from saved state ($attempt/$MAX_RETRIES) after 30s" | tee -a "$LOG"
