@@ -11,6 +11,8 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
+from utils import format_dates, to_datetime
+
 # Friendly headers, shared by every history screen.
 LABELS = {
     "request_id": "Req #", "item_name": "Item Name", "requester_name": "Requested By",
@@ -116,7 +118,7 @@ def render_filter_bar(df, table, key, show_scope_toggle=True):
             )
         with r2c3:
             date_col = "request_date" if "request_date" in work.columns else "date_added"
-            dates = pd.to_datetime(work[date_col], errors="coerce") if date_col in work.columns else pd.Series(dtype="datetime64[ns]")
+            dates = to_datetime(work[date_col]) if date_col in work.columns else pd.Series(dtype="datetime64[ns]")
             valid = dates.dropna()
             if not valid.empty:
                 lo, hi = valid.min().date(), valid.max().date()
@@ -167,7 +169,7 @@ def render_filter_bar(df, table, key, show_scope_toggle=True):
     if pick_people and people_col in work.columns:
         work = work[_series_str(work, people_col).isin(pick_people)]
     if picked and isinstance(picked, (tuple, list)) and len(picked) == 2 and date_col in work.columns:
-        col_dates = pd.to_datetime(work[date_col], errors="coerce")
+        col_dates = to_datetime(work[date_col])
         start, end = pd.Timestamp(picked[0]), pd.Timestamp(picked[1]) + pd.Timedelta(days=1)
         # Undated rows are kept rather than silently dropped by a date filter.
         work = work[col_dates.isna() | ((col_dates >= start) & (col_dates < end))]
@@ -226,7 +228,7 @@ def render_table(df, columns, key, table="purchase_requests", page_size_default=
     )
     for col in ("Date Requested", "Date Added", "Last Update", "Depleted On"):
         if col in display.columns:
-            display[col] = pd.to_datetime(display[col], errors="coerce").dt.strftime("%Y-%m-%d")
+            display[col] = format_dates(display[col])
     st.dataframe(display.fillna(""), hide_index=True, width='stretch',
                  column_config={"Link": st.column_config.LinkColumn("Link", display_text="open")}
                  if "Link" in display.columns else None)

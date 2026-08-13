@@ -1,4 +1,34 @@
+import pandas as pd
 import streamlit as st
+
+
+def to_datetime(values):
+    """Parse a column of timestamps that may arrive in mixed formats.
+
+    SQLite stores timestamps as text, and rows written at different times carry
+    different precision — "2026-04-15 01:37:15.333446" alongside
+    "2026-01-02 00:00:00". pandas infers a single format from the first value
+    and then raises on anything that does not match it, so parsing has to be
+    per-element. Passing only errors="coerce" is not enough either: it silences
+    the crash by turning every mismatched date into NaT, which shows up as a
+    blank date in the UI.
+
+    Postgres returns real datetimes, so this is a no-op there.
+    """
+    series = values if isinstance(values, pd.Series) else pd.Series(values)
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return series
+    try:
+        return pd.to_datetime(series, format="mixed", errors="coerce")
+    except (ValueError, TypeError):
+        # format="mixed" needs pandas >= 2.0; fall back on older versions.
+        return pd.to_datetime(series, errors="coerce")
+
+
+def format_dates(series, fmt="%Y-%m-%d", blank=""):
+    """Mixed-format-safe timestamp column -> display strings."""
+    return to_datetime(series).dt.strftime(fmt).fillna(blank)
+
 
 def _is_blank(value):
     """

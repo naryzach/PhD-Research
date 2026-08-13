@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 import smtplib
 from email.message import EmailMessage
 import time
-from utils import display_tracking_button, color_status, highlight_low_stock, color_inventory_matches
+from utils import (display_tracking_button, color_status, highlight_low_stock,
+                   color_inventory_matches, format_dates)
 
 # --- Smart Defaults Configuration ---
 CATEGORY_DEFAULTS = {
@@ -45,7 +46,7 @@ st.set_page_config(page_title="Lab Manager", layout="wide", page_icon="🔬")
 st.title("Lab Manager")
 
 menu = ["Inventory Dashboard", "Request a Purchase", "Process Orders", "Log Usage",
-        "📚 Order History", "Metrics & History"]
+        "Order History", "Metrics & History"]
 choice = st.sidebar.radio("Navigation", menu)
 
 if choice == "Inventory Dashboard":
@@ -432,7 +433,7 @@ elif choice == "Process Orders":
         display_df = df_pending[['item_name', 'specs', 'keep_on_ice', 'status', 'status_updated_at']].copy()
 
         # Format dates for readability
-        display_df['status_updated_at'] = pd.to_datetime(display_df['status_updated_at']).dt.strftime('%Y-%m-%d')
+        display_df['status_updated_at'] = format_dates(display_df['status_updated_at'])
 
         # Add visual indicator for ice BEFORE renaming
         display_df['keep_on_ice'] = display_df['keep_on_ice'].apply(lambda x: "❄️ YES" if x else "No")
@@ -577,10 +578,10 @@ elif choice == "Log Usage":
     else:
         st.warning("Inventory is currently empty or fully depleted.")
 
-elif choice == "📚 Order History":
+elif choice == "Order History":
     import history_view as hv
 
-    st.header("📚 Order History")
+    st.header("Order History")
     st.caption(
         "Every order the lab has placed, including the years backfilled from the Excel "
         "order workbook. Use the controls to narrow things down, pick your columns, and "
@@ -705,7 +706,7 @@ elif choice == "Metrics & History":
         '''
         df_recent = db.get_query_df(recent_query)
         # Clean up the timestamp for nicer display
-        df_recent['date_used'] = pd.to_datetime(df_recent['date_used']).dt.strftime('%Y-%m-%d %H:%M')
+        df_recent['date_used'] = format_dates(df_recent['date_used'], '%Y-%m-%d %H:%M')
         st.dataframe(df_recent.rename(columns={
             "name": "Item", "user_name": "User", "amount_used": "Amount", "unit": "Unit", "date_used": "Date & Time"
         }), hide_index=True, width='stretch')

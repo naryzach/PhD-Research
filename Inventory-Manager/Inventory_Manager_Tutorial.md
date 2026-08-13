@@ -106,64 +106,7 @@ Keep the data clean with these tools:
 - **Cancel Stale Requests**: Clears out old drafts or requests that were never acted upon.
 - **Table Editor**: Directly edit cells in the `inventory`, `purchase_requests`, or `usage_log` tables—just like an Excel sheet. Don't forget to click **Save Changes**.
 
-### 4. Import Historical Data
-Loads the lab's Excel order workbook so past orders become searchable in the app.
-
-**Clean the workbook first.** `clean_workbook.py` writes a corrected *copy* (the original
-is never touched):
-
-```bash
-python clean_workbook.py "Sarmazdeh's Lab Orders.xlsx"
-```
-
-That produces `Sarmazdeh's Lab Orders (CLEANED).xlsx` containing a `Read Me` sheet, an
-`All Orders` sheet, the per-term sheets, and a `Cleaning Log` recording every change.
-Import that file. (The importer reads the original too, but the cleaned copy gives
-consolidated vendor names and repaired dates and prices.)
-
-**Before importing**: download a backup from **📥 Export Data (CSV) → Cloud Snapshot (JSON)**.
-
-1. Upload the `.xlsx`.
-2. Press **🔍 Analyze workbook (dry run)**. Nothing is written yet — you get counts by
-   status and term, a preview of the rows to import, the rows being skipped as
-   duplicates, and a list of rows with gaps or oddities in the workbook itself.
-3. Tick the confirmation box and press **🚀 Run import**.
-
-Three settings worth understanding:
-
-- **Treat everything imported as received and used up** (on by default). If a line is old
-  enough to be in the workbook but is not already in the live database, the lab has been
-  and gone through it — so it is recorded as `Received`. Where the workbook said something
-  else (cancelled, lost, never ordered), that original status is preserved in the item's
-  specs as `Workbook status: …` so it stays identifiable.
-- **Create legacy inventory rows** (on by default). Each imported line also gets an
-  inventory row with quantity 0, flagged depleted and archived. They stay searchable — the
-  purchase wizard surfaces them under "Archived / Legacy Items" — but never affect live
-  stock or low-stock alerts.
-- **Duplicate window (days)**. A line counts as already recorded only when an existing
-  request matches its catalog number or name *and* falls within this many days. Matching
-  on catalog number alone would be wrong: the lab re-buys the same products every term,
-  so a bare catalog hit means "we still stock this", not "this order is already recorded".
-
-**How statuses are read**: the older sheets record status as the *fill colour* of the
-Status cell (matching each sheet's colour legend), and the Status text column actually
-holds who received it and when. The newest sheets write a status word as text. Both are
-handled automatically; the cleaned copy writes every status out as text.
-
-**Undoing**: every import is tagged with a batch label. The **↩️ Undo a previous import**
-section at the bottom of the page deletes everything a batch created, in one step.
-
-**From the command line** (same logic, no browser):
-
-```bash
-python historical_import.py "Sarmazdeh's Lab Orders (CLEANED).xlsx"
-```
-
-That is a dry run. Add `--apply` to commit, `--batch <label>` to name it, and
-`--undo <label>` to roll it back. `--keep-workbook-status` imports each row with its
-original status instead of assuming everything was received and used.
-
-### 5. System Settings
+### 4. System Settings
 
 - **Instant Notifications**: Toggle this on to receive an email the *moment* a new request is submitted.
 - **Digest Layout**: Choose between "Abbreviated" (one line per item) or "Detailed" (shows all specs and links) for your weekly emails.
@@ -180,6 +123,5 @@ original status instead of assuming everything was received and used.
 | **Tracking Integration**| Direct links to FedEx/UPS/USPS from within the app. | Admin/Researchers |
 | **Smart Defaults** | Automatically sets units and reorder points by category. | Admin |
 | **Financial Analytics**| Visual bar charts of spending over time by vendor and category. | Admin/PI |
-| **Historical Import** | Loads years of Excel order sheets, reading status from cell colours. | Admin |
 | **Order History** | Filter, sort, hide/show and export the full multi-year order record. | Everyone |
 | **Instant Alerts** | Real-time email notifications for urgent requests. | Admin |
