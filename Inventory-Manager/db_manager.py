@@ -16,8 +16,17 @@ class AdvancedLabInventory:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         self.db_path = db_name or os.path.join(base_dir, "lab_inventory.db")
         
-        # Check if Supabase/PostgreSQL secrets are available
-        if "connections" in st.secrets and "postgresql" in st.secrets.connections:
+        # Check if Supabase/PostgreSQL secrets are available.
+        # st.secrets raises (rather than returning empty) when there is no
+        # secrets.toml at all, so the lookup itself has to be guarded — without
+        # this, running the app or any script outside a configured environment
+        # blows up instead of falling back to the local SQLite file.
+        try:
+            has_pg = "connections" in st.secrets and "postgresql" in st.secrets.connections
+        except Exception:
+            has_pg = False
+
+        if has_pg:
             try:
                 # Add aggressive pooling to avoid client limits in Supabase Session Mode
                 self._conn = st.connection(
@@ -71,7 +80,10 @@ class AdvancedLabInventory:
                 date_added TIMESTAMP,
                 is_depleted BOOLEAN DEFAULT {bool_default},
                 last_depleted TIMESTAMP,
-                archived BOOLEAN DEFAULT {bool_default}
+                archived BOOLEAN DEFAULT {bool_default},
+                source_sheet TEXT,
+                is_historical BOOLEAN DEFAULT {bool_default},
+                import_batch TEXT
             )
             """,
             f"""
@@ -91,7 +103,10 @@ class AdvancedLabInventory:
                 courier TEXT,
                 order_number TEXT,
                 request_date TIMESTAMP DEFAULT {ts_default},
-                status_updated_at TIMESTAMP DEFAULT {ts_default}
+                status_updated_at TIMESTAMP DEFAULT {ts_default},
+                source_sheet TEXT,
+                is_historical BOOLEAN DEFAULT {bool_default},
+                import_batch TEXT
             )
             """,
             f"""
@@ -133,7 +148,20 @@ class AdvancedLabInventory:
                 self.execute("ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS shipping_number TEXT")
                 self.execute("ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS courier TEXT")
                 self.execute("ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS order_number TEXT")
-                
+
+                # Legacy-import bookkeeping: which term sheet a row came from,
+                # whether it is backfilled history, and which batch created it.
+                for _tbl in ("inventory", "purchase_requests"):
+                    self.execute(f"ALTER TABLE {_tbl} ADD COLUMN IF NOT EXISTS source_sheet TEXT")
+                    self.execute(f"ALTER TABLE {_tbl} ADD COLUMN IF NOT EXISTS is_historical BOOLEAN DEFAULT FALSE")
+                    self.execute(f"ALTER TABLE {_tbl} ADD COLUMN IF NOT EXISTS import_batch TEXT")
+                    self.execute(f"UPDATE {_tbl} SET is_historical = FALSE WHERE is_historical IS NULL")
+                # Import batches are queried on every history page load.
+                self.execute("CREATE INDEX IF NOT EXISTS idx_pr_historical ON purchase_requests (is_historical)")
+                self.execute("CREATE INDEX IF NOT EXISTS idx_pr_batch ON purchase_requests (import_batch)")
+                self.execute("CREATE INDEX IF NOT EXISTS idx_inv_historical ON inventory (is_historical)")
+                self.execute("CREATE INDEX IF NOT EXISTS idx_inv_batch ON inventory (import_batch)")
+
                 # Sync ALL sequences to prevent UniqueViolation
                 with self._conn.session as s:
                     tables_to_sync = {
@@ -162,7 +190,7 @@ class AdvancedLabInventory:
                         pass
                 
                 # Purchase requests migration
-                for col, col_type in [("quantity", "REAL DEFAULT 1.0"), 
+                for col, col_type in [("quantity", "REAL DEFAULT 1.0"),
                                       ("keep_on_ice", "BOOLEAN DEFAULT 0"),
                                       ("status_updated_at", "TIMESTAMP"),
                                       ("shipping_number", "TEXT"),
@@ -172,6 +200,20 @@ class AdvancedLabInventory:
                         self.execute(f"ALTER TABLE purchase_requests ADD COLUMN {col} {col_type}")
                         if col == "status_updated_at":
                             self.execute("UPDATE purchase_requests SET status_updated_at = request_date WHERE status_updated_at IS NULL")
+                    except Exception:
+                        pass
+
+                # Legacy-import bookkeeping (see the Postgres branch above).
+                for _tbl in ("inventory", "purchase_requests"):
+                    for col, col_type in [("source_sheet", "TEXT"),
+                                          ("is_historical", "BOOLEAN DEFAULT 0"),
+                                          ("import_batch", "TEXT")]:
+                        try:
+                            self.execute(f"ALTER TABLE {_tbl} ADD COLUMN {col} {col_type}")
+                        except Exception:
+                            pass
+                    try:
+                        self.execute(f"UPDATE {_tbl} SET is_historical = 0 WHERE is_historical IS NULL")
                     except Exception:
                         pass
             self.commit()
@@ -317,14 +359,16 @@ class AdvancedLabInventory:
 
     def search_similar_items(self, search_term):
         term = f"%{search_term}%"
+        # "req" drives the duplicate-request warning, so it must only show
+        # genuinely open orders — never a backfilled 2021 line.
         if self.is_postgres:
             inv = self.get_query_df("SELECT * FROM inventory WHERE (name ILIKE :term OR catalog_number ILIKE :term) AND archived IS FALSE", {"term": term})
-            archived = self.get_query_df("SELECT * FROM inventory WHERE (name ILIKE :term OR catalog_number ILIKE :term) AND archived IS TRUE", {"term": term})
-            req = self.get_query_df("SELECT * FROM purchase_requests WHERE (item_name ILIKE :term OR catalog_number ILIKE :term) AND status NOT IN ('Received', 'Cancelled', 'Lost')", {"term": term})
+            archived = self.get_query_df("SELECT * FROM inventory WHERE (name ILIKE :term OR catalog_number ILIKE :term) AND archived IS TRUE ORDER BY date_added DESC", {"term": term})
+            req = self.get_query_df("SELECT * FROM purchase_requests WHERE (item_name ILIKE :term OR catalog_number ILIKE :term) AND status NOT IN ('Received', 'Cancelled', 'Lost') AND is_historical IS NOT TRUE", {"term": term})
         else:
             inv = self.get_query_df("SELECT * FROM inventory WHERE (name LIKE ? OR catalog_number LIKE ?) AND archived = 0", (term, term))
-            archived = self.get_query_df("SELECT * FROM inventory WHERE (name LIKE ? OR catalog_number LIKE ?) AND archived = 1", (term, term))
-            req = self.get_query_df("SELECT * FROM purchase_requests WHERE (item_name LIKE ? OR catalog_number LIKE ?) AND status NOT IN ('Received', 'Cancelled', 'Lost')", (term, term))
+            archived = self.get_query_df("SELECT * FROM inventory WHERE (name LIKE ? OR catalog_number LIKE ?) AND archived = 1 ORDER BY date_added DESC", (term, term))
+            req = self.get_query_df("SELECT * FROM purchase_requests WHERE (item_name LIKE ? OR catalog_number LIKE ?) AND status NOT IN ('Received', 'Cancelled', 'Lost') AND is_historical IS NOT TRUE", (term, term))
         return inv, req, archived
 
     def log_usage(self, item_id, amount, user):
@@ -444,11 +488,14 @@ class AdvancedLabInventory:
             # is considered stale/draft and should be cleaned up.
             terminal_statuses = "('Received', 'Cancelled', 'Lost', 'Completed')"
             
+            # Backfilled history is excluded — rewriting a 2021 line's status
+            # would destroy the record it exists to preserve.
             query = f"""
-                UPDATE purchase_requests 
-                SET status = 'Cancelled' 
-                WHERE status NOT IN {active_statuses} 
+                UPDATE purchase_requests
+                SET status = 'Cancelled'
+                WHERE status NOT IN {active_statuses}
                 AND status NOT IN {terminal_statuses}
+                AND is_historical IS NOT TRUE
             """
             self.execute(query)
             self.commit()

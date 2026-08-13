@@ -66,7 +66,8 @@ PRIMARY_KEYS = {
     "usage_log": "log_id",
 }
 
-menu = ["🔄 Manage Order Status", "✏️ Edit Tables Directly", "📥 Export Data (CSV)", "💻 Advanced: Raw SQL", "🛠️ Database Maintenance", "⚙️ System Settings"]
+menu = ["🔄 Manage Order Status", "✏️ Edit Tables Directly", "📤 Import Historical Data",
+        "📥 Export Data (CSV)", "💻 Advanced: Raw SQL", "🛠️ Database Maintenance", "⚙️ System Settings"]
 choice = st.sidebar.radio("Admin Tools", menu)
 
 
@@ -76,14 +77,17 @@ def render_vendor_orders_view(db):
     layout = db.get_setting("email_digest_layout", "Abbreviated")
     excluded_statuses = "('Received', 'Cancelled', 'Lost', 'Completed')"
 
+    # Backfilled history never counts as an outstanding order.
+    not_historical = "AND is_historical IS NOT TRUE"
+
     if scope == "All Pending (Need to Order)":
-        df = db.get_query_df(f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses}")
+        df = db.get_query_df(f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses} {not_historical}")
         scope_label = "all outstanding orders"
     else:
         days_back = int(db.get_setting("digest_days_back", "7"))
         cutoff = datetime.now() - timedelta(days=days_back)
         df = db.get_query_df(
-            f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses} AND request_date >= ?",
+            f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses} {not_historical} AND request_date >= ?",
             params=(cutoff,)
         )
         scope_label = f"orders requested in the last {days_back} days"
@@ -220,7 +224,13 @@ if choice == "🔄 Manage Order Status":
     st.info("Update the status of pending lab requests.")
     
     # Fetch all active orders
-    df_active = db.get_query_df("SELECT request_id, item_name, requester_name, quantity, keep_on_ice, seller, status, request_date, status_updated_at, shipping_number, courier, order_number FROM purchase_requests WHERE status NOT IN ('Received', 'Cancelled', 'Lost')")
+    df_active = db.get_query_df(
+        "SELECT request_id, item_name, requester_name, quantity, keep_on_ice, seller, status, "
+        "request_date, status_updated_at, shipping_number, courier, order_number "
+        "FROM purchase_requests "
+        "WHERE status NOT IN ('Received', 'Cancelled', 'Lost') "
+        "AND is_historical IS NOT TRUE"
+    )
     if df_active.empty:
         st.success("There are no active orders to manage!")
     else:
@@ -324,7 +334,12 @@ if choice == "🔄 Manage Order Status":
         # --- Deactivated Orders (History) ---
         st.markdown("---")
         with st.expander("🚫 View Deactivated Orders (Cancelled / Lost)"):
-            df_deactivated = db.get_query_df("SELECT item_name, requester_name, quantity, keep_on_ice, seller, status, request_date, status_updated_at FROM purchase_requests WHERE status IN ('Cancelled', 'Lost')")
+            # Historical imports are excluded here; browse those in 📚 Order History.
+            df_deactivated = db.get_query_df(
+                "SELECT item_name, requester_name, quantity, keep_on_ice, seller, status, "
+                "request_date, status_updated_at FROM purchase_requests "
+                "WHERE status IN ('Cancelled', 'Lost') AND is_historical IS NOT TRUE"
+            )
             if df_deactivated.empty:
                 st.write("No deactivated orders found.")
             else:
@@ -431,6 +446,177 @@ elif choice == "✏️ Edit Tables Directly":
             st.success(f"Successfully updated the '{selected_table}' table!")
         except Exception as e:
             st.error(f"Error saving data: {e}")
+
+# --- 1b. Historical Import ---
+elif choice == "📤 Import Historical Data":
+    import historical_import as hi
+
+    st.header("📤 Import Historical Order Data")
+    st.write(
+        "Load the lab's Excel order workbook (`Sarmazdeh's Lab Orders.xlsx`) so every "
+        "past order becomes searchable in this app. Nothing is written until you press "
+        "the final confirm button."
+    )
+    st.info(
+        "**How the statuses are read:** older sheets record status as the *fill colour* "
+        "of the Status cell (matching each sheet's colour legend), while the newest "
+        "sheets write the status as text. Both are handled automatically."
+    )
+    st.warning(
+        "⚠️ Download a backup first — **📥 Export Data (CSV) → Cloud Snapshot (JSON)**. "
+        "An import can be undone by batch below, but a backup is the safer path."
+    )
+
+    upload = st.file_uploader("Order workbook (.xlsx)", type=["xlsx", "xlsm"])
+
+    ccol1, ccol2, ccol3 = st.columns(3)
+    with ccol1:
+        assume_received = st.checkbox(
+            "Treat everything imported as received and used up", value=True,
+            help="If a line is old enough to be in the workbook but is not already in the "
+                 "live database, the lab has been and gone through it. The workbook's own "
+                 "status is kept in the item's specs whenever it was not 'Received'.",
+        )
+    with ccol2:
+        mark_used = st.checkbox(
+            "Create legacy inventory rows (depleted + archived)", value=True,
+            help="Creates an inventory row with quantity 0, flagged depleted and archived. "
+                 "It stays searchable but never affects live stock or low-stock alerts.",
+        )
+    with ccol3:
+        window = st.number_input(
+            "Duplicate window (days)", min_value=0, max_value=365, value=45, step=5,
+            help="An order line is treated as already recorded when an existing request "
+                 "matches its catalog number or name AND falls within this many days of it. "
+                 "Matching on catalog number alone would wrongly skip repeat purchases.",
+        )
+
+    if upload is not None:
+        if st.button("🔍 Analyze workbook (dry run)", width='stretch'):
+            with st.spinner("Reading sheets and colour legends..."):
+                try:
+                    parsed = hi.parse_orders_workbook(upload)
+                except Exception as e:
+                    st.error(f"Could not read the workbook: {e}")
+                    parsed = None
+
+            if parsed is not None and not parsed.empty:
+                existing = db.get_query_df(
+                    "SELECT request_id, item_name, catalog_number, request_date FROM purchase_requests"
+                )
+                new_rows, dupes = hi.plan_import(existing, parsed, date_window_days=int(window))
+                st.session_state.hi_parsed = parsed
+                st.session_state.hi_new = new_rows
+                st.session_state.hi_dupes = dupes
+            elif parsed is not None:
+                st.error("No order rows found in that workbook.")
+
+    if "hi_new" in st.session_state:
+        parsed = st.session_state.hi_parsed
+        new_rows = st.session_state.hi_new
+        dupes = st.session_state.hi_dupes
+        stats = hi.summarize(new_rows, assume_received=assume_received)
+
+        st.markdown("---")
+        st.subheader("Dry-run result")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Rows in workbook", len(parsed))
+        m2.metric("Already recorded", len(dupes))
+        m3.metric("Will be imported", stats["total"])
+        m4.metric("Marked as used", stats["as_used"] if mark_used else 0)
+
+        if assume_received and stats["reclassified"]:
+            st.caption(
+                f"All {stats['total']} rows will be recorded as **Received**. "
+                f"{stats['reclassified']} of them carry a different status in the workbook "
+                f"(cancelled, lost, never ordered…); that original status is preserved in "
+                f"each item's specs so it stays identifiable."
+            )
+
+        tcol1, tcol2 = st.columns(2)
+        with tcol1:
+            st.markdown("**Status recorded in the workbook**")
+            st.dataframe(
+                pd.DataFrame(sorted(stats["by_status"].items(), key=lambda kv: -kv[1]),
+                             columns=["Status", "Rows"]),
+                hide_index=True, width='stretch',
+            )
+        with tcol2:
+            st.markdown("**By term sheet**")
+            st.dataframe(
+                pd.DataFrame(sorted(stats["by_term"].items(), key=lambda kv: -kv[1]),
+                             columns=["Term", "Rows"]),
+                hide_index=True, width='stretch',
+            )
+
+        with st.expander(f"👁️ Preview the {stats['total']} rows to import"):
+            st.dataframe(
+                new_rows[["term", "item", "size", "quantity", "catalog_number", "seller",
+                          "price", "status", "date_requested", "storage"]],
+                hide_index=True, width='stretch',
+            )
+        with st.expander(f"⏭️ Preview the {len(dupes)} rows being skipped as duplicates"):
+            if dupes.empty:
+                st.write("Nothing skipped.")
+            else:
+                st.dataframe(
+                    dupes[["term", "item", "catalog_number", "status", "date_requested"]],
+                    hide_index=True, width='stretch',
+                )
+
+        issues = hi.find_data_issues(new_rows)
+        if not issues.empty:
+            with st.expander(f"⚠️ {len(issues)} rows have gaps or oddities in the workbook itself"):
+                st.caption(
+                    "These still import — they are flagged so you can correct them at the "
+                    "source. Note the workbook's Quantity column often holds the *pack size* "
+                    "rather than the number of packs, which is why totals in this app sum "
+                    "unit prices instead of multiplying by quantity."
+                )
+                st.dataframe(issues, hide_index=True, width='stretch')
+
+        st.markdown("---")
+        default_batch = f"xlsx-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        batch_id = st.text_input("Batch label (used to undo this import)", value=default_batch)
+
+        st.error(
+            f"This writes **{stats['total']}** purchase-request rows"
+            + (f" and **{stats['as_used']}** archived legacy inventory rows" if mark_used else "")
+            + " to the live database."
+        )
+        confirm = st.checkbox("I have a backup and I want to run this import.")
+        if st.button("🚀 Run import", disabled=not confirm, width='stretch'):
+            with st.spinner("Importing... this can take a minute for a few thousand rows."):
+                try:
+                    reqs, invs = hi.build_records(
+                        new_rows, batch_id,
+                        mark_received_as_used=mark_used,
+                        assume_received=assume_received,
+                    )
+                    n_req, n_inv = hi.apply_import(db, reqs, invs)
+                    st.success(f"Imported {n_req} order records and {n_inv} legacy inventory rows "
+                               f"under batch `{batch_id}`.")
+                    for key in ("hi_parsed", "hi_new", "hi_dupes"):
+                        st.session_state.pop(key, None)
+                    st.balloons()
+                except Exception as e:
+                    st.error(f"Import failed: {e}")
+                    st.info("Nothing partial should remain — if it does, undo the batch below.")
+
+    st.markdown("---")
+    st.subheader("↩️ Undo a previous import")
+    batches = hi.list_batches(db)
+    if batches.empty:
+        st.caption("No imported batches found.")
+    else:
+        st.dataframe(batches, hide_index=True, width='stretch')
+        pick = st.selectbox("Batch to remove", batches["import_batch"].tolist())
+        if st.checkbox(f"Yes, delete every row created by `{pick}`.", key="undo_confirm"):
+            if st.button("🗑️ Undo this batch"):
+                hi.undo_import(db, pick)
+                st.success(f"Removed batch `{pick}`.")
+                time.sleep(1)
+                st.rerun()
 
 # --- 2. Data Export ---
 elif choice == "📥 Export Data (CSV)":

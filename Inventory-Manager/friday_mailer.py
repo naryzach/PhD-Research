@@ -16,16 +16,19 @@ def generate_digest_body(db, include_all_pending=None):
     days_back = int(db.get_setting("digest_days_back", "7"))
     last_week = datetime.now() - timedelta(days=days_back)
     excluded_statuses = "('Received', 'Cancelled', 'Lost', 'Completed')"
+    # Backfilled history must never reach the digest — a 2021 "Need to order"
+    # line is not something anyone should be asked to order this Friday.
+    not_historical = "AND is_historical IS NOT TRUE"
 
     if include_all_pending:
-        pending_query = f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses}"
+        pending_query = f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses} {not_historical}"
         df_orders = db.get_query_df(pending_query)
     else:
-        pending_query = f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses} AND request_date >= ?"
+        pending_query = f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses} {not_historical} AND request_date >= ?"
         df_orders = db.get_query_df(pending_query, params=(last_week,))
-    
+
     # --- PART 1.5: Recently Depleted Items ---
-    depleted_query = "SELECT name, category, location, last_depleted FROM inventory WHERE is_depleted IS TRUE AND last_depleted >= ?"
+    depleted_query = "SELECT name, category, location, last_depleted FROM inventory WHERE is_depleted IS TRUE AND is_historical IS NOT TRUE AND last_depleted >= ?"
     df_depleted = db.get_query_df(depleted_query, params=(last_week,))
     
     # --- PART 2: Predictive Reordering ---
@@ -108,9 +111,10 @@ def generate_status_updates_body(db):
     # Query for all purchase requests updated in the last N days (inherits Days Back from Order Digest Options)
     # We sort by status FIRST (for grouping), then by date (most recent first)
     query = """
-        SELECT item_name, requester_name, status, status_updated_at, quantity 
-        FROM purchase_requests 
-        WHERE status_updated_at >= ? 
+        SELECT item_name, requester_name, status, status_updated_at, quantity
+        FROM purchase_requests
+        WHERE status_updated_at >= ?
+        AND is_historical IS NOT TRUE
         ORDER BY status ASC, status_updated_at DESC
     """
     df_updates = db.get_query_df(query, params=(last_week,))

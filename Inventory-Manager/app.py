@@ -44,16 +44,38 @@ db = get_db()
 st.set_page_config(page_title="Lab Manager", layout="wide", page_icon="🔬")
 st.title("Lab Manager")
 
-menu = ["Inventory Dashboard", "Request a Purchase", "Process Orders", "Log Usage", "Metrics & History"]
+menu = ["Inventory Dashboard", "Request a Purchase", "Process Orders", "Log Usage",
+        "📚 Order History", "Metrics & History"]
 choice = st.sidebar.radio("Navigation", menu)
 
 if choice == "Inventory Dashboard":
     st.header("Inventory Dashboard")
     
-    # Fetch active inventory
-    # Fetch active inventory (including depleted, excluding archived)
-    df_inv = db.get_query_df("SELECT name, category, source_type, quantity, unit, reorder_threshold, location, owner, is_depleted FROM inventory WHERE archived IS FALSE")
-    
+    # Live stock by default: archived rows (which is where imported history
+    # lands) are opt-in, so a six-year backfill can't drown the daily view.
+    vcol1, vcol2 = st.columns([1, 1])
+    with vcol1:
+        include_archived = st.toggle(
+            "Include archived / legacy items", value=False,
+            help="Archived items are things the lab no longer stocks, including the "
+                 "orders backfilled from the Excel workbook.",
+        )
+    with vcol2:
+        hide_depleted = st.toggle(
+            "Hide used-up items", value=False,
+            help="Hides anything already marked depleted.",
+        )
+
+    where = [] if include_archived else ["archived IS FALSE"]
+    if hide_depleted:
+        where.append("is_depleted IS FALSE")
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+
+    df_inv = db.get_query_df(
+        "SELECT name, category, source_type, quantity, unit, reorder_threshold, "
+        f"location, owner, is_depleted, archived, source_sheet FROM inventory{where_sql}"
+    )
+
     if df_inv.empty:
         st.info("Your inventory is currently empty.")
     else:
@@ -69,17 +91,23 @@ if choice == "Inventory Dashboard":
         st.markdown("---")
         
         # --- Search and Filter Bar ---
-        scol1, scol2 = st.columns([3, 1])
+        scol1, scol2, scol3 = st.columns([3, 1, 1])
         with scol1:
             search = st.text_input("🔍 Quick Search", placeholder="Search by item name, owner, or location...")
         with scol2:
             source_filter = st.selectbox("Filter Source", ["All", "Purchased", "Made in Lab"])
-            
+        with scol3:
+            terms = sorted(df_inv['source_sheet'].dropna().astype(str).unique().tolist())
+            terms = [t for t in terms if t and t.lower() != "nan"]
+            term_filter = st.multiselect("Term", terms) if terms else []
+
         # Apply filters
         if search:
-            df_inv = df_inv[df_inv.apply(lambda row: row.astype(str).str.contains(search, case=False).any(), axis=1)]
+            df_inv = df_inv[df_inv.apply(lambda row: row.astype(str).str.contains(search, case=False, regex=False).any(), axis=1)]
         if source_filter != "All":
             df_inv = df_inv[df_inv['source_type'] == source_filter]
+        if term_filter:
+            df_inv = df_inv[df_inv['source_sheet'].astype(str).isin(term_filter)]
 
         # --- Categorized Tab View ---
         st.subheader("Categorized Stock")
@@ -94,12 +122,17 @@ if choice == "Inventory Dashboard":
             "unit": "Unit",
             "reorder_threshold": "Reorder Threshold",
             "location": "Storage Location",
-            "owner": "Owner"
+            "owner": "Owner",
+            "source_sheet": "Term",
+            "archived": "Archived"
         }
         df_display = df_inv.rename(columns=clean_headers)
-        
+
         # Define the columns we want to show (Category omitted — the tabs already split by category)
-        display_order = ("Item Name", "Source Type", "Quantity", "Unit", "Reorder Threshold", "Storage Location", "Owner")
+        display_order = ["Item Name", "Source Type", "Quantity", "Unit", "Reorder Threshold", "Storage Location", "Owner"]
+        if include_archived:
+            display_order += ["Archived", "Term"]
+        display_order = tuple(display_order)
         
         if categories:
             tabs = st.tabs(["All Items"] + categories)
@@ -131,13 +164,15 @@ if choice == "Inventory Dashboard":
         # We join with purchase_requests to see if there's an active order
         attention_query = """
             SELECT i.item_id, i.name, i.quantity, i.unit, i.reorder_threshold, i.is_depleted, i.last_depleted, i.catalog_number, i.seller,
-                   (SELECT status FROM purchase_requests pr 
+                   (SELECT status FROM purchase_requests pr
                     WHERE (pr.item_name = i.name OR (i.catalog_number IS NOT NULL AND i.catalog_number != '' AND pr.catalog_number = i.catalog_number))
                     AND pr.status NOT IN ('Received', 'Cancelled', 'Lost')
+                    AND pr.is_historical IS NOT TRUE
                     ORDER BY pr.request_date DESC LIMIT 1) as pending_status
             FROM inventory i
             WHERE (i.quantity <= i.reorder_threshold OR i.is_depleted IS TRUE)
             AND i.archived IS FALSE
+            AND i.is_historical IS NOT TRUE
             ORDER BY i.is_depleted DESC, i.quantity ASC
         """
         df_attention = db.get_query_df(attention_query)
@@ -385,7 +420,11 @@ elif choice == "Process Orders":
     st.header("Order Management Pipeline")
     
     st.subheader("Pending Orders")
-    df_pending = db.get_query_df("SELECT * FROM purchase_requests WHERE status NOT IN ('Received', 'Cancelled', 'Lost')")
+    df_pending = db.get_query_df(
+        "SELECT * FROM purchase_requests "
+        "WHERE status NOT IN ('Received', 'Cancelled', 'Lost') "
+        "AND is_historical IS NOT TRUE"
+    )
     
     if not df_pending.empty:
         # Style the dataframe by status
@@ -538,15 +577,68 @@ elif choice == "Log Usage":
     else:
         st.warning("Inventory is currently empty or fully depleted.")
 
+elif choice == "📚 Order History":
+    import history_view as hv
+
+    st.header("📚 Order History")
+    st.caption(
+        "Every order the lab has placed, including the years backfilled from the Excel "
+        "order workbook. Use the controls to narrow things down, pick your columns, and "
+        "export exactly what you see."
+    )
+
+    tab_orders, tab_stock = st.tabs(["🧾 Orders", "📦 Legacy & Archived Stock"])
+
+    with tab_orders:
+        df_hist = db.get_query_df(
+            "SELECT request_id, source_sheet, item_name, specs, quantity, catalog_number, "
+            "seller, price, status, requester_name, request_date, order_number, "
+            "shipping_number, link, is_historical FROM purchase_requests"
+        )
+        if df_hist.empty:
+            st.info("No order records yet.")
+        else:
+            view, cols = hv.render_filter_bar(df_hist, "purchase_requests", key="hist_orders")
+            hv.render_table(view, cols, key="hist_orders", table="purchase_requests")
+
+    with tab_stock:
+        st.caption(
+            "Items the lab has held. Imported history is stored as used up (quantity 0, "
+            "archived) so it stays searchable without affecting live stock or reorder alerts."
+        )
+        df_stock = db.get_query_df(
+            "SELECT item_id, source_sheet, name, category, specs, quantity, unit, "
+            "catalog_number, seller, price, location, owner, date_added, is_depleted, "
+            "archived, is_historical FROM inventory"
+        )
+        if df_stock.empty:
+            st.info("No inventory records yet.")
+        else:
+            view, cols = hv.render_filter_bar(df_stock, "inventory", key="hist_stock")
+            hv.render_table(view, cols, key="hist_stock", table="inventory")
+
 elif choice == "Metrics & History":
     st.header("Lab Analytics & History")
-    
+
     # --- Financial Metrics ---
     st.subheader("Financial Overview")
-    
-    # Fetch all inventory items, even depleted ones, to get accurate historical spending
-    df_finances = db.get_query_df("SELECT category, seller, price FROM inventory")
-    
+
+    # Backfilled history would otherwise silently dominate every total, so the
+    # scope is an explicit choice rather than a hidden default.
+    spend_scope = st.radio(
+        "Spending scope",
+        ["Current records only", "Everything (incl. imported history)", "Imported history only"],
+        horizontal=True,
+    )
+    scope_sql = {
+        "Current records only": " WHERE is_historical IS NOT TRUE",
+        "Everything (incl. imported history)": "",
+        "Imported history only": " WHERE is_historical IS TRUE",
+    }[spend_scope]
+
+    # Fetch inventory, even depleted, to get accurate historical spending
+    df_finances = db.get_query_df(f"SELECT category, seller, price FROM inventory{scope_sql}")
+
     if not df_finances.empty and df_finances['price'].sum() > 0:
         total_spent = df_finances['price'].sum()
         
