@@ -1685,6 +1685,24 @@ class IterativeRefiner:
             pool = pool[pool[sm] > 0]
         logger.info(f"Stratifying AF3 tranche on '{sm}' over {len(pool)} SCORED pooled designs.")
 
+        # Earlier tranches: never re-submit a design, and never clobber a previous
+        # manifest — those carry the band assignments the calibration analysis needs,
+        # and re-running with the default filename would overwrite them silently.
+        prior = sorted(OUT_BASE.glob("stratified_manifest*.json"))
+        submitted = set()
+        for p in prior:
+            try:
+                for m in json.load(open(p)):
+                    if m.get("design_id"):
+                        submitted.add(m["design_id"])
+            except Exception as exc:
+                logger.warning(f"Could not read prior manifest {p.name}: {exc}")
+        if submitted and "design_id" in pool.columns:
+            before = len(pool)
+            pool = pool[~pool["design_id"].isin(submitted)]
+            logger.info(f"Excluding {len(submitted)} design(s) already submitted in "
+                        f"{len(prior)} earlier tranche(s): {before} -> {len(pool)} candidates.")
+
         n_targets       = max(1, len(self.active_targets))
         per_target      = max(n_bands, n_total // n_targets)
         per_band        = max(1, per_target // n_bands)
@@ -1731,8 +1749,11 @@ class IterativeRefiner:
             logger.warning("Stratified export produced no jobs.")
             return
 
-        sub_path = OUT_BASE / "af3_submission_stratified.json"
-        man_path = OUT_BASE / "stratified_manifest.json"
+        # Tranche 1 keeps the original names; later tranches are suffixed so both the
+        # submission and its manifest survive side by side.
+        suffix   = "" if not prior else f"_{len(prior) + 1}"
+        sub_path = OUT_BASE / f"af3_submission_stratified{suffix}.json"
+        man_path = OUT_BASE / f"stratified_manifest{suffix}.json"
         with open(sub_path, "w") as f:
             json.dump(jobs, f, indent=2)
         with open(man_path, "w") as f:
