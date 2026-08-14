@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import pandas as pd
 import os
@@ -315,6 +316,19 @@ class AdvancedLabInventory:
             return self._conn.engine
         return self.conn_sqlite
 
+    @property
+    def now_sql(self):
+        """SQL expression for 'right now' on the current backend.
+
+        Timestamps must all come from one clock. New purchase requests are
+        stamped by the column default (the database server's clock), so any
+        code that writes a timestamp has to use the database clock too —
+        Python's datetime.now() is the *local* clock, which on this setup runs
+        7 hours behind the Postgres server. Mixing the two made a status change
+        look older than a request created at the same moment.
+        """
+        return "now()" if self.is_postgres else "CURRENT_TIMESTAMP"
+
     # --- Settings Management ---
     def get_setting(self, key, default=None):
         """Retrieves a setting from the app_settings table."""
@@ -323,6 +337,21 @@ class AdvancedLabInventory:
         if res.empty:
             return default
         return res.iloc[0]['setting_value']
+
+    def get_setting_list(self, key, default=None):
+        """Read a setting stored as a JSON list."""
+        raw = self.get_setting(key)
+        if raw in (None, ""):
+            return list(default or [])
+        try:
+            value = json.loads(raw)
+            return list(value) if isinstance(value, list) else list(default or [])
+        except (ValueError, TypeError):
+            return list(default or [])
+
+    def set_setting_list(self, key, values):
+        """Store a setting as a JSON list."""
+        self.set_setting(key, json.dumps(list(values)))
 
     def set_setting(self, key, value):
         """Updates or inserts a setting into the app_settings table."""

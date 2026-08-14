@@ -520,8 +520,13 @@ elif choice == "Process Orders":
                         "seller": order_data['seller'], "link": order_data['link'], "specs": order_data['specs'],
                         "price": final_price, "date_added": datetime.now()
                     })
-                    # Specifically set the status to "Received"
-                    db.cursor.execute("UPDATE purchase_requests SET status = 'Received' WHERE request_id = ?", (req_id,))
+                    # Specifically set the status to "Received". The timestamp has
+                    # to move too, or receiving an order never shows up in the
+                    # Recent Status Updates digest.
+                    db.cursor.execute(
+                        f"UPDATE purchase_requests SET status = 'Received', "
+                        f"status_updated_at = {db.now_sql} WHERE request_id = ?",
+                        (req_id,))
                     db.commit()
                     
                     st.success(f"{order_data['item_name']} successfully added to inventory!")

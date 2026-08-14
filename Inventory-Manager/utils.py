@@ -1,5 +1,112 @@
+import re
+
 import pandas as pd
 import streamlit as st
+
+# --- Plain-text digests ------------------------------------------------------
+
+# Ranges chosen to cover the pictographs the digests use while deliberately
+# NOT touching characters that appear in real product names — ™ (U+2122),
+# ® (U+00AE), µ (U+00B5), ° (U+00B0) all sit outside these blocks.
+EMOJI_RE = re.compile(
+    "["
+    "\U0001F100-\U0001FAFF"   # enclosed alphanumerics, pictographs, emoticons, transport
+    "☀-➿"           # misc symbols + dingbats  (⚠ ❄ ✅ ❌)
+    "⬀-⯿"           # misc symbols and arrows
+    "️"                  # variation selector-16
+    "‍"                  # zero width joiner
+    "]"
+)
+
+
+def strip_emoji(text):
+    """Remove pictographs, leaving product names (™, ®, µ) intact."""
+    if not text:
+        return text
+    return re.sub(r"[ \t]{2,}", " ", EMOJI_RE.sub("", text)).strip()
+
+
+def _is_heading(rest):
+    """A digest heading is either colon-terminated or shouted in capitals."""
+    if rest.endswith(":"):
+        return True
+    letters = [c for c in rest if c.isalpha()]
+    return bool(letters) and all(c.isupper() for c in letters)
+
+
+def to_plain_text(body):
+    """Rewrite a digest body without emoji, using '-' bullets for item lines.
+
+    Lines that begin with a pictograph are classified as a heading or an item:
+    headings keep their wording with the emoji dropped, items become bullets.
+    The distinction matters because ⚠️ prefixes both the "RECENTLY DEPLETED
+    ITEMS:" heading and each predictive-alert line.
+    """
+    if not body:
+        return body
+
+    out = []
+    for line in body.splitlines():
+        leading = EMOJI_RE.match(line.lstrip())
+        if leading:
+            indent = line[:len(line) - len(line.lstrip())]
+            rest = strip_emoji(line.lstrip())
+            out.append(f"{indent}{rest}" if _is_heading(rest) else f"{indent}- {rest}")
+        else:
+            out.append(strip_emoji(line) if EMOJI_RE.search(line) else line.rstrip())
+    return "\n".join(out)
+
+
+def digest_is_plain_text(db):
+    """True when digests should be emitted without emoji, using '-' bullets."""
+    return db.get_setting("digest_plain_text", "False") == "True"
+
+
+def render_digest(db, body):
+    """Apply the plain-text preference to a finished digest body."""
+    return to_plain_text(body) if digest_is_plain_text(db) else body
+
+
+def render_subject(db, subject):
+    """Apply the plain-text preference to an email subject line."""
+    return strip_emoji(subject) if digest_is_plain_text(db) else subject
+
+# --- Order status vocabulary -------------------------------------------------
+# Lives here rather than in admin_dashboard.py because friday_mailer needs it
+# too, and admin_dashboard already imports friday_mailer (importing back the
+# other way would be circular).
+
+# The lab's full status vocabulary, in pipeline order.
+ORDER_STATUS_OPTIONS = [
+    "Need to order", "Ordered", "Shipped", "Pending", "Waiting for Shipment",
+    "Sent to Dr. MRS", "Delayed", "Back order", "Needs Fixing",
+    "Misc.", "Do not order yet", "Cancelled", "Lost", "Received",
+]
+
+# Statuses that mean an order is finished with, one way or another.
+TERMINAL_STATUSES = ["Received", "Cancelled", "Lost", "Completed"]
+
+# Everything still in flight — the candidates for the vendor manifest.
+OUTSTANDING_STATUSES = [s for s in ORDER_STATUS_OPTIONS if s not in TERMINAL_STATUSES]
+
+# The manifest answers "what do I need to buy", so it starts on that alone.
+DEFAULT_MANIFEST_STATUSES = ["Need to order"]
+
+
+def manifest_statuses(db):
+    """The statuses ticked for the vendor manifest, filtered to valid ones."""
+    picked = db.get_setting_list("vendor_manifest_statuses", DEFAULT_MANIFEST_STATUSES)
+    return [s for s in picked if s in OUTSTANDING_STATUSES]
+
+
+def digest_uses_manifest(db):
+    """True when the emailed Order Requests Digest should reuse those statuses.
+
+    On by default: the digest is a request to go buy things, so it should match
+    the shopping manifest rather than listing every order already in flight.
+    Untick it in System Settings to get every open order back.
+    """
+    return db.get_setting("digest_use_manifest_statuses", "True") == "True"
 
 
 def to_datetime(values):

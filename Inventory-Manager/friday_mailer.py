@@ -6,6 +6,8 @@ from email.message import EmailMessage
 import toml
 import os
 from db_manager import AdvancedLabInventory
+from utils import (manifest_statuses, digest_uses_manifest,
+                   render_digest, render_subject, digest_is_plain_text)
 
 def generate_digest_body(db, include_all_pending=None):
     """Generates the text body for the lab digest without sending it."""
@@ -20,12 +22,29 @@ def generate_digest_body(db, include_all_pending=None):
     # line is not something anyone should be asked to order this Friday.
     not_historical = "AND is_historical IS NOT TRUE"
 
-    if include_all_pending:
-        pending_query = f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses} {not_historical}"
-        df_orders = db.get_query_df(pending_query)
+    # Optionally narrow the digest to the same statuses as the vendor manifest,
+    # so the email matches the shopping list instead of every open order.
+    status_params = []
+    statuses = None
+    if digest_uses_manifest(db):
+        statuses = manifest_statuses(db)
+        if statuses:
+            placeholders = ", ".join(["?"] * len(statuses))
+            status_clause = f"status IN ({placeholders})"
+            status_params = list(statuses)
+        else:
+            # Nothing ticked means nothing qualifies; do not silently fall back
+            # to every open order, which would be the opposite of the intent.
+            status_clause = "1 = 0"
     else:
-        pending_query = f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses} {not_historical} AND request_date >= ?"
-        df_orders = db.get_query_df(pending_query, params=(last_week,))
+        status_clause = f"status NOT IN {excluded_statuses}"
+
+    pending_query = f"SELECT * FROM purchase_requests WHERE {status_clause} {not_historical}"
+    params = list(status_params)
+    if not include_all_pending:
+        pending_query += " AND request_date >= ?"
+        params.append(last_week)
+    df_orders = db.get_query_df(pending_query, params=tuple(params) if params else None)
 
     # --- PART 1.5: Recently Depleted Items ---
     depleted_query = "SELECT name, category, location, last_depleted FROM inventory WHERE is_depleted IS TRUE AND is_historical IS NOT TRUE AND last_depleted >= ?"
@@ -68,10 +87,13 @@ def generate_digest_body(db, include_all_pending=None):
             body += f"❌ {row['name']} - Depleted {depleted_on}\n"
         body += "-"*40 + "\n\n"
 
-    if include_all_pending:
-        body += "🛒 PENDING PURCHASE REQUESTS (Scope: All Outstanding / Need to Order):\n"
+    window = "All Outstanding" if include_all_pending else f"Last {days_back} Days"
+    if statuses is not None:
+        # Spell out the status filter so the email explains its own contents.
+        status_label = ", ".join(statuses) if statuses else "none selected"
+        body += f"🛒 PENDING PURCHASE REQUESTS (Scope: {window} · Status: {status_label}):\n"
     else:
-        body += f"🛒 PENDING PURCHASE REQUESTS (Scope: Last {days_back} Days):\n"
+        body += f"🛒 PENDING PURCHASE REQUESTS (Scope: {window}):\n"
     if df_orders.empty:
         body += "No pending purchase requests found for this scope.\n"
     else:
@@ -100,80 +122,98 @@ def generate_digest_body(db, include_all_pending=None):
                 body += f"📦 {row['item_name']} - {qty:.1f}x @ ${unit_price:,.2f} = ${line_total:,.2f} (Req by: {row['requester_name']}) {ice_flag}\n"
                 
         body += f"\n💰 TOTAL ESTIMATED COST: ${total_cost:,.2f}\n"
-        
-    return body
+
+    return render_digest(db, body)
 
 def generate_status_updates_body(db):
     """Generates the text body for all orders with recent status changes."""
     days_back = int(db.get_setting("digest_days_back", "7"))
     last_week = datetime.now() - timedelta(days=days_back)
 
-    # Query for all purchase requests updated in the last N days (inherits Days Back from Order Digest Options)
-    # We sort by status FIRST (for grouping), then by date (most recent first)
+    # Anything that changed status OR was newly requested in the window. A brand
+    # new request has not had a status *change*, but it is still news — leaving
+    # it out made freshly added orders invisible here.
+    # Sorted by status first (for grouping), then by date (most recent first).
     query = """
-        SELECT item_name, requester_name, status, status_updated_at, quantity
+        SELECT item_name, requester_name, status, status_updated_at, request_date, quantity
         FROM purchase_requests
-        WHERE status_updated_at >= ?
+        WHERE (status_updated_at >= ? OR request_date >= ?)
         AND is_historical IS NOT TRUE
         ORDER BY status ASC, status_updated_at DESC
     """
-    df_updates = db.get_query_df(query, params=(last_week,))
-    
+    df_updates = db.get_query_df(query, params=(last_week, last_week))
+
     if df_updates.empty:
         return None
-        
+
+    # In plain-text mode the "new" marker becomes a word rather than a symbol,
+    # so the legend still makes sense once the emoji are gone.
+    plain = digest_is_plain_text(db)
+
     body = f"🧪 RECENT LAB ORDER STATUS UPDATES (Last {days_back} Days):\n"
-    body += "Items are grouped by their current status.\n\n"
-    
+    body += ("Items are grouped by their current status. "
+             + ("[NEW] marks a newly submitted request.\n\n" if plain
+                else "🆕 marks a newly submitted request.\n\n"))
+
     current_group = None
     for _, row in df_updates.iterrows():
         status = row['status']
-        updated_at = pd.to_datetime(row['status_updated_at']).strftime('%Y-%m-%d %H:%M')
-        
+        stamp = row['status_updated_at'] if pd.notna(row['status_updated_at']) else row['request_date']
+        updated_at = pd.to_datetime(stamp).strftime('%Y-%m-%d %H:%M') if pd.notna(stamp) else "unknown"
+
+        requested = pd.to_datetime(row['request_date'], errors='coerce')
+        is_new = pd.notna(requested) and requested >= last_week
+
         # Add a header for each status group
         if status != current_group:
             current_group = status
             body += f"\n📌 STATUS: {status.upper()}\n"
             body += "=" * 30 + "\n"
-            
-        body += f"✅ {row['item_name']} (Qty: {row['quantity']})\n"
+
+        if plain:
+            body += f"- {'[NEW] ' if is_new else ''}{row['item_name']} (Qty: {row['quantity']})\n"
+        else:
+            body += f"{'🆕' if is_new else '✅'} {row['item_name']} (Qty: {row['quantity']})\n"
         body += f"   Requested by: {row['requester_name']}\n"
-        body += f"   Updated on: {updated_at}\n"
+        body += f"   {'Requested on' if is_new else 'Updated on'}: {updated_at}\n"
         body += "-" * 20 + "\n"
-        
-    return body
+
+    return render_digest(db, body)
 
 def send_status_updates_digest():
     """Generates and sends the digest of recent status updates."""
     db = AdvancedLabInventory()
     body = generate_status_updates_body(db)
+    subject = render_subject(db, "🧪 Lab Order Status Updates Digest")
     db.close()
-    
+
     if not body:
         return False, "No status updates were recorded this week.", ""
-        
-    return _send_email("🧪 Lab Order Status Updates Digest", body)
+
+    return _send_email(subject, body)
 
 def send_friday_digest(include_all_pending=False):
     db = AdvancedLabInventory()
     body = generate_digest_body(db, include_all_pending)
+    subject = render_subject(db, "🧪 Friday Lab Orders & Inventory Digest")
     db.close()
-    
+
     if not body:
         return False, "No data to report.", ""
-    
-    return _send_email("🧪 Friday Lab Orders & Inventory Digest", body)
+
+    return _send_email(subject, body)
 
 def send_status_updates_digest():
     """Generates and sends the digest of recent status updates."""
     db = AdvancedLabInventory()
     body = generate_status_updates_body(db)
+    subject = render_subject(db, "🧪 Lab Order Status Updates Digest")
     db.close()
-    
+
     if not body:
         return False, "No status updates were recorded this week.", ""
-        
-    return _send_email("🧪 Lab Order Status Updates Digest", body)
+
+    return _send_email(subject, body)
 
 def send_instant_notification(order_data):
     """Sends an immediate email for a new purchase request."""

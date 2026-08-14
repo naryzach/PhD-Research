@@ -6,7 +6,10 @@ from friday_mailer import send_friday_digest
 from datetime import datetime, timedelta
 import os
 import time
-from utils import display_tracking_button, color_status, format_dates
+from utils import (display_tracking_button, color_status, format_dates,
+                   ORDER_STATUS_OPTIONS, OUTSTANDING_STATUSES,
+                   DEFAULT_MANIFEST_STATUSES, manifest_statuses, digest_uses_manifest,
+                   digest_is_plain_text, render_subject)
 
 # --- Authentication Setup ---
 def check_password():
@@ -66,34 +69,49 @@ PRIMARY_KEYS = {
     "usage_log": "log_id",
 }
 
+# Status vocabulary lives in utils so friday_mailer can share it.
+
 menu = ["🔄 Manage Order Status", "✏️ Edit Tables Directly", "📥 Export Data (CSV)",
         "💻 Advanced: Raw SQL", "🛠️ Database Maintenance", "⚙️ System Settings"]
 choice = st.sidebar.radio("Admin Tools", menu)
 
 
 def render_vendor_orders_view(db):
-    """Displays all outstanding purchase requests grouped by vendor, with approximate cost, item details, clickable links, and a grand total."""
-    scope = db.get_setting("digest_pending_scope", "Pending This Week")
+    """Purchase requests grouped by vendor — the shopping manifest.
+
+    Which statuses appear is controlled by the checkboxes in
+    ⚙️ System Settings → Order Digest Options, defaulting to "Need to order"
+    alone. This view is deliberately independent of the email digest, which
+    keeps its own Scope setting.
+    """
     layout = db.get_setting("email_digest_layout", "Abbreviated")
-    excluded_statuses = "('Received', 'Cancelled', 'Lost', 'Completed')"
+    statuses = manifest_statuses(db)
+    limit_days = db.get_setting("vendor_manifest_limit_days", "False") == "True"
+
+    if not statuses:
+        st.warning(
+            "No statuses are selected for the manifest. Pick at least one in "
+            "⚙️ System Settings → Vendor Manifest."
+        )
+        return
 
     # Backfilled history never counts as an outstanding order.
-    not_historical = "AND is_historical IS NOT TRUE"
+    placeholders = ", ".join(["?"] * len(statuses))
+    query = (f"SELECT * FROM purchase_requests WHERE status IN ({placeholders}) "
+             f"AND is_historical IS NOT TRUE")
+    params = list(statuses)
+    scope_label = f"status: {', '.join(statuses)}"
 
-    if scope == "All Pending (Need to Order)":
-        df = db.get_query_df(f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses} {not_historical}")
-        scope_label = "all outstanding orders"
-    else:
+    if limit_days:
         days_back = int(db.get_setting("digest_days_back", "7"))
-        cutoff = datetime.now() - timedelta(days=days_back)
-        df = db.get_query_df(
-            f"SELECT * FROM purchase_requests WHERE status NOT IN {excluded_statuses} {not_historical} AND request_date >= ?",
-            params=(cutoff,)
-        )
-        scope_label = f"orders requested in the last {days_back} days"
+        query += " AND request_date >= ?"
+        params.append(datetime.now() - timedelta(days=days_back))
+        scope_label += f" · requested in the last {days_back} days"
+
+    df = db.get_query_df(query, params=tuple(params))
 
     if df.empty:
-        st.info(f"No outstanding orders found ({scope_label}).")
+        st.info(f"No orders match the manifest filters ({scope_label}).")
         return
 
     df['seller_clean'] = df['seller'].apply(lambda s: str(s).strip() if pd.notna(s) and str(s).strip() else "Unknown Vendor")
@@ -101,7 +119,8 @@ def render_vendor_orders_view(db):
     df['qty_clean'] = df['quantity'].apply(lambda q: float(q) if pd.notna(q) else 1.0)
     df['line_total'] = df['unit_price'] * df['qty_clean']
 
-    st.caption(f"Showing {scope_label} · Layout: {layout} (change in ⚙️ System Settings → Order Digest Options)")
+    st.caption(f"Showing {len(df)} order(s) — {scope_label} · Layout: {layout} "
+               f"(change in ⚙️ System Settings → Vendor Manifest)")
 
     grand_total = 0.0
     for vendor, group in df.sort_values('item_name').groupby('seller_clean'):
@@ -160,7 +179,7 @@ if choice == "🔄 Manage Order Status":
                 from friday_mailer import generate_digest_body
                 st.session_state.preview_content = generate_digest_body(db)
                 st.session_state.preview_type = "Pending Orders"
-                st.session_state.preview_subject = "🧪 Weekly Lab Orders Digest"
+                st.session_state.preview_subject = render_subject(db, "🧪 Weekly Lab Orders Digest")
 
     with col2:
         st.write("**🧪 Recent Status Updates**")
@@ -182,7 +201,7 @@ if choice == "🔄 Manage Order Status":
                 from friday_mailer import generate_status_updates_body
                 st.session_state.preview_content = generate_status_updates_body(db)
                 st.session_state.preview_type = "Recent Updates"
-                st.session_state.preview_subject = "🧪 Lab Order Status Updates Digest"
+                st.session_state.preview_subject = render_subject(db, "🧪 Lab Order Status Updates Digest")
 
     # --- Full Width Preview Display ---
     if "preview_content" in st.session_state and st.session_state.preview_content:
@@ -285,13 +304,8 @@ if choice == "🔄 Manage Order Status":
         selected_row = df_active.iloc[order_list.index(selected_order)]
         display_tracking_button(selected_row.get('courier'), selected_row.get('shipping_number'), selected_row.get('status'))
         
-        # The full list of your lab's specific statuses
-        status_options = [
-            "Need to order", "Ordered", "Shipped", "Pending", "Waiting for Shipment", 
-            "Sent to Dr. MRS", "Delayed", "Back order", "Needs Fixing", 
-            "Misc.", "Do not order yet", "Cancelled", "Lost", "Received"
-        ]
-        
+        status_options = ORDER_STATUS_OPTIONS
+
         col1, col2 = st.columns([2, 1])
         with col1:
             new_status = st.selectbox("New Status", status_options)
@@ -317,14 +331,26 @@ if choice == "🔄 Manage Order Status":
             
             if st.button("Update Status", width='stretch'):
                 req_id = int(selected_order.split("]")[0].replace("[", ""))
-                # Use standard timestamp for both SQLite and Postgres
-                ts = datetime.now()
+                # Stamp with the DATABASE clock, not Python's. New requests are
+                # timestamped by the column default (server clock), so using
+                # datetime.now() here recorded status changes 7 hours in the
+                # past relative to them and made recent updates look stale.
+                now = db.now_sql
                 if new_status == "Shipped":
-                    db.cursor.execute("UPDATE purchase_requests SET status = ?, status_updated_at = ?, shipping_number = ?, courier = ? WHERE request_id = ?", (new_status, ts, shipping_number, courier, req_id))
+                    db.cursor.execute(
+                        f"UPDATE purchase_requests SET status = ?, status_updated_at = {now}, "
+                        "shipping_number = ?, courier = ? WHERE request_id = ?",
+                        (new_status, shipping_number, courier, req_id))
                 elif new_status == "Ordered":
-                    db.cursor.execute("UPDATE purchase_requests SET status = ?, status_updated_at = ?, order_number = ? WHERE request_id = ?", (new_status, ts, order_num, req_id))
+                    db.cursor.execute(
+                        f"UPDATE purchase_requests SET status = ?, status_updated_at = {now}, "
+                        "order_number = ? WHERE request_id = ?",
+                        (new_status, order_num, req_id))
                 else:
-                    db.cursor.execute("UPDATE purchase_requests SET status = ?, status_updated_at = ? WHERE request_id = ?", (new_status, ts, req_id))
+                    db.cursor.execute(
+                        f"UPDATE purchase_requests SET status = ?, status_updated_at = {now} "
+                        "WHERE request_id = ?",
+                        (new_status, req_id))
                 db.commit()
                 st.toast(f"✅ Status updated!")
                 st.success(f"Updated order #{req_id} to '{new_status}'!")
@@ -685,7 +711,8 @@ elif choice == "⚙️ System Settings":
     
     # --- Order Digest Options ---
     st.subheader("📧 Order Digest Options")
-    st.caption("Applies to the Order Requests Digest, the Outstanding Orders by Vendor view, and (Days Back only) the Recent Status Updates digest.")
+    st.caption("Applies to the emailed Order Requests Digest. The Outstanding Orders by "
+               "Vendor list has its own settings under 🛒 Vendor Manifest below.")
 
     # Layout: Abbreviated vs Detailed
     current_layout = db.get_setting("email_digest_layout", "Abbreviated")
@@ -698,13 +725,27 @@ elif choice == "⚙️ System Settings":
         time.sleep(1)
         st.rerun()
 
+    # Plain text: no emoji, hyphen bullets. Applies to both digests, the
+    # instant notification, their subject lines, and the on-screen previews.
+    plain_now = digest_is_plain_text(db)
+    plain_new = st.checkbox(
+        "Plain text (no emoji, use - bullets)", value=plain_now,
+        help="Strips emoji from digest bodies and subject lines and turns item lines "
+             "into '-' bullets. Product names keep their ™, ®, µ and ° symbols.",
+    )
+    if plain_new != plain_now:
+        db.set_setting("digest_plain_text", str(plain_new))
+        st.success("Digests will now use " + ("plain text." if plain_new else "emoji."))
+        time.sleep(1)
+        st.rerun()
+
     # Scope: Pending This Week vs All Pending
     scope_options = ["Pending This Week", "All Pending (Need to Order)"]
     current_scope = db.get_setting("digest_pending_scope", "Pending This Week")
     if current_scope not in scope_options:
         current_scope = "Pending This Week"
     new_scope = st.radio("Scope", options=scope_options, index=scope_options.index(current_scope),
-                         help="Pending This Week: Only orders requested within the Days Back window. All Pending (Need to Order): every currently outstanding order, regardless of request date.")
+                         help="Applies to the emailed Order Requests Digest. Pending This Week: Only orders requested within the Days Back window. All Pending (Need to Order): every currently outstanding order, regardless of request date.")
 
     if new_scope != current_scope:
         db.set_setting("digest_pending_scope", new_scope)
@@ -712,18 +753,102 @@ elif choice == "⚙️ System Settings":
         time.sleep(1)
         st.rerun()
 
-    # Days Back (drives the "this week" window, and is always used by Recent Status Updates)
+    # Days Back — always editable: it drives the digest window, the Recent
+    # Status Updates digest, and (optionally) the vendor manifest below, so
+    # hiding it behind the Scope choice made it unreachable when it was needed.
     current_days_back = int(db.get_setting("digest_days_back", "7"))
-    if new_scope == "Pending This Week":
-        new_days_back = st.number_input("Days Back", min_value=1, max_value=90, value=current_days_back, step=1,
-                                        help="Number of days back to include for the 'Pending This Week' scope. The Recent Status Updates digest also uses this value, regardless of Scope.")
-        if new_days_back != current_days_back:
-            db.set_setting("digest_days_back", str(new_days_back))
-            st.success(f"Days back updated to {new_days_back}.")
-            time.sleep(1)
-            st.rerun()
+    new_days_back = st.number_input(
+        "Days Back", min_value=1, max_value=90, value=current_days_back, step=1,
+        help="Used by: the Order Requests Digest when Scope is 'Pending This Week', "
+             "the Recent Status Updates digest (always), and the vendor manifest "
+             "if you tick its date limit below.",
+    )
+    if new_days_back != current_days_back:
+        db.set_setting("digest_days_back", str(new_days_back))
+        st.success(f"Days back updated to {new_days_back}.")
+        time.sleep(1)
+        st.rerun()
+    if new_scope != "Pending This Week":
+        st.caption("ℹ️ Scope is 'All Pending', so Days Back does not limit the emailed "
+                   "Order Requests Digest — but it still drives Recent Status Updates.")
+
+    st.divider()
+
+    # --- Vendor manifest: which statuses land on the shopping list ---------
+    st.subheader("🛒 Vendor Manifest")
+    st.caption(
+        "Controls the **📊 View Outstanding Orders by Vendor** list on the Manage Order "
+        "Status page. Most of the time you only want what still needs buying, so this "
+        "starts on *Need to order* alone. The emailed digests are not affected."
+    )
+
+    saved_statuses = db.get_setting_list("vendor_manifest_statuses", DEFAULT_MANIFEST_STATUSES)
+    # Live counts beside each status make it obvious what ticking one adds.
+    counts_df = db.get_query_df(
+        "SELECT status, COUNT(*) AS n FROM purchase_requests "
+        "WHERE is_historical IS NOT TRUE GROUP BY status"
+    )
+    counts = dict(zip(counts_df["status"], counts_df["n"])) if not counts_df.empty else {}
+
+    picked = []
+    cols = st.columns(3)
+    for i, status in enumerate(OUTSTANDING_STATUSES):
+        with cols[i % 3]:
+            if st.checkbox(f"{status} ({int(counts.get(status, 0))})",
+                           value=status in saved_statuses,
+                           key=f"manifest_status_{status}"):
+                picked.append(status)
+
+    limit_days_now = db.get_setting("vendor_manifest_limit_days", "False") == "True"
+    limit_days_new = st.checkbox(
+        f"Also limit the manifest to the last {new_days_back} days",
+        value=limit_days_now,
+        help="Off by default: a shopping list should show everything still waiting to be "
+             "ordered, however long ago it was requested.",
+    )
+
+    if picked != saved_statuses:
+        db.set_setting_list("vendor_manifest_statuses", picked)
+        st.success(f"Manifest now includes: {', '.join(picked) if picked else 'nothing selected'}")
+        time.sleep(1)
+        st.rerun()
+
+    apply_to_digest_now = digest_uses_manifest(db)
+    apply_to_digest_new = st.checkbox(
+        "Also apply these statuses to the emailed Order Requests Digest",
+        value=apply_to_digest_now,
+        help="On by default: the digest lists only the statuses ticked above, so the "
+             "email matches your shopping list. Untick it to list every open order "
+             "instead (anything not Received, Cancelled, Lost or Completed). The "
+             "digest's own Scope and Days Back still control the date window either way.",
+    )
+
+    if limit_days_new != limit_days_now:
+        db.set_setting("vendor_manifest_limit_days", str(limit_days_new))
+        st.success("Manifest date limit " + ("enabled." if limit_days_new else "disabled."))
+        time.sleep(1)
+        st.rerun()
+
+    if apply_to_digest_new != apply_to_digest_now:
+        db.set_setting("digest_use_manifest_statuses", str(apply_to_digest_new))
+        st.success("Order Requests Digest now uses "
+                   + ("the manifest statuses." if apply_to_digest_new
+                      else "every open order."))
+        time.sleep(1)
+        st.rerun()
+
+    if picked:
+        shown = sum(int(counts.get(s, 0)) for s in picked)
+        st.caption(f"Manifest currently shows **{shown}** order(s) across "
+                   f"{len(picked)} status(es)"
+                   + (" — and the emailed digest matches it." if apply_to_digest_new
+                      else "; the emailed digest still lists every open order."))
     else:
-        st.caption(f"ℹ️ Days Back is currently **{current_days_back}** (used by the Recent Status Updates digest; only shown here when Scope is 'Pending This Week').")
+        st.warning(
+            "Nothing is selected — the vendor manifest will be empty"
+            + (", and so will the pending section of the emailed digest."
+               if apply_to_digest_new else ".")
+        )
 
     st.divider()
     st.subheader("🧹 System Maintenance")

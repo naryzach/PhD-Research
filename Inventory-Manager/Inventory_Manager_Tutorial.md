@@ -86,8 +86,12 @@ This is the "Pipeline Manager" where you track orders from request to delivery.
 
 - **Weekly Digests**: 
     - **Send Weekly Digest**: Emails all pending orders to the manager. 
-    - **Email Update Digest**: Emails all status changes from the last week.
+    - **Email Update Digest**: Emails everything that changed status *or* was newly
+      requested in the last N days. New requests are marked 🆕.
     - **Preview**: You can preview the text before sending or open it in your mail client.
+- **View Outstanding Orders by Vendor**: Your shopping manifest, grouped by vendor with a
+  running total. By default it lists only items marked **Need to order** — change which
+  statuses appear under ⚙️ System Settings → 🛒 Vendor Manifest.
 - **Updating Status**: Select an order to change its status (e.g., from "Need to order" to "Ordered" or "Shipped").
     - **Order Number**: When marking as "Ordered", you can record the official order #.
     - **Shipping & Tracking**: When marking as "Shipped", you can add the **Tracking #** and **Courier** (FedEx, UPS, etc.). A "Track Package" button will appear for easy tracking.
@@ -110,6 +114,31 @@ Keep the data clean with these tools:
 
 - **Instant Notifications**: Toggle this on to receive an email the *moment* a new request is submitted.
 - **Digest Layout**: Choose between "Abbreviated" (one line per item) or "Detailed" (shows all specs and links) for your weekly emails.
+- **Plain text (no emoji, use - bullets)**: Off by default. When on, every digest — both
+  emails, the instant new-order notification, their subject lines, and the on-screen
+  previews — drops the emoji and uses `-` bullets for item lines. Section headings keep
+  their wording. Product names are left alone, so `Fisherbrand™`, `Corning®`, `0.2 µm`
+  and `30°` all survive. In the Recent Status Updates digest the 🆕 marker becomes
+  `[NEW]` rather than simply disappearing.
+- **Scope**: Applies to the emailed Order Requests Digest only — either orders from the
+  Days Back window, or every outstanding order regardless of age.
+- **Days Back**: Drives the digest window, the Recent Status Updates digest (always), and
+  optionally the vendor manifest.
+- **🛒 Vendor Manifest**: Checkboxes for which statuses appear in **View Outstanding
+  Orders by Vendor**, with a live count beside each. Defaults to **Need to order** alone,
+  since that list is normally "what do I still have to buy". Tick more to widen it — e.g.
+  add *Ordered* to see what's already placed. Two extra options sit below:
+    - *Also limit the manifest to the last N days* — off by default, so nothing old
+      silently drops off the shopping list.
+    - *Also apply these statuses to the emailed Order Requests Digest* — **on by
+      default**, so the email lists exactly the same statuses as the manifest and its
+      header spells out the filter (`Scope: All Outstanding · Status: Need to order`).
+      Untick it to go back to listing every open order. Scope and Days Back still
+      control the date window either way.
+
+  If no statuses are ticked while that option is on, the digest's pending section comes
+  out empty — it does not quietly fall back to listing everything. The Recent Status
+  Updates digest is never affected by any of these settings.
 
 ---
 
