@@ -61,6 +61,7 @@ import time
 import json
 import logging
 import dataclasses
+import itertools
 from pathlib import Path
 
 import numpy as np
@@ -1987,7 +1988,16 @@ class IterativeRefiner:
                 # Always generate at least one fresh backbone so the pool cannot
                 # collapse onto the incumbent HOF.
                 n_fresh = max(1, BACKBONES_PER_TARGET - len(reused))
-                backbones = self.run_rfd3(tname, pdb_path, n_fresh, adaptive_ranges) + reused
+                fresh = self.run_rfd3(tname, pdb_path, n_fresh, adaptive_ranges)
+                # INTERLEAVE, don't concatenate. ESMFold2 batches still die partway on
+                # the large complexes (~62% scored), and the scorer walks designs in
+                # order — so appending reused backbones last made truncation discard
+                # precisely the better half. Measured on it_38-41: reused designs score
+                # +0.081 over fresh (p=1e-46), yet ADAM10 got 2 of ~150 of them scored
+                # and its mean composite fell 0.072. Interleaving makes truncation
+                # sample both populations evenly.
+                backbones = [b for pair in itertools.zip_longest(fresh, reused)
+                             for b in pair if b is not None]
 
                 # Save backbone CIFs (the structural record of each design)
                 for bi, arr in enumerate(backbones):
