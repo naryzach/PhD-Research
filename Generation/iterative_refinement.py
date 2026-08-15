@@ -194,6 +194,15 @@ ADAPTIVE_BIAS_PCT      = 25    # Use top-N% HOF lengths to define new contig ran
 # what makes hot->cold annealing mean something. Set frac to 0.0 to disable.
 HOF_BACKBONE_REUSE_FRAC = 0.5  # share of each iteration's backbones drawn from the HOF
 HOF_REUSE_START         = 3    # first iteration to reuse (HOF needs to be populated)
+# Reuse only pays when the seed is genuinely good. Measured over it_42+ with
+# balanced sampling, benefit tracks the target's HOF floor (rho=+0.80, n=4):
+#   MMP9 seeds >=0.874 -> +0.050   MMP2 >=0.893 -> +0.028
+#   ADAM10    >=0.826 -> -0.014    ADAM17 >=0.782 -> -0.037
+# Below ~0.85 re-sampling a mediocre backbone exploits a weak optimum instead of
+# exploring for a better one. Seeds under this bar are skipped and the slot falls
+# back to fresh RFd3, so reuse switches itself on per target as its HOF improves.
+# Empirical threshold from 4 targets — revisit as the pool grows.
+HOF_REUSE_MIN_COMPOSITE = 0.87
 # AF3_EXPORT_EVERY_N: with RF3 + Boltz-2 both running, each iteration is roughly
 # 6–10 h on an A100.  N=2 targets ~12–20 h between submissions, matching the
 # 30 AF3 jobs/day Google-server cap.
@@ -790,6 +799,12 @@ class IterativeRefiner:
             return []
         entries = sorted(self.state["hof"].get(target_name, []),
                          key=lambda e: e.get("composite_score", 0) or 0, reverse=True)
+        n_hof = len(entries)
+        entries = [e for e in entries
+                   if (e.get("composite_score", 0) or 0) >= HOF_REUSE_MIN_COMPOSITE]
+        if n_hof and not entries:
+            logger.info(f"[{target_name}] no HOF seed clears the reuse bar "
+                        f"({HOF_REUSE_MIN_COMPOSITE:.2f}); exploring with fresh backbones.")
         seen, arrays = set(), []
         for e in entries:
             m = re.search(r"_it(\d+)_d(\d+)", str(e.get("design_id", "")))
@@ -1629,7 +1644,7 @@ class IterativeRefiner:
         print("=" * 60 + "\n")
 
     def export_for_af3_stratified(self, n_total: int = 30, n_bands: int = 3,
-                                  strat_metric: str = None) -> None:
+                                  strat_metric: str = None, min_iteration: int = None) -> None:
         """
         One-time VALIDATION / CALIBRATION-TRANCHE export: instead of sending the
         top-scoring designs (which all sit in a narrow high band and cause range
@@ -1688,20 +1703,52 @@ class IterativeRefiner:
         # Earlier tranches: never re-submit a design, and never clobber a previous
         # manifest — those carry the band assignments the calibration analysis needs,
         # and re-running with the default filename would overwrite them silently.
-        prior = sorted(OUT_BASE.glob("stratified_manifest*.json"))
+        # Read BOTH manifests and submissions. The submission JSON carries the
+        # sequences too, so exclusion still works if a manifest is lost, renamed, or
+        # missed by a sync — which is exactly what happened between tranches 1 and 2.
+        prior = (sorted(OUT_BASE.glob("stratified_manifest*.json"))
+                 + sorted(OUT_BASE.glob("af3_submission_stratified*.json")))
         submitted = set()
         for p in prior:
             try:
+                if p.name.startswith("af3_submission"):
+                    for j in json.load(open(p)):
+                        for s in j.get("sequences", []):
+                            seq = s.get("proteinChain", {}).get("sequence")
+                            if seq:
+                                submitted.add(seq)
+                                break        # chain A is the binder
+                    continue
                 for m in json.load(open(p)):
-                    if m.get("design_id"):
-                        submitted.add(m["design_id"])
+                    # Exclude by SEQUENCE, not design_id. The pool is deduplicated on
+                    # full_seq, and which design_id survives that dedup shifts as the
+                    # pool grows — so an id-keyed exclusion lets the same sequence come
+                    # back under a different id. That is exactly how tranche 2 re-sent
+                    # 7 of 24 designs, burning a quarter of a day's AF3 quota.
+                    if m.get("full_seq"):
+                        submitted.add(m["full_seq"])
             except Exception as exc:
                 logger.warning(f"Could not read prior manifest {p.name}: {exc}")
-        if submitted and "design_id" in pool.columns:
+        if submitted:
             before = len(pool)
-            pool = pool[~pool["design_id"].isin(submitted)]
-            logger.info(f"Excluding {len(submitted)} design(s) already submitted in "
+            pool = pool[~pool["full_seq"].isin(submitted)]
+            logger.info(f"Excluding {len(submitted)} sequence(s) already submitted in "
                         f"{len(prior)} earlier tranche(s): {before} -> {len(pool)} candidates.")
+
+        # TIMESTAMPED, never counted. Counting prior files meant a missing, renamed or
+        # unsynced manifest reset the counter and silently overwrote the previous
+        # tranche's submission + manifest. A timestamp cannot collide and needs no
+        # knowledge of what else is on disk.
+        suffix = "_" + time.strftime("%Y%m%d_%H%M%S")
+
+        # Restrict to iterations >= min_iteration. Use this to draw a tranche only
+        # from rounds that carry the SV structural battery (--sv-battery, it_38+):
+        # tranches 1-2 were sampled from the pre-SV pool, so the mechanistic metrics
+        # have never been tested against AF3 at all.
+        if min_iteration is not None and "iteration" in pool.columns:
+            before = len(pool)
+            pool = pool[pd.to_numeric(pool["iteration"], errors="coerce") >= min_iteration]
+            logger.info(f"Restricting to iteration >= {min_iteration}: {before} -> {len(pool)}")
 
         n_targets       = max(1, len(self.active_targets))
         per_target      = max(n_bands, n_total // n_targets)
@@ -1723,7 +1770,10 @@ class IterativeRefiner:
                 for _, e in take.iterrows():
                     idx  = len(jobs)
                     tseq = self.target_seqs.get(tname, "") or e.get("target_seq", "")
-                    name = f"strat_{tname}_{label}_{idx:02d}"
+                    # Tranche tag keeps job names unique across submissions: the
+                    # index restarts at 0 each tranche, so without it two zips come
+                    # back with identical job names and cannot be told apart.
+                    name = f"strat{suffix}_{tname}_{label}_{idx:02d}"
                     jobs.append({
                         "name":       name,
                         "modelSeeds": [42],
@@ -1749,11 +1799,16 @@ class IterativeRefiner:
             logger.warning("Stratified export produced no jobs.")
             return
 
-        # Tranche 1 keeps the original names; later tranches are suffixed so both the
-        # submission and its manifest survive side by side.
-        suffix   = "" if not prior else f"_{len(prior) + 1}"
         sub_path = OUT_BASE / f"af3_submission_stratified{suffix}.json"
         man_path = OUT_BASE / f"stratified_manifest{suffix}.json"
+        # Refuse to clobber, even with a timestamp collision.
+        for _p in (sub_path, man_path):
+            if _p.exists():
+                logger.warning(f"{_p.name} already exists — writing {_p.stem}_b{_p.suffix}")
+                sub_path = sub_path.with_name(sub_path.stem + "_b" + sub_path.suffix)
+                man_path = man_path.with_name(man_path.stem + "_b" + man_path.suffix)
+                break
+
         with open(sub_path, "w") as f:
             json.dump(jobs, f, indent=2)
         with open(man_path, "w") as f:
@@ -2101,6 +2156,7 @@ def main():
     global RF3_ENABLE, ESMFOLD2_GPUS, INIT_TEMPERATURE, MIN_TEMPERATURE, TEMP_DECAY, ADAPTIVE_BIAS_START
     global SV_BATTERY, SV_OCCLUSION_FILTER, SV_OCCLUSION_MIN
     global BACKBONES_PER_TARGET, LMPNN_SEQS_PER_BACKBONE, HOF_BACKBONE_REUSE_FRAC
+    global HOF_REUSE_MIN_COMPOSITE
 
     parser = argparse.ArgumentParser(description="Iterative TIMP3 binder design.")
     parser.add_argument(
@@ -2182,6 +2238,14 @@ def main():
                              f"designs (default {HOF_BACKBONE_REUSE_FRAC}); the rest are fresh RFd3. "
                              "This is the exploit half of the anneal — 0.0 reverts to the old "
                              "all-fresh behaviour, where iterations are independent draws.")
+    parser.add_argument("--strat-min-iteration", type=int, default=None, metavar="N",
+                        help="Stratified export: only draw from iterations >= N. Use to sample "
+                             "rounds that carry the SV structural battery, so the mechanistic "
+                             "metrics can be tested against AF3.")
+    parser.add_argument("--hof-reuse-min", type=float, default=None, metavar="C",
+                        help=f"Minimum composite for a HOF design to be reused as a seed "
+                             f"(default {HOF_REUSE_MIN_COMPOSITE}). Weak seeds make reuse a net "
+                             "loss; those slots fall back to fresh RFd3. 0.0 reuses any seed.")
     # ── Throughput controls ──
     parser.add_argument("--backbones-per-target", type=int, default=None,
                         help=f"RFd3 backbones per target per iteration (default {BACKBONES_PER_TARGET}). "
@@ -2211,6 +2275,8 @@ def main():
         ADAPTIVE_BIAS_START = 10**9   # effectively never
     if args.hof_reuse_frac is not None:
         HOF_BACKBONE_REUSE_FRAC = max(0.0, min(0.9, args.hof_reuse_frac))
+    if args.hof_reuse_min is not None:
+        HOF_REUSE_MIN_COMPOSITE = args.hof_reuse_min
     if args.backbones_per_target is not None:
         BACKBONES_PER_TARGET = args.backbones_per_target
     if args.seqs_per_backbone is not None:
@@ -2229,7 +2295,8 @@ def main():
 
     if args.stratified_export:
         # Validation mode: write the stratified batch and stop (no iterations).
-        refiner.export_for_af3_stratified(n_total=args.stratified_export)
+        refiner.export_for_af3_stratified(n_total=args.stratified_export,
+                                          min_iteration=args.strat_min_iteration)
         return
 
     refiner.main_loop(max_iterations=args.max_iterations)
