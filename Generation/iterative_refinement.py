@@ -2238,6 +2238,10 @@ def main():
                              f"designs (default {HOF_BACKBONE_REUSE_FRAC}); the rest are fresh RFd3. "
                              "This is the exploit half of the anneal — 0.0 reverts to the old "
                              "all-fresh behaviour, where iterations are independent draws.")
+    parser.add_argument("--strat-metric", default=None, metavar="COL",
+                        help="Stratified export: column to band on (default composite_score). "
+                             "Use e.g. sv_pdockq to test a mechanistic metric prospectively "
+                             "instead of re-testing the composite.")
     parser.add_argument("--strat-min-iteration", type=int, default=None, metavar="N",
                         help="Stratified export: only draw from iterations >= N. Use to sample "
                              "rounds that carry the SV structural battery, so the mechanistic "
@@ -2296,6 +2300,7 @@ def main():
     if args.stratified_export:
         # Validation mode: write the stratified batch and stop (no iterations).
         refiner.export_for_af3_stratified(n_total=args.stratified_export,
+                                          strat_metric=args.strat_metric,
                                           min_iteration=args.strat_min_iteration)
         return
 
