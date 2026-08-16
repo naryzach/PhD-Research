@@ -31,6 +31,7 @@ Idempotent and safe to re-run; each round summary is backed up once to *.bak.
 """
 import argparse
 import os
+import time
 import shutil
 import sys
 from pathlib import Path
@@ -112,6 +113,19 @@ def recover_one(cif_path: Path) -> dict:
     }
 
 
+_SVB = None
+
+
+def _sv_battery(cif_path: str, target_id: str) -> dict:
+    """SV structural battery for one predicted complex. Imported lazily so plain
+    recovery keeps working where sv_bridge is unavailable."""
+    global _SVB
+    if _SVB is None:
+        import sv_bridge as svb
+        _SVB = svb
+    return _SVB.sv_battery(cif_path, BINDER_CHAIN, TARGET_CHAIN, target_id=target_id)
+
+
 _SPEC_MOD = None
 
 
@@ -144,6 +158,10 @@ def main():
     ap.add_argument("--loops", nargs="+", default=["AB", "C", "EF"],
                     help="Loops the run redesigned — must match the run being rebuilt, since the "
                          "HOF's loop-length bookkeeping is per-loop (default: AB C EF).")
+    ap.add_argument("--sv", action="store_true",
+                    help="Also compute the SV structural battery (sv_pdockq etc.) from each "
+                         "saved CIF. CPU-only. sv_pdockq is the one metric validated against "
+                         "AF3 (prospective rho=+0.66, n=24); the ESM composite is not.")
     ap.add_argument("--pair-mode", action="store_true",
                     help="Specificity pool: each design was folded against BOTH targets "
                          "(<id>::on / <id>::off). Recovers both sides and scores with the "
@@ -160,7 +178,8 @@ def main():
         sys.exit(f"No it_*/round_summary.csv under {out_base}")
     print(f"Run directory: {out_base}\nRound summaries: {len(csvs)}")
 
-    n_rows = n_have_cif = n_recovered = n_already = 0
+    n_rows = n_have_cif = n_recovered = n_already = n_sv = 0
+    _t0 = time.time()
     per_target = {}
     missing = {}
     seen_targets = set()   # every target in the pool, not just newly-recovered ones
@@ -173,6 +192,28 @@ def main():
             n_rows += 1
             if isinstance(r.get("target_name"), str):
                 seen_targets.add(r["target_name"])
+
+            # SV backfill: independent of score recovery — a row can already be
+            # scored yet still lack the structural battery (everything before
+            # --sv-battery was switched on).
+            if args.sv and not args.dry_run:
+                have_sv = ("sv_pdockq" in df.columns) and pd.notna(r.get("sv_pdockq"))
+                if not have_sv:
+                    cif = find_cif(out_base, it, str(r.get("target_name")),
+                                   str(r.get("design_id")),
+                                   "on" if args.pair_mode else None)
+                    if cif is not None:
+                        try:
+                            for k, v in _sv_battery(str(cif), str(r.get("target_name"))).items():
+                                df.at[i, k] = v
+                            changed = True
+                            n_sv += 1
+                            if n_sv == 1 or n_sv % 100 == 0:
+                                print(f"    ... sv {n_sv} designs "
+                                      f"({(time.time()-_t0)/n_sv:.1f}s each, "
+                                      f"{it})", flush=True)
+                        except Exception:
+                            pass
             # "Scored" means the ranking inputs are present — NOT esm_iptm, which
             # the composite never reads.
             if "esm_plddt" in df.columns and pd.notna(r.get("esm_plddt")):
@@ -221,8 +262,16 @@ def main():
             if not bak.exists():
                 shutil.copy2(csv, bak)
             df.to_csv(csv, index=False)
-            print(f"  {it}: recovered, summary rewritten", flush=True)
+            # Per-file progress. The SV battery costs ~1.7 s/design, so a full
+            # backfill runs for hours; silence that long is indistinguishable from
+            # a hang, and a kill loses only the file in progress (~17 min).
+            done = csvs.index(csv) + 1
+            print(f"  {it}: written  ({done}/{len(csvs)} summaries"
+                  + (f", sv+{n_sv}" if args.sv else "")
+                  + f", recovered {n_recovered})", flush=True)
 
+    if args.sv:
+        print(f"SV battery computed for {n_sv} design(s).")
     print(f"\nRows: {n_rows} | already scored: {n_already} | "
           f"{'recoverable' if args.dry_run else 'recovered'} from CIF: "
           f"{n_have_cif if args.dry_run else n_recovered}")
