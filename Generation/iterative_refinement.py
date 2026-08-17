@@ -602,6 +602,10 @@ def calc_composite(entry: dict) -> float:
             "esm_plddt":                 _normalize_plddt(entry.get("esm_plddt")),
             "esm_iface_contact_density": entry.get("esm_iface_contact_density"),
             "esm_iface_n_iface_res":     entry.get("esm_iface_n_iface_res"),
+            # pDockQ (SV battery) — the dominant, AF3-validated term. Absent for
+            # designs predating --sv-battery until recover_from_cifs.py --sv fills
+            # it; the weights renormalise, so those fall back to the old composite.
+            "sv_pdockq":                 entry.get("sv_pdockq"),
         })
 
     # ── Boltz-2-scored ──

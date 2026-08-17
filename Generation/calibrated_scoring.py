@@ -64,6 +64,14 @@ AF3_NORM = {
 }
 ESM_NORM = {
     "esm_iface_contact_density": (15.0, 40.0, True), # the one trustworthy positive ESM feature
+    # pDockQ from the SV battery: the ONLY local metric validated against AF3.
+    # 2026-08-15, ESMFold2-predicted complexes vs AF3 ipTM, target-centred Spearman:
+    #   prospective  (it>=38, n=24, pre-registered) rho = +0.655  p = 0.0005
+    #   retrospective(it 0-36, n=36)                rho = +0.364  p = 0.029
+    #   pooled                    (n=60)            rho = +0.434  p = 0.0005
+    # The ESM composite on the same designs: rho = +0.112, p = 0.40 (i.e. nothing).
+    # Range = p10-p90 of the 3,325-design pool (0.119 / 0.443), rounded.
+    "sv_pdockq": (0.12, 0.44, True),
 }
 
 # ── AF3 binding-prior weights (positive foldability/interface terms only) ────
@@ -94,9 +102,10 @@ FOLD_GATE = {
 # floor; contact_density is the ESMFold2 binding-ish ranker; esm_plddt is a mild
 # (positive-sense) developability prior.
 COMPOSITE_ESMFOLD2 = {
-    "fold_base":       0.50,
-    "contact_density": 0.35,
-    "plddt":           0.15,
+    "fold_base":       0.25,   # was 0.50 -- still awarded once past the foldability gate
+    "pdockq":          0.50,   # NEW dominant term: the only AF3-validated local metric
+    "contact_density": 0.15,   # was 0.35 -- kept, but it is not the validated axis
+    "plddt":           0.10,   # was 0.15 -- mild developability prior
 }
 ESM_GATE_FAIL_SCORE = 0.05    # designs failing the foldability floor rank below all folded ones
 
@@ -186,10 +195,16 @@ def esmfold2_stage_score(metrics: dict, weights: dict = None, gate: dict = None)
     if not esm_passes_fold_gate(metrics, gate):
         return ESM_GATE_FAIL_SCORE
     cd = _norm(ESM_NORM, "esm_iface_contact_density", metrics.get("esm_iface_contact_density"))
+    # pDockQ is the validated term (see ESM_NORM). Designs without it -- anything
+    # predating --sv-battery and not yet backfilled by recover_from_cifs.py --sv --
+    # yield NaN here and the remaining weights renormalise, reproducing the old
+    # composite exactly. So a partially backfilled pool degrades gracefully rather
+    # than ranking un-backfilled designs as zero.
+    pq = _norm(ESM_NORM, "sv_pdockq", metrics.get("sv_pdockq"))
     plddt = metrics.get("esm_plddt")
     pl = min(1.0, max(0.0, float(plddt) / 100.0)) if _isnum(plddt) else float("nan")
     num, den = w["fold_base"], w["fold_base"]        # fold_base always awarded once gated in
-    for key, val in (("contact_density", cd), ("plddt", pl)):
+    for key, val in (("pdockq", pq), ("contact_density", cd), ("plddt", pl)):
         if not np.isnan(val):
             num += w[key] * val
             den += w[key]
