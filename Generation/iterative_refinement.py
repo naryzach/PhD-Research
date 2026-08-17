@@ -201,7 +201,15 @@ HOF_REUSE_START         = 3    # first iteration to reuse (HOF needs to be popul
 # Below ~0.85 re-sampling a mediocre backbone exploits a weak optimum instead of
 # exploring for a better one. Seeds under this bar are skipped and the slot falls
 # back to fresh RFd3, so reuse switches itself on per target as its HOF improves.
-# Empirical threshold from 4 targets — revisit as the pool grows.
+# SCALE-DEPENDENT, and currently NON-BINDING. 0.87 was fit against the old composite
+# (pool mean 0.77, SD 0.05). With sv_pdockq as the dominant term the scale changed to
+# mean 0.669, SD 0.161, and every target's top-75 now clears 0.87 — so the gate admits
+# all seeds. That is deliberate: the evidence for the bar (reuse benefit tracking the
+# HOF floor, rho=+0.80 on 4 targets, p=0.20) was measured on a ranker we have since
+# replaced, so it does not transfer, and inventing a new threshold on no evidence would
+# be worse than running ungated. Re-measure fresh-vs-reused under the new ranker (split
+# design_id by index parity — interleaved, so even=fresh, odd=reused) and set this from
+# that, not from the old numbers.
 HOF_REUSE_MIN_COMPOSITE = 0.87
 # AF3_EXPORT_EVERY_N: with RF3 + Boltz-2 both running, each iteration is roughly
 # 6–10 h on an A100.  N=2 targets ~12–20 h between submissions, matching the

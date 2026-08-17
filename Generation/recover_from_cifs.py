@@ -162,6 +162,11 @@ def main():
                     help="Also compute the SV structural battery (sv_pdockq etc.) from each "
                          "saved CIF. CPU-only. sv_pdockq is the one metric validated against "
                          "AF3 (prospective rho=+0.66, n=24); the ESM composite is not.")
+    ap.add_argument("--recompute-composite", action="store_true",
+                    help="Recompute composite_score for every scored row from its stored "
+                         "esm_*/sv_* columns using the CURRENT calibrated_scoring weights. "
+                         "Implied by --sv: adding sv_pdockq changes the composite, so leaving "
+                         "the stored value in place would rebuild the HOF on the old ranking.")
     ap.add_argument("--pair-mode", action="store_true",
                     help="Specificity pool: each design was folded against BOTH targets "
                          "(<id>::on / <id>::off). Recovers both sides and scores with the "
@@ -178,7 +183,9 @@ def main():
         sys.exit(f"No it_*/round_summary.csv under {out_base}")
     print(f"Run directory: {out_base}\nRound summaries: {len(csvs)}")
 
-    n_rows = n_have_cif = n_recovered = n_already = n_sv = 0
+    n_rows = n_have_cif = n_recovered = n_already = n_sv = n_recomp = 0
+    # Adding sv_pdockq changes the composite, so --sv implies a refresh.
+    recompute = args.recompute_composite or args.sv
     _t0 = time.time()
     per_target = {}
     missing = {}
@@ -214,6 +221,24 @@ def main():
                                       f"{it})", flush=True)
                         except Exception:
                             pass
+            # Refresh composite_score from whatever the row now holds (including any
+            # sv_* just written above). Reads back through df.at rather than the
+            # original row, which predates this pass.
+            if recompute and "esm_plddt" in df.columns and pd.notna(df.at[i, "esm_plddt"]):
+                if str(df.at[i, "source"]) != "AF3":     # never clobber AF3 ground truth
+                    def _g(col):
+                        return df.at[i, col] if col in df.columns else None
+                    new = cs.esmfold2_stage_score({
+                        "esm_plddt":                 _g("esm_plddt"),
+                        "esm_iface_contact_density": _g("esm_iface_contact_density"),
+                        "esm_iface_n_iface_res":     _g("esm_iface_n_iface_res"),
+                        "sv_pdockq":                 _g("sv_pdockq"),
+                    })
+                    if not np.isclose(float(df.at[i, "composite_score"] or 0), new, atol=1e-9):
+                        df.at[i, "composite_score"] = new
+                        changed = True
+                        n_recomp += 1
+
             # "Scored" means the ranking inputs are present — NOT esm_iptm, which
             # the composite never reads.
             if "esm_plddt" in df.columns and pd.notna(r.get("esm_plddt")):
@@ -272,6 +297,9 @@ def main():
 
     if args.sv:
         print(f"SV battery computed for {n_sv} design(s).")
+    if recompute:
+        print(f"composite_score recomputed for {n_recomp} design(s) "
+              f"using the current calibrated_scoring weights.")
     print(f"\nRows: {n_rows} | already scored: {n_already} | "
           f"{'recoverable' if args.dry_run else 'recovered'} from CIF: "
           f"{n_have_cif if args.dry_run else n_recovered}")
