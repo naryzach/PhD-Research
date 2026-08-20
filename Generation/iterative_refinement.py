@@ -57,6 +57,7 @@ except Exception:
 
 import re
 import sys
+import tempfile
 import time
 import json
 import logging
@@ -896,7 +897,7 @@ class IterativeRefiner:
         return chosen
 
     def run_rfd3_partial(self, target_name: str, seed_array, n_designs: int,
-                         partial_t: float) -> list:
+                         partial_t: float, seed_path=None) -> list:
         """
         Perturb a grafted seed by `partial_t` Angstroms and re-denoise.
 
@@ -915,13 +916,25 @@ class IterativeRefiner:
         fixed = (_ranges(DESIGN_BINDER_CHAIN, fixed_binder)
                  + _ranges(DESIGN_TARGET_CHAIN, [int(i) for i in tgt_ids]))
 
+        # Write the seed and pass it as `input=`, the same way run_rfd3 does.
+        # atom_array_input is a real field but rfd3's load_input validator reads
+        # data["input"] unconditionally (KeyError without it), and the file also
+        # leaves an inspectable record of exactly what was seeded.
+        if seed_path is None:
+            seed_path = Path(tempfile.gettempdir()) / f"seed_{target_name}_{os.getpid()}.pdb"
+        seed_path = Path(seed_path)
+        seed_path.parent.mkdir(parents=True, exist_ok=True)
+        _pdb = PDBFile()
+        _pdb.set_structure(seed_array)
+        _pdb.write(str(seed_path))
+
         rfd3_cfg = RFD3InferenceConfig(
             diffusion_batch_size=min(10, n_designs),
             low_memory_mode=False,
         )
         engine = RFD3InferenceEngine(**dataclasses.asdict(rfd3_cfg))
         spec = DesignInputSpecification(
-            atom_array_input=seed_array,
+            input=str(seed_path),
             partial_t=float(partial_t),
             select_fixed_atoms=",".join(fixed),
         )
@@ -2236,7 +2249,9 @@ class IterativeRefiner:
                             if len(perturbed) >= n_seeded:
                                 break
                             try:
-                                perturbed += self.run_rfd3_partial(tname, seed, per, pt)
+                                perturbed += self.run_rfd3_partial(
+                                    tname, seed, per, pt,
+                                    seed_path=it_dir / "seeds" / tname / f"{sid}.pdb")
                             except Exception as exc:
                                 logger.warning(f"[{tname}] partial diffusion failed on "
                                                f"{sid}: {exc}")
