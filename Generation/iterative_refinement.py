@@ -883,10 +883,25 @@ class IterativeRefiner:
             if scaf > DRIFT_MAX_SCAFFOLD or tgt > DRIFT_MAX_TARGET:
                 n_drift += 1
                 continue
+            # Seed from the RAW predicted complex, not a graft. Grafting a design's
+            # loops onto the canonical scaffold zeroes drift but SNAPS THE BACKBONE:
+            # the loop spans a gap sized by its own scaffold, and the template's gap
+            # differs by 2.5-6 A, so one or both junctions break (measured up to 6.25 A
+            # C-N, and one compressed to 0.90 A). A per-loop local fit reduced but did
+            # not remove it -- a loop cannot match both anchors at once. Raw predictions
+            # are internally clean (all peptide bonds 1.30-1.45 A, zero breaks), so we
+            # seed from them and BOUND drift with the gate above instead: every seed is
+            # re-measured against the ORIGINAL template each round, so drift is capped
+            # at the threshold rather than compounding.
             try:
-                seed = cseed.build_seed_template(cif, tpl, loops)
+                seed = cseed._load(cif)
+                jr = cseed.junction_report(seed, DESIGN_BINDER_CHAIN)
+                if jr["n_broken"]:
+                    logger.debug(f"[{target_name}] {e.get('design_id')}: "
+                                 f"{jr['n_broken']} broken peptide bonds; skipping")
+                    continue
             except Exception as exc:
-                logger.debug(f"[{target_name}] graft failed for {e.get('design_id')}: {exc}")
+                logger.debug(f"[{target_name}] seed load failed for {e.get('design_id')}: {exc}")
                 continue
             chosen.append((e.get("design_id"), seed))
             lineage[parent] = lineage.get(parent, 0) + 1
@@ -1299,6 +1314,16 @@ class IterativeRefiner:
                 if SV_OCCLUSION_FILTER:
                     c["sv_occlusion_pass"] = svb.occlusion_pass(sv, SV_OCCLUSION_MIN)
             c["composite_score"] = calc_composite(c)
+            # Score the OLD ESM ranker too (no pdockq term) and keep it as a column.
+            # It ranks nothing in the pipeline -- composite_score drives everything --
+            # but it lets us ask later whether its null result against AF3 was a
+            # property of the metric or an artifact of the open-loop pool it was
+            # measured on.
+            c["composite_esm_legacy"] = cs.esmfold2_stage_score(
+                {"esm_plddt":                 _normalize_plddt(c.get("esm_plddt")),
+                 "esm_iface_contact_density": c.get("esm_iface_contact_density"),
+                 "esm_iface_n_iface_res":     c.get("esm_iface_n_iface_res")},
+                weights=cs.COMPOSITE_ESMFOLD2_LEGACY)
             if (SV_BATTERY and SV_OCCLUSION_FILTER
                     and c.get("sv_occlusion_pass") is False):
                 c["composite_score"] = 0.0        # sanity gate: exclude from HOF/ranking
@@ -2237,8 +2262,17 @@ class IterativeRefiner:
                     # Conformation refinement: perturb the loop GEOMETRY of the beam's
                     # seeds, which is the 89% axis, instead of re-rolling sequences on
                     # frozen geometry (the 11% axis the old reuse path worked on).
-                    pt = max(PARTIAL_T_MIN,
-                             PARTIAL_T_INIT * (PARTIAL_T_DECAY ** max(0, it - HOF_REUSE_START)))
+                    # Anneal from the iteration conformation mode STARTED, not from
+                    # the absolute iteration count. Switching it on mid-campaign (state
+                    # was at it=55) would otherwise begin at the floor and skip the
+                    # exploration phase entirely.
+                    if self.state.get("conformation_start") is None:
+                        self.state["conformation_start"] = it
+                        logger.info(f"Conformation mode begins at iteration {it}; "
+                                    f"partial_t anneals {PARTIAL_T_INIT}->{PARTIAL_T_MIN} A "
+                                    f"from here.")
+                    k = max(0, it - int(self.state["conformation_start"]))
+                    pt = max(PARTIAL_T_MIN, PARTIAL_T_INIT * (PARTIAL_T_DECAY ** k))
                     n_fresh_c = max(1, int(BACKBONES_PER_TARGET * BEAM_FRESH_FRACTION))
                     n_seeded = BACKBONES_PER_TARGET - n_fresh_c
                     seeds = self._beam_seeds(tname, BEAM_WIDTH)

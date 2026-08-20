@@ -49,6 +49,18 @@ INIT_TEMPERATURE=0.60               # HOT start (fresh run only)
 MIN_TEMPERATURE=0.10                # COLD confident floor
 TEMP_DECAY=0.94                     # slow cool -> ~29 iters to reach the floor
 MAX_ITERATIONS=40                   # full anneal + ~11 exploit iterations at the floor
+# ── Conformation refinement (the 89% axis) ──
+# Loop CONFORMATION carries ~89% of sv_pdockq; the sequence on it ~11%. Set
+# CONFORMATION_MODE=1 to perturb grafted seeds with RFd3 partial diffusion instead
+# of re-sequencing frozen backbones. Measured: partial_t=8 A moves loops ~4 A while
+# the pinned scaffold/target hold at 0.04/0.03 A, and it runs ~5x faster than full
+# RFd3 because it only walks the tail of the noise schedule.
+CONFORMATION_MODE="${CONFORMATION_MODE:-0}"                 # 1 = conformation refinement; 0 = archived reuse behaviour
+BEAM_WIDTH="${BEAM_WIDTH:-10}"                       # seeds carried between rounds
+PARTIAL_T="${PARTIAL_T:-8.0}"                       # Angstroms of noise, first conformation round (<=15)
+PARTIAL_T_MIN="${PARTIAL_T_MIN:-2.0}"                   # noise floor for fine loop refinement
+BEAM_FRESH_FRACTION="${BEAM_FRESH_FRACTION:-0.25}"            # share generated unseeded, guards against a local optimum
+
 HOF_REUSE_FRAC=0.5                  # share of each round's backbones re-sampled from the HOF's
                                     # best designs (rest are fresh RFd3). This is the EXPLOIT half
                                     # of the anneal -- with 0.0 every iteration is an independent
@@ -143,6 +155,12 @@ echo "Targets: $TARGETS | Loops: $LOOPS | ${BACKBONES_PER_TARGET}bb x ${SEQS_PER
      "SV: ${sv_flags[*]:-none} | HOF backbone reuse: ${HOF_REUSE_FRAC}" | tee -a "$LOG"
 
 # ── Run with crash-resume ────────────────────────────────────────────────────
+conf_flags=()
+if [[ "$CONFORMATION_MODE" == "1" ]]; then
+  conf_flags=(--conformation-mode --beam-width "$BEAM_WIDTH" --partial-t "$PARTIAL_T"
+              --partial-t-min "$PARTIAL_T_MIN" --beam-fresh-fraction "$BEAM_FRESH_FRACTION")
+fi
+
 attempt=0
 while (( attempt <= MAX_RETRIES )); do
   echo "=== launch attempt $attempt at $(date) ===" | tee -a "$LOG"
@@ -156,7 +174,7 @@ while (( attempt <= MAX_RETRIES )); do
     --temp-decay "$TEMP_DECAY" \
     --esmfold2-gpus "$ESMFOLD2_GPUS" \
     --max-iterations "$MAX_ITERATIONS" \
-    --hof-reuse-frac "$HOF_REUSE_FRAC" \
+    --hof-reuse-frac "$HOF_REUSE_FRAC"     ${conf_flags[@]+"${conf_flags[@]}"} \
     ${sv_flags[@]+"${sv_flags[@]}"} \
     >> "$LOG" 2>&1
   rc=$?

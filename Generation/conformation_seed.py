@@ -134,10 +134,51 @@ def drift_rmsd(design_path, template_path, loops=("AB", "C", "EF")):
     return scaf, float(bio_rmsd(tB[:m], fitB))
 
 
+def junction_report(arr, chain=BINDER_CHAIN):
+    """
+    Peptide-bond geometry along one chain: {min, max, n_broken, worst_at}.
+
+    A broken bond (C(i)-N(i+1) outside ~1.0-2.0 A) means the backbone is severed or
+    clashing. Raw ESMFold2 predictions come back clean (1.30-1.45 A); grafted
+    structures do not, which is why the pipeline seeds from predictions directly.
+    """
+    a = arr[arr.chain_id == chain]
+    rids = sorted({int(i) for i in a.res_id})
+    coords = {}
+    for nm in ("C", "N"):
+        m = a.atom_name == nm
+        for rid, xyz in zip(a.res_id[m], a.coord[m]):
+            coords.setdefault(nm, {})[int(rid)] = xyz
+    ds, worst_at, worst = [], None, 0.0
+    for r in rids[:-1]:
+        c = coords.get("C", {}).get(r)
+        n = coords.get("N", {}).get(r + 1)
+        if c is None or n is None:
+            continue
+        d = float(np.linalg.norm(c - n))
+        ds.append(d)
+        if abs(d - 1.33) > worst:
+            worst, worst_at = abs(d - 1.33), r
+    if not ds:
+        return {"min": float("nan"), "max": float("nan"), "n_broken": 0, "worst_at": None}
+    ds = np.array(ds)
+    return {"min": float(ds.min()), "max": float(ds.max()),
+            "n_broken": int(((ds < 1.0) | (ds > 2.0)).sum()), "worst_at": worst_at}
+
+
 def build_seed_template(design_path, template_path, loops=("AB", "C", "EF"),
-                        out_path=None):
+                        out_path=None, flank=8):
     """
     Canonical scaffold + canonical target + THIS DESIGN'S loop conformations.
+
+    NOT USED BY THE PIPELINE -- kept for reference and for anyone wanting a strictly
+    canonical scaffold. It zeroes drift (0.000 A scaffold and target) but SNAPS THE
+    BACKBONE at the graft junctions: a loop spans a gap sized by its own scaffold and
+    the template's gap differs by 2.5-6 A, so one or both anchors cannot be met. Even
+    with a per-loop local fit, 1-3 junctions per seed stay outside 1.0-2.0 A (worst
+    measured 6.25 A; one compressed to 0.90 A, a clash). Check any output with
+    junction_report() before trusting it. The pipeline seeds from raw predictions,
+    which are internally clean, and bounds drift with drift_rmsd() instead.
 
     The design is first superimposed onto the template through their paired constant
     binder residues, which puts its loops into the template's frame. The output chain
@@ -154,12 +195,31 @@ def build_seed_template(design_path, template_path, loops=("AB", "C", "EF"),
     if n < 20:
         raise ValueError(f"only {n} paired constant residues; loop detection failed")
 
-    # Put the design into the template frame using the constant scaffold only.
-    dca = _ca_of(des, BINDER_CHAIN, d_const[:n])
-    tca = _ca_of(tpl, BINDER_CHAIN, t_const[:n])
-    k = min(len(dca), len(tca))
-    _, transform = superimpose(tca[:k], dca[:k])
-    des_fit = transform.apply(des)
+    # PER-LOOP LOCAL FIT. A single global superposition on the whole scaffold leaves
+    # the two frames several Angstrom apart near any individual loop, which snaps the
+    # peptide bond at the graft junction: measured 3.94 A at AB-start, 3.10 at AB-end,
+    # 2.73 at C-start, and 0.90 (a clash) at EF-end. Aligning on the residues that
+    # immediately flank each loop places that loop into its own local context instead.
+    d_const_sorted = np.sort(d_const)
+    t_const_sorted = np.sort(t_const)[:len(d_const_sorted)]
+    loop_coords = {}                       # design res_id -> transformed atom array
+    for lname, ids in d_loops.items():
+        if not len(ids):
+            continue
+        a = int(ids[0])
+        k_before = int(np.searchsorted(d_const_sorted, a))
+        lo = max(0, k_before - flank)
+        hi = min(len(d_const_sorted), k_before + flank)
+        d_fl = d_const_sorted[lo:hi]
+        t_fl = t_const_sorted[lo:hi]
+        m = min(len(d_fl), len(t_fl))
+        if m < 4:
+            raise ValueError(f"loop {lname}: only {m} flanking residues to align on")
+        _, tr = superimpose(_ca_of(tpl, BINDER_CHAIN, t_fl[:m]),
+                            _ca_of(des, BINDER_CHAIN, d_fl[:m]))
+        local = tr.apply(des)
+        for rid in ids:
+            loop_coords[int(rid)] = local[_res_mask(local, BINDER_CHAIN, [int(rid)])]
 
     d_loop_set = {int(i) for ids in d_loops.values() for i in ids}
     _, d_resids = _seq_and_resids(des, BINDER_CHAIN)
@@ -168,8 +228,8 @@ def build_seed_template(design_path, template_path, loops=("AB", "C", "EF"),
     pieces, new_id = [], 1
     for rid in d_resids:
         rid = int(rid)
-        if rid in d_loop_set:                      # inherited loop: design coords
-            sub = des_fit[_res_mask(des_fit, BINDER_CHAIN, [rid])]
+        if rid in d_loop_set:                      # inherited loop: design coords,
+            sub = loop_coords[rid]                  # placed by its own local fit
         else:                                       # canonical scaffold: template coords
             try:
                 t_rid = int(next(t_const_iter))

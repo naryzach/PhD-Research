@@ -107,6 +107,17 @@ COMPOSITE_ESMFOLD2 = {
     "contact_density": 0.15,   # was 0.35 -- kept, but it is not the validated axis
     "plddt":           0.10,   # was 0.15 -- mild developability prior
 }
+# The pre-2026-08-15 ESMFold2 weights, kept so every design can ALSO be scored the
+# old way. That ranker showed no relationship to AF3 (n=60, target-centred rho=+0.11,
+# p=0.40) -- but it was only ever measured on a pool built by an open loop, so scoring
+# it alongside the new ranker lets us test whether its failure was an artifact of how
+# designs were being generated rather than of the metric itself.
+COMPOSITE_ESMFOLD2_LEGACY = {
+    "fold_base":       0.50,
+    "contact_density": 0.35,
+    "plddt":           0.15,
+}
+
 ESM_GATE_FAIL_SCORE = 0.05    # designs failing the foldability floor rank below all folded ones
 
 
@@ -203,11 +214,15 @@ def esmfold2_stage_score(metrics: dict, weights: dict = None, gate: dict = None)
     pq = _norm(ESM_NORM, "sv_pdockq", metrics.get("sv_pdockq"))
     plddt = metrics.get("esm_plddt")
     pl = min(1.0, max(0.0, float(plddt) / 100.0)) if _isnum(plddt) else float("nan")
-    num, den = w["fold_base"], w["fold_base"]        # fold_base always awarded once gated in
+    base = w.get("fold_base", 0.0)
+    num, den = base, base                            # fold_base always awarded once gated in
+    # w.get, not w[...]: a weight dict may legitimately omit a term (the legacy
+    # weights carry no pdockq), and the remaining weights then renormalize.
     for key, val in (("pdockq", pq), ("contact_density", cd), ("plddt", pl)):
-        if not np.isnan(val):
-            num += w[key] * val
-            den += w[key]
+        wt = w.get(key, 0.0)
+        if wt and not np.isnan(val):
+            num += wt * val
+            den += wt
     return float(num / den) if den > 0 else float(w["fold_base"])
 
 
