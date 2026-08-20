@@ -201,6 +201,32 @@ HOF_REUSE_START         = 3    # first iteration to reuse (HOF needs to be popul
 # Below ~0.85 re-sampling a mediocre backbone exploits a weak optimum instead of
 # exploring for a better one. Seeds under this bar are skipped and the slot falls
 # back to fresh RFd3, so reuse switches itself on per target as its HOF improves.
+# ── Conformation refinement (partial diffusion) ──────────────────────────────
+# Measured 2026-08-17: ~89% of sv_pdockq variance is set by the loop CONFORMATION
+# and ~11% by the sequence on it. HOF backbone reuse only re-rolls the sequence, so
+# nine iterations moved the best design by 0.001. Partial diffusion perturbs the
+# conformation itself: RFd3 accepts `partial_t` = ANGSTROMS of noise to add before
+# re-denoising (rfd3 recommends t <= 15), which is a direct explore/exploit knob on
+# the axis that actually carries the score.
+#
+# Seeds are grafted first (conformation_seed.build_seed_template): the design's loop
+# coordinates are transplanted onto the CANONICAL scaffold and target, so drift
+# cannot accumulate across rounds. Raw predictions were already 2.5-6.1 A off the
+# template scaffold; grafted seeds measure 0.000 A by construction.
+CONFORMATION_MODE      = False  # opt-in; False keeps the archived reuse behaviour
+BEAM_WIDTH             = 10     # seeds carried between rounds
+BEAM_FRESH_FRACTION    = 0.25   # share of each round generated unseeded, as insurance
+                                # against the beam settling into a local optimum
+PARTIAL_T_INIT         = 8.0    # Angstroms of noise, first conformation round
+PARTIAL_T_MIN          = 2.0    # floor: fine loop refinement
+PARTIAL_T_DECAY        = 0.90   # per-iteration multiplier
+BEAM_MAX_PER_PARENT    = 3      # cap seeds sharing one parent lineage
+BEAM_MIN_LOOP_DIFF     = 2      # min differing loop residues between two beam seeds.
+                                # Not optional: reused designs were already 26% unique
+                                # on MMP9 with one sequence appearing 91 times.
+DRIFT_MAX_SCAFFOLD     = 6.0    # A; seeds whose scaffold strayed further are ineligible
+DRIFT_MAX_TARGET       = 4.0    # A; ditto for the supposedly-fixed target chain
+
 # SCALE-DEPENDENT, and currently NON-BINDING. 0.87 was fit against the old composite
 # (pool mean 0.77, SD 0.05). With sv_pdockq as the dominant term the scale changed to
 # mean 0.669, SD 0.161, and every target's top-75 now clears 0.87 — so the gate admits
@@ -552,6 +578,22 @@ def _contacts_score(n_contacts):
     return min(1.0, _safe(n_contacts) / N_CONTACTS_NORM)
 
 
+def _ranges(chain: str, resids: list) -> list:
+    """Collapse residue ids into contiguous 'A12-30' selection tokens."""
+    out, ids = [], sorted(set(int(i) for i in resids))
+    if not ids:
+        return out
+    start = prev = ids[0]
+    for i in ids[1:]:
+        if i == prev + 1:
+            prev = i
+            continue
+        out.append(f"{chain}{start}-{prev}" if prev > start else f"{chain}{start}")
+        start = prev = i
+    out.append(f"{chain}{start}-{prev}" if prev > start else f"{chain}{start}")
+    return out
+
+
 def _normalize_plddt(val) -> float:
     """Coerce pLDDT to the 0–100 scale (Boltz/RF3 return 0–1, AF3 returns 0–100)."""
     v = _safe(val, np.nan)
@@ -789,6 +831,114 @@ class IterativeRefiner:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.state_path, "w") as f:
             json.dump(self.state, f, indent=2, default=_jsonable)
+
+    # ── Conformation refinement: beam seeds + partial diffusion ───────────────
+
+    def _beam_seeds(self, target_name: str, n_want: int) -> list:
+        """
+        Pick up to `n_want` HOF designs to seed the next round, and graft each onto
+        the canonical template.
+
+        Three filters, in order:
+          drift     — the prediction's scaffold/target must not have strayed
+                      (raw predictions run 2.5-6.1 A off; anything worse is not a
+                      structure we want to carry forward)
+          lineage   — at most BEAM_MAX_PER_PARENT seeds from one parent, so one good
+                      design cannot take over the beam
+          diversity — seeds must differ by BEAM_MIN_LOOP_DIFF loop residues from every
+                      seed already chosen
+
+        Returns [(design_id, seed_atom_array)]. Fewer than n_want is fine; the caller
+        makes up the difference with fresh RFd3.
+        """
+        import conformation_seed as cseed
+
+        entries = sorted(self.state["hof"].get(target_name, []),
+                         key=lambda e: e.get("composite_score", 0) or 0, reverse=True)
+        tcfg = TARGETS[target_name]
+        tpl = str(DATA_DIR / tcfg["pdb"])
+        loops = [lc["name"] for lc in self.selected_loops]
+
+        chosen, lineage, loopsigs = [], {}, []
+        n_drift = n_dup = 0
+        for e in entries:
+            if len(chosen) >= n_want:
+                break
+            cif = e.get("esm_cif")
+            if not cif or not Path(cif).exists():
+                continue
+            parent = str(e.get("parent_id") or e.get("design_id", ""))[:40]
+            if lineage.get(parent, 0) >= BEAM_MAX_PER_PARENT:
+                continue
+            sig = "".join(str(e.get(f"loop_{n}_seq", "")) for n in loops)
+            if any(sum(a != b for a, b in zip(sig, o)) + abs(len(sig) - len(o))
+                   < BEAM_MIN_LOOP_DIFF for o in loopsigs):
+                n_dup += 1
+                continue
+            try:
+                scaf, tgt = cseed.drift_rmsd(cif, tpl, loops)
+            except Exception:
+                continue
+            if scaf > DRIFT_MAX_SCAFFOLD or tgt > DRIFT_MAX_TARGET:
+                n_drift += 1
+                continue
+            try:
+                seed = cseed.build_seed_template(cif, tpl, loops)
+            except Exception as exc:
+                logger.debug(f"[{target_name}] graft failed for {e.get('design_id')}: {exc}")
+                continue
+            chosen.append((e.get("design_id"), seed))
+            lineage[parent] = lineage.get(parent, 0) + 1
+            loopsigs.append(sig)
+
+        logger.info(f"[{target_name}] beam: {len(chosen)}/{n_want} seeds "
+                    f"(rejected {n_drift} drifted, {n_dup} too similar)")
+        return chosen
+
+    def run_rfd3_partial(self, target_name: str, seed_array, n_designs: int,
+                         partial_t: float) -> list:
+        """
+        Perturb a grafted seed by `partial_t` Angstroms and re-denoise.
+
+        With partial diffusion RFd3 does NOT resample the contig — the input structure
+        defines composition, so loop LENGTHS are inherited and only geometry moves.
+        The scaffold and target are pinned via select_fixed_atoms so the noise budget
+        lands on the loops rather than sliding the binder across the target.
+        """
+        loops = [lc["name"] for lc in self.selected_loops]
+        import conformation_seed as cseed
+        loop_ids = cseed.loop_residue_ids(seed_array, DESIGN_BINDER_CHAIN, loops)
+        loop_set = {int(i) for ids in loop_ids.values() for i in ids}
+        binder = seed_array[seed_array.chain_id == DESIGN_BINDER_CHAIN]
+        fixed_binder = [int(i) for i in np.unique(binder.res_id) if int(i) not in loop_set]
+        tgt_ids = np.unique(seed_array.res_id[seed_array.chain_id == DESIGN_TARGET_CHAIN])
+        fixed = (_ranges(DESIGN_BINDER_CHAIN, fixed_binder)
+                 + _ranges(DESIGN_TARGET_CHAIN, [int(i) for i in tgt_ids]))
+
+        rfd3_cfg = RFD3InferenceConfig(
+            diffusion_batch_size=min(10, n_designs),
+            low_memory_mode=False,
+        )
+        engine = RFD3InferenceEngine(**dataclasses.asdict(rfd3_cfg))
+        spec = DesignInputSpecification(
+            atom_array_input=seed_array,
+            partial_t=float(partial_t),
+            select_fixed_atoms=",".join(fixed),
+        )
+        n_batches = (n_designs + rfd3_cfg.diffusion_batch_size - 1) // rfd3_cfg.diffusion_batch_size
+        t0 = time.time()
+        outputs = engine.run(inputs=spec, n_batches=n_batches, out_dir=None)
+        logger.info(f"[{target_name}] partial diffusion t={partial_t:.1f}A "
+                    f"-> {n_designs} in {(time.time()-t0)/60:.1f} min")
+        arrays = []
+        for key, out_list in (outputs or {}).items():
+            if not key.startswith("backbone"):
+                continue
+            for out in out_list:
+                if len(arrays) >= n_designs:
+                    break
+                arrays.append(renumber(out.atom_array))
+        return arrays
 
     # ── HOF backbone reuse (exploit) ──────────────────────────────────────────
 
@@ -2070,13 +2220,42 @@ class IterativeRefiner:
                 #    iteration cost (~3-4 min/batch).
                 rfd3_dir = it_dir / "rfd3" / tname
                 rfd3_dir.mkdir(parents=True, exist_ok=True)
-                n_reuse = (int(BACKBONES_PER_TARGET * HOF_BACKBONE_REUSE_FRAC)
-                           if it >= HOF_REUSE_START else 0)
-                reused  = self._hof_backbones(tname, n_reuse)
-                # Always generate at least one fresh backbone so the pool cannot
-                # collapse onto the incumbent HOF.
-                n_fresh = max(1, BACKBONES_PER_TARGET - len(reused))
-                fresh = self.run_rfd3(tname, pdb_path, n_fresh, adaptive_ranges)
+                if CONFORMATION_MODE and it >= HOF_REUSE_START:
+                    # Conformation refinement: perturb the loop GEOMETRY of the beam's
+                    # seeds, which is the 89% axis, instead of re-rolling sequences on
+                    # frozen geometry (the 11% axis the old reuse path worked on).
+                    pt = max(PARTIAL_T_MIN,
+                             PARTIAL_T_INIT * (PARTIAL_T_DECAY ** max(0, it - HOF_REUSE_START)))
+                    n_fresh_c = max(1, int(BACKBONES_PER_TARGET * BEAM_FRESH_FRACTION))
+                    n_seeded = BACKBONES_PER_TARGET - n_fresh_c
+                    seeds = self._beam_seeds(tname, BEAM_WIDTH)
+                    perturbed = []
+                    if seeds:
+                        per = max(1, n_seeded // len(seeds))
+                        for sid, seed in seeds:
+                            if len(perturbed) >= n_seeded:
+                                break
+                            try:
+                                perturbed += self.run_rfd3_partial(tname, seed, per, pt)
+                            except Exception as exc:
+                                logger.warning(f"[{tname}] partial diffusion failed on "
+                                               f"{sid}: {exc}")
+                    fresh = self.run_rfd3(tname, pdb_path,
+                                          max(1, BACKBONES_PER_TARGET - len(perturbed)),
+                                          adaptive_ranges)
+                    backbones_a, backbones_b = fresh, perturbed
+                    logger.info(f"[{tname}] round {it}: {len(fresh)} fresh + "
+                                f"{len(perturbed)} perturbed (t={pt:.1f}A)")
+                else:
+                    n_reuse = (int(BACKBONES_PER_TARGET * HOF_BACKBONE_REUSE_FRAC)
+                               if it >= HOF_REUSE_START else 0)
+                    reused  = self._hof_backbones(tname, n_reuse)
+                    # Always generate at least one fresh backbone so the pool cannot
+                    # collapse onto the incumbent HOF.
+                    n_fresh = max(1, BACKBONES_PER_TARGET - len(reused))
+                    backbones_a = self.run_rfd3(tname, pdb_path, n_fresh, adaptive_ranges)
+                    backbones_b = reused
+                fresh, reused = backbones_a, backbones_b
                 # INTERLEAVE, don't concatenate. ESMFold2 batches still die partway on
                 # the large complexes (~62% scored), and the scorer walks designs in
                 # order — so appending reused backbones last made truncation discard
@@ -2169,6 +2348,7 @@ def main():
     global SV_BATTERY, SV_OCCLUSION_FILTER, SV_OCCLUSION_MIN
     global BACKBONES_PER_TARGET, LMPNN_SEQS_PER_BACKBONE, HOF_BACKBONE_REUSE_FRAC
     global HOF_REUSE_MIN_COMPOSITE
+    global CONFORMATION_MODE, BEAM_WIDTH, PARTIAL_T_INIT, PARTIAL_T_MIN, BEAM_FRESH_FRACTION
 
     parser = argparse.ArgumentParser(description="Iterative TIMP3 binder design.")
     parser.add_argument(
@@ -2258,6 +2438,21 @@ def main():
                         help="Stratified export: only draw from iterations >= N. Use to sample "
                              "rounds that carry the SV structural battery, so the mechanistic "
                              "metrics can be tested against AF3.")
+    parser.add_argument("--conformation-mode", action="store_true",
+                        help="Refine loop CONFORMATION via RFd3 partial diffusion on grafted "
+                             "beam seeds, instead of re-sequencing frozen backbones. "
+                             "Conformation carries ~89% of sv_pdockq; sequence ~11%.")
+    parser.add_argument("--beam-width", type=int, default=None, metavar="B",
+                        help=f"Seeds carried between rounds (default {BEAM_WIDTH}).")
+    parser.add_argument("--partial-t", type=float, default=None, metavar="A",
+                        help=f"Angstroms of noise for the first conformation round "
+                             f"(default {PARTIAL_T_INIT}); rfd3 recommends <= 15. Decays "
+                             f"toward --partial-t-min each iteration.")
+    parser.add_argument("--partial-t-min", type=float, default=None, metavar="A",
+                        help=f"Noise floor for fine loop refinement (default {PARTIAL_T_MIN}).")
+    parser.add_argument("--beam-fresh-fraction", type=float, default=None, metavar="F",
+                        help=f"Share of each round generated unseeded (default "
+                             f"{BEAM_FRESH_FRACTION}) as insurance against a local optimum.")
     parser.add_argument("--hof-reuse-min", type=float, default=None, metavar="C",
                         help=f"Minimum composite for a HOF design to be reused as a seed "
                              f"(default {HOF_REUSE_MIN_COMPOSITE}). Weak seeds make reuse a net "
@@ -2293,6 +2488,16 @@ def main():
         HOF_BACKBONE_REUSE_FRAC = max(0.0, min(0.9, args.hof_reuse_frac))
     if args.hof_reuse_min is not None:
         HOF_REUSE_MIN_COMPOSITE = args.hof_reuse_min
+    if args.conformation_mode:
+        CONFORMATION_MODE = True
+    if args.beam_width is not None:
+        BEAM_WIDTH = max(1, args.beam_width)
+    if args.partial_t is not None:
+        PARTIAL_T_INIT = max(0.0, args.partial_t)
+    if args.partial_t_min is not None:
+        PARTIAL_T_MIN = max(0.0, args.partial_t_min)
+    if args.beam_fresh_fraction is not None:
+        BEAM_FRESH_FRACTION = min(0.9, max(0.0, args.beam_fresh_fraction))
     if args.backbones_per_target is not None:
         BACKBONES_PER_TARGET = args.backbones_per_target
     if args.seqs_per_backbone is not None:
