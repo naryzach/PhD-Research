@@ -2349,6 +2349,7 @@ def main():
     global BACKBONES_PER_TARGET, LMPNN_SEQS_PER_BACKBONE, HOF_BACKBONE_REUSE_FRAC
     global HOF_REUSE_MIN_COMPOSITE
     global CONFORMATION_MODE, BEAM_WIDTH, PARTIAL_T_INIT, PARTIAL_T_MIN, BEAM_FRESH_FRACTION
+    global HOF_REUSE_START
 
     parser = argparse.ArgumentParser(description="Iterative TIMP3 binder design.")
     parser.add_argument(
@@ -2442,6 +2443,10 @@ def main():
                         help="Refine loop CONFORMATION via RFd3 partial diffusion on grafted "
                              "beam seeds, instead of re-sequencing frozen backbones. "
                              "Conformation carries ~89% of sv_pdockq; sequence ~11%.")
+    parser.add_argument("--hof-reuse-start", type=int, default=None, metavar="N",
+                        help=f"First iteration that reuses/perturbs HOF seeds (default "
+                             f"{HOF_REUSE_START}). Set 0 to engage immediately when resuming "
+                             "a run that already has a populated Hall of Fame.")
     parser.add_argument("--beam-width", type=int, default=None, metavar="B",
                         help=f"Seeds carried between rounds (default {BEAM_WIDTH}).")
     parser.add_argument("--partial-t", type=float, default=None, metavar="A",
@@ -2490,6 +2495,8 @@ def main():
         HOF_REUSE_MIN_COMPOSITE = args.hof_reuse_min
     if args.conformation_mode:
         CONFORMATION_MODE = True
+    if args.hof_reuse_start is not None:
+        HOF_REUSE_START = max(0, args.hof_reuse_start)
     if args.beam_width is not None:
         BEAM_WIDTH = max(1, args.beam_width)
     if args.partial_t is not None:
