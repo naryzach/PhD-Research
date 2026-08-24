@@ -97,6 +97,19 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
+# OWN handler, propagate=False. basicConfig above is a no-op whenever rfd3/foundry
+# has already configured root (it usually has), and RFD3InferenceEngine reconfigures
+# root when it runs -- which silently killed every pipeline log line after the first
+# RFd3 call. Measured on gen_20260820_101712.log: 12 __main__ lines in a 1,044-line,
+# 3-day log, so 10 rounds of conformation mode ran with no "beam:"/"partial diffusion"
+# output at all and the campaign looked like it had never started. Detaching from root
+# makes our logging immune to whatever the inference engines do to it.
+logger.setLevel(logging.INFO)
+logger.propagate = False
+if not logger.handlers:
+    _h = logging.StreamHandler(sys.stdout)
+    _h.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    logger.addHandler(_h)
 for _noisy in ("transforms", "atomworks.io", "atomworks.ml", "foundry", "lightning"):
     logging.getLogger(_noisy).setLevel(logging.ERROR)
 
@@ -1445,7 +1458,8 @@ class IterativeRefiner:
     # ── LigandMPNN ────────────────────────────────────────────────────────────
 
     def run_lmpnn(self, target_name: str, backbones: list, out_dir: Path,
-                  temperature: float) -> list:
+                  temperature: float,
+                  origins: list = None) -> list:
         """
         Design sequences for each backbone using LigandMPNN.
         Returns list of dicts with keys: design_id, array, rfd3_array, full_seq,
@@ -1467,6 +1481,11 @@ class IterativeRefiner:
 
         for idx, rfd3_array in enumerate(backbones):
             design_id = f"{target_name}_it{self.state['iteration']}_d{idx}"
+            # Provenance for this backbone: ("fresh"|"perturbed"|"hof_reuse", parent_id).
+            # Without it the perturbed children are indistinguishable from the fresh
+            # ones downstream, so "did conformation search help" is unanswerable.
+            bb_origin, parent_id = (origins[idx] if origins and idx < len(origins)
+                                    else ("fresh", ""))
             try:
                 fixed_res = get_fixed_residues(rfd3_array, self.selected_loops, bc, fc)
                 mpnn_in = {
@@ -1500,6 +1519,8 @@ class IterativeRefiner:
                         "full_seq":    bseq,
                         "target_seq":  tseq,
                         "seq_recovery": seq_rec,
+                        "bb_origin":   bb_origin,
+                        "parent_id":   parent_id,
                         **loops,
                     })
             except Exception as exc:
@@ -2276,16 +2297,18 @@ class IterativeRefiner:
                     n_fresh_c = max(1, int(BACKBONES_PER_TARGET * BEAM_FRESH_FRACTION))
                     n_seeded = BACKBONES_PER_TARGET - n_fresh_c
                     seeds = self._beam_seeds(tname, BEAM_WIDTH)
-                    perturbed = []
+                    perturbed, origins_pert = [], []
                     if seeds:
                         per = max(1, n_seeded // len(seeds))
                         for sid, seed in seeds:
                             if len(perturbed) >= n_seeded:
                                 break
                             try:
-                                perturbed += self.run_rfd3_partial(
+                                got = self.run_rfd3_partial(
                                     tname, seed, per, pt,
                                     seed_path=it_dir / "seeds" / tname / f"{sid}.pdb")
+                                perturbed += got
+                                origins_pert += [("perturbed", str(sid))] * len(got)
                             except Exception as exc:
                                 logger.warning(f"[{tname}] partial diffusion failed on "
                                                f"{sid}: {exc}")
@@ -2293,6 +2316,8 @@ class IterativeRefiner:
                                           max(1, BACKBONES_PER_TARGET - len(perturbed)),
                                           adaptive_ranges)
                     backbones_a, backbones_b = fresh, perturbed
+                    origins_a = [("fresh", "")] * len(fresh)
+                    origins_b = origins_pert
                     logger.info(f"[{tname}] round {it}: {len(fresh)} fresh + "
                                 f"{len(perturbed)} perturbed (t={pt:.1f}A)")
                 else:
@@ -2304,6 +2329,8 @@ class IterativeRefiner:
                     n_fresh = max(1, BACKBONES_PER_TARGET - len(reused))
                     backbones_a = self.run_rfd3(tname, pdb_path, n_fresh, adaptive_ranges)
                     backbones_b = reused
+                    origins_a = [("fresh", "")] * len(backbones_a)
+                    origins_b = [("hof_reuse", "")] * len(backbones_b)
                 fresh, reused = backbones_a, backbones_b
                 # INTERLEAVE, don't concatenate. ESMFold2 batches still die partway on
                 # the large complexes (~62% scored), and the scorer walks designs in
@@ -2312,8 +2339,11 @@ class IterativeRefiner:
                 # +0.081 over fresh (p=1e-46), yet ADAM10 got 2 of ~150 of them scored
                 # and its mean composite fell 0.072. Interleaving makes truncation
                 # sample both populations evenly.
-                backbones = [b for pair in itertools.zip_longest(fresh, reused)
-                             for b in pair if b is not None]
+                pairs = list(itertools.zip_longest(
+                    list(zip(fresh, origins_a)), list(zip(reused, origins_b))))
+                flat      = [x for pair in pairs for x in pair if x is not None]
+                backbones = [b for b, _ in flat]
+                origins   = [o for _, o in flat]
 
                 # Save backbone CIFs (the structural record of each design)
                 for bi, arr in enumerate(backbones):
@@ -2325,7 +2355,8 @@ class IterativeRefiner:
 
                 # 2. Sequence design
                 lmpnn_dir  = it_dir / "lmpnn" / tname
-                candidates = self.run_lmpnn(tname, backbones, lmpnn_dir, temp)
+                candidates = self.run_lmpnn(tname, backbones, lmpnn_dir, temp,
+                                            origins=origins)
 
                 if not candidates:
                     logger.warning(f"[{tname}] No LMPNN sequences; skipping.")
