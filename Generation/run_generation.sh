@@ -57,8 +57,10 @@ MAX_ITERATIONS=40                   # full anneal + ~11 exploit iterations at th
 # RFd3 because it only walks the tail of the noise schedule.
 CONFORMATION_MODE="${CONFORMATION_MODE:-0}"                 # 1 = conformation refinement; 0 = archived reuse behaviour
 BEAM_WIDTH="${BEAM_WIDTH:-10}"                       # seeds carried between rounds
-PARTIAL_T="${PARTIAL_T:-8.0}"                       # Angstroms of noise, first conformation round (<=15)
-PARTIAL_T_MIN="${PARTIAL_T_MIN:-2.0}"                   # noise floor for fine loop refinement
+PARTIAL_T="${PARTIAL_T:-3.0}"                       # Angstroms of noise, first conformation round (<=15)
+PARTIAL_T_MIN="${PARTIAL_T_MIN:-1.0}"                   # noise floor for fine loop refinement
+# 3.0/1.0 are measured by partial_t_ladder.py, not chosen: parent->child transmission
+# of sv_pdockq is +0.87/+0.80/+0.69 at t=1/2/3 and collapses to +0.18/-0.31 at t=5/8.
 BEAM_FRESH_FRACTION="${BEAM_FRESH_FRACTION:-0.25}"            # share generated unseeded, guards against a local optimum
 
 HOF_REUSE_FRAC=0.5                  # share of each round's backbones re-sampled from the HOF's

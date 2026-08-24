@@ -127,7 +127,7 @@ def main() -> int:
 
     rows = []
     for t in tvals:
-        kids, loop_rmsds = [], []
+        kids, loop_rmsds, rmsd_err = [], [], 0
         for sid, seed in seeds:
             const_ids, _ = cseed._split_const_loop(seed, B, loops)
             sl = cseed.loop_residue_ids(seed, B, loops)
@@ -140,18 +140,26 @@ def main() -> int:
                 print(f"  t={t:g} {sid}: partial diffusion failed: {exc}")
                 continue
             for arr in arrs:
-                try:  # how far did the loops actually travel from this parent?
+                # How far did the loops actually travel from this parent? Pin on the
+                # constant scaffold first, so this is loop movement and not a rigid
+                # shift. _ca_of returns an AtomArray, so take .coord -- subtracting the
+                # arrays themselves is not elementwise and raises.
+                try:
                     a = cseed._ca_of(seed, B, const_ids)
                     b = cseed._ca_of(arr, B, const_ids)
-                    k = min(len(a), len(b))
+                    k = min(a.array_length(), b.array_length())
                     _, tr = superimpose(a[:k], b[:k])
-                    la = cseed._ca_of(seed, B, lids)
-                    lb = tr.apply(cseed._ca_of(arr, B, lids))
+                    la = cseed._ca_of(seed, B, lids).coord
+                    lb = tr.apply(cseed._ca_of(arr, B, lids)).coord
                     k = min(len(la), len(lb))
                     loop_rmsds.append(float(np.sqrt(
                         ((la[:k] - lb[:k]) ** 2).sum(axis=1).mean())))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # Report, never swallow: a silently-NaN diagnostic column is how
+                    # a broken measurement survives a whole campaign unnoticed.
+                    if not rmsd_err:
+                        print(f"    loop RMSD unavailable: {type(exc).__name__}: {exc}")
+                    rmsd_err += 1
             kids += arrs
 
         if not kids:

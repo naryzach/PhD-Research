@@ -231,9 +231,21 @@ CONFORMATION_MODE      = False  # opt-in; False keeps the archived reuse behavio
 BEAM_WIDTH             = 10     # seeds carried between rounds
 BEAM_FRESH_FRACTION    = 0.25   # share of each round generated unseeded, as insurance
                                 # against the beam settling into a local optimum
-PARTIAL_T_INIT         = 8.0    # Angstroms of noise, first conformation round
-PARTIAL_T_MIN          = 2.0    # floor: fine loop refinement
-PARTIAL_T_DECAY        = 0.90   # per-iteration multiplier
+# Measured, not guessed. partial_t_ladder.py on MMP2 (3 beam seeds x 4 children per
+# rung, scored through the real ranker) gives the fraction of the parent's sv_pdockq
+# edge over the current population that survives into the children:
+#     t = 1 A  ->  +0.87        t = 5 A  ->  +0.18
+#     t = 2 A  ->  +0.80        t = 8 A  ->  -0.31
+#     t = 3 A  ->  +0.69
+# The cliff sits between 3 and 5. At 8 the children are worse than a fresh draw,
+# which is what it_54-63 ran: 10 rounds, ~75% of backbones seeded from parents
+# averaging 0.46-0.55, and not one target's round mean moved off baseline.
+# At 1-3 A the best child cleared every parent in one generation (0.525 vs 0.489),
+# so 3.0 buys the most exploration that the parent's information still pays for,
+# annealing to 1.0 for the endgame.
+PARTIAL_T_INIT         = 3.0    # Angstroms of noise, first conformation round
+PARTIAL_T_MIN          = 1.0    # floor: fine loop refinement
+PARTIAL_T_DECAY        = 0.90   # per-iteration multiplier (3.0 -> 1.0 over ~11 rounds)
 BEAM_MAX_PER_PARENT    = 3      # cap seeds sharing one parent lineage
 BEAM_MIN_LOOP_DIFF     = 2      # min differing loop residues between two beam seeds.
                                 # Not optional: reused designs were already 26% unique
