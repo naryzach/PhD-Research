@@ -47,16 +47,27 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 
 
-def population_mean(out_base, target, metric):
-    """Baseline a child must beat to have inherited anything."""
-    vals = []
+def population_mean(out_base, target, metric, window=10):
+    """
+    Baseline a child must beat to have inherited anything: what the pipeline
+    produces right now, i.e. the last `window` iterations rather than the whole
+    campaign. Averaging all of history drags the baseline down (MMP2: 0.286
+    all-time vs 0.336 over it_46+) and inflates transmission for free.
+    """
+    per = {}
     for f in glob.glob(str(out_base / "it_*" / "round_summary.csv")):
         d = pd.read_csv(f)
         if metric not in d.columns or "esm_plddt" not in d.columns:
             continue
         d = d[(d.esm_plddt.notna()) & (d.target_name == target)]
-        vals += [v for v in d[metric].tolist() if v == v]
-    return float(np.mean(vals)) if vals else float("nan")
+        v = [x for x in d[metric].tolist() if x == x]
+        if v:
+            per[int(re.search(r"it_(\d+)", f).group(1))] = v
+    if not per:
+        return float("nan")
+    keep = sorted(per)[-window:] if window else sorted(per)
+    vals = [x for i in keep for x in per[i]]
+    return float(np.mean(vals))
 
 
 def main() -> int:
@@ -71,19 +82,29 @@ def main() -> int:
     ap.add_argument("--seeds", type=int, default=3, help="beam seeds to test")
     ap.add_argument("--children", type=int, default=4, help="children per seed per t")
     ap.add_argument("--metric", default="sv_pdockq")
+    ap.add_argument("--pop-window", type=int, default=10,
+                    help="iterations of history defining the baseline (0 = all)")
+    ap.add_argument("--no-sv", action="store_true",
+                    help="skip the SV battery (sv_* metrics unavailable)")
     ap.add_argument("--out-base", default=None)
     ap.add_argument("--work", default=None, help="scratch dir (default: <out_base>/ladder)")
     args = ap.parse_args()
 
     tvals = [float(x) for x in args.t.split(",")]
+    # SV_BATTERY is a module global that iterative_refinement.main() flips from its
+    # --sv-battery flag. Importing the module leaves it False, so sv_pdockq is never
+    # computed and every child scores as "nothing" -- turn it on the same way.
+    if not args.no_sv:
+        ir.SV_BATTERY = True
     out_base = Path(args.out_base) if args.out_base else ir.OUT_BASE
     work = Path(args.work) if args.work else out_base / "ladder" / args.target
     work.mkdir(parents=True, exist_ok=True)
     loops = ["AB", "C", "EF"]
     B = ir.DESIGN_BINDER_CHAIN
 
-    pop = population_mean(out_base, args.target, args.metric)
-    print(f"target {args.target} | population mean {args.metric} = {pop:.3f}")
+    pop = population_mean(out_base, args.target, args.metric, args.pop_window)
+    print(f"target {args.target} | population mean {args.metric} = {pop:.3f} "
+          f"(last {args.pop_window} iterations)")
 
     # Same beam the live run uses, so the seeds are the ones conformation mode
     # would actually have picked.
@@ -143,7 +164,10 @@ def main() -> int:
         vals = [s.get(args.metric) for s in scored
                 if s.get(args.metric) is not None and s.get(args.metric) == s.get(args.metric)]
         if not vals:
-            print(f"  t={t:g}: nothing scored")
+            keys = sorted(scored[0].keys()) if scored else []
+            print(f"  t={t:g}: {len(scored)} records but none carry '{args.metric}'.")
+            if keys:
+                print(f"    available: {', '.join(k for k in keys if not k.startswith('_'))}")
             continue
         cmean = float(np.mean(vals))
         trans = (cmean - pop) / (pmean - pop) if pmean != pop else float("nan")
