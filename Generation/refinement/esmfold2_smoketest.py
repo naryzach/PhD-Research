@@ -16,8 +16,8 @@ do not have:
     exit 1  ENVIRONMENT fault: cannot load/run the model at all
     exit 2  RESOURCE fault: model loaded fine, GPU was out of memory
 
-    python Generation/esmfold2_smoketest.py
-    ESMFOLD2_PYTHON=/path/to/env/bin/python python Generation/esmfold2_smoketest.py
+    python Generation/refinement/esmfold2_smoketest.py
+    ESMFOLD2_PYTHON=/path/to/env/bin/python python Generation/refinement/esmfold2_smoketest.py
 """
 import os
 import subprocess
@@ -26,8 +26,9 @@ import tempfile
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
+_ROOT = _HERE.parents[1]
 SCORER = _HERE / "score_with_esmfold2.py"
-TEMPLATE = _HERE / ".." / "Data" / "TIMP_Complexes" / "AF3_Templates" / "MMP2_TIMP3_AF3.pdb"
+TEMPLATE = _ROOT / "Data" / "TIMP_Complexes" / "AF3_Templates" / "MMP2_TIMP3_AF3.pdb"
 
 # Same default as iterative_refinement.ESMFOLD2_PYTHON — keep them in step.
 ESMFOLD2_PYTHON = os.environ.get(

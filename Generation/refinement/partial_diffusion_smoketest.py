@@ -12,8 +12,8 @@ Exercises exactly the path conformation mode uses, without running an iteration:
 Step 4 is the real test. A call that "succeeds" but perturbs the scaffold, or moves
 the loops by ~0 A, is a silent failure that would waste days in a live run.
 
-    python Generation/partial_diffusion_smoketest.py                 # MMP2, t=8
-    python Generation/partial_diffusion_smoketest.py --target MMP9 --partial-t 5 -n 2
+    python Generation/refinement/partial_diffusion_smoketest.py                 # MMP2, t=8
+    python Generation/refinement/partial_diffusion_smoketest.py --target MMP9 --partial-t 5 -n 2
 
 Run with the GPUs free — it competes with any live generation job.
 """

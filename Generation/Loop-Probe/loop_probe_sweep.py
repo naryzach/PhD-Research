@@ -60,6 +60,7 @@ _HERE = Path(__file__).parent.resolve()
 # Generation/ for iterative_refinement.
 sys.path.insert(0, str(_HERE))
 sys.path.insert(0, str(_HERE.parent))
+sys.path.insert(0, str(_HERE.parent / "refinement"))  # pipeline moved 2026-08-25
 
 from iterative_refinement import LOOP_CONFIGS  # noqa: E402
 import loop_probe as lp  # noqa: E402

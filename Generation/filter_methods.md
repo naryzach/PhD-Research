@@ -1,6 +1,6 @@
 # In-Silico Pre-Filtering for AF3: Methods & Decision Log
 
-**Project:** Iterative TIMP3-scaffold binder design (`Generation/iterative_refinement.py`)
+**Project:** Iterative TIMP3-scaffold binder design (`Generation/refinement/iterative_refinement.py`)
 **Question this document answers:** *Which local structure predictor (RF3, Boltz-2, ESMFold2) best pre-filters designs before the rate-limited AF3 step, and how do we know it's worth the compute?*
 **Last updated:** 2026-06-02
 
@@ -150,7 +150,7 @@ To break the range-restriction confound we need AF3 scores at **low, mid, and hi
 Boltz ipTM, not just the top. So the next AF3 batch is deliberately stratified:
 
 ```bash
-python Generation/iterative_refinement.py --targets MMP2 MMP9 ADAM10 ADAM17 \
+python Generation/refinement/iterative_refinement.py --targets MMP2 MMP9 ADAM10 ADAM17 \
     --stratified-export 30
 ```
 

@@ -13,9 +13,9 @@ scored fine.
 
 RUN IN THE GENERATION ENV (foundry + ESMFOLD2_PYTHON), GPUs FREE:
     export ESMFOLD2_PYTHON=$(command -v python)          # if ESMFold2 is in foundry
-    python Generation/rescore_pool.py                     # recover all targets
-    python Generation/rescore_pool.py --targets ADAM10 ADAM17   # just the starved ones
-    python Generation/rescore_pool.py --esmfold2-gpus auto
+    python Generation/refinement/rescore_pool.py                     # recover all targets
+    python Generation/refinement/rescore_pool.py --targets ADAM10 ADAM17   # just the starved ones
+    python Generation/refinement/rescore_pool.py --esmfold2-gpus auto
 
 It reuses the pipeline's own ESMFold2 scorer and composite, so recovered rows are
 identical in format to a clean run. Idempotent: already-scored rows are skipped.

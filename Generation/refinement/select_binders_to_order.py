@@ -27,10 +27,10 @@ Selection categories (each pick carries reason tags, like the reference notebook
                     (requires cross-target folds; see --emit-crossfold-input)
 
 Usage:
-  python Generation/select_binders_to_order.py                      # best to order, all categories
-  python Generation/select_binders_to_order.py --criteria best_overall --n 15
-  python Generation/select_binders_to_order.py --emit-crossfold-input   # prep specificity scoring
-  python Generation/select_binders_to_order.py --specificity-scores cross.csv --criteria best_specificity
+  python Generation/refinement/select_binders_to_order.py                      # best to order, all categories
+  python Generation/refinement/select_binders_to_order.py --criteria best_overall --n 15
+  python Generation/refinement/select_binders_to_order.py --emit-crossfold-input   # prep specificity scoring
+  python Generation/refinement/select_binders_to_order.py --specificity-scores cross.csv --criteria best_specificity
 
 Output: Local/iterative_refinement/ordering/  (CSV + a human-readable report)
 """
@@ -50,6 +50,7 @@ import pandas as pd
 # Calibrated in-silico -> binding priors (2026-07 exact-sequence, purchased-only
 # calibration). calibrated_scoring.py sits alongside this file in Generation/.
 sys.path.insert(0, str(Path(__file__).parent.resolve()))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import calibrated_scoring as cs
 
 
@@ -105,11 +106,12 @@ def _target_seqs() -> dict:
     return mp
 
 HERE     = Path(__file__).parent.resolve()
+_ROOT    = HERE.parents[1]
 # Honor REFINE_OUT_BASE so ordering can point at a salvaged/alternate pool dir
 # (matches iterative_refinement.py). Defaults to Local/iterative_refinement.
 import os as _os
-OUT_BASE = Path(_os.environ.get("REFINE_OUT_BASE") or (HERE / ".." / "Local" / "iterative_refinement")).resolve()
-DATA_DIR = (HERE / ".." / "Data" / "TIMP_Complexes" / "AF3_Templates").resolve()
+OUT_BASE = Path(_os.environ.get("REFINE_OUT_BASE") or (_ROOT / "Local" / "iterative_refinement")).resolve()
+DATA_DIR = (_ROOT / "Data" / "TIMP_Complexes" / "AF3_Templates").resolve()
 ORDER_DIR = OUT_BASE / "ordering"
 
 # Redesigned loops — flank tripeptides locate each loop inside any binder/native
@@ -548,7 +550,7 @@ def build_table(convergence_max: float = CONVERGENCE_MAX,
     # (e.g. a crossfold/specificity run) — otherwise it is auto-dropped & renormalized.
     try:
         import sys as _sys
-        _sys.path.insert(0, str(Path(__file__).parent))   # binding_recipe.py lives in Generation/
+        _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # binding_recipe.py lives in Generation/
         from binding_recipe import score_design as _score_design
         def _rmap(r):
             return {"LpLDDT": r["lplddt"], "PAE": r["loop_pae"], "ipTM": r["iptm"], "pTM": r["ptm"]}
@@ -756,9 +758,9 @@ def main():
         pd.DataFrame(rows).to_csv(out, index=False)
         print(f"\nWrote {len(rows)} (candidate x target) rows for {len(cand)} candidates -> {out}")
         print("On the cluster:")
-        print(f"  python Generation/score_with_esmfold2.py --input {out} "
+        print(f"  python Generation/refinement/score_with_esmfold2.py --input {out} "
               f"--out {ORDER_DIR/'crossfold_scores.csv'}")
-        print("Then: python Generation/select_binders_to_order.py "
+        print("Then: python Generation/refinement/select_binders_to_order.py "
               "--criteria best_specificity --specificity-scores "
               f"{ORDER_DIR/'crossfold_scores.csv'}")
         return

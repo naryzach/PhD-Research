@@ -23,8 +23,8 @@ real ranker, so "did the child inherit the parent" becomes a measured number:
 Pick the largest t that still transmits; that is the most exploration the
 parent's information can pay for.
 
-    python Generation/partial_t_ladder.py --target MMP2
-    python Generation/partial_t_ladder.py --target ADAM17 --t 1,2,3,5 --seeds 4
+    python Generation/refinement/partial_t_ladder.py --target MMP2
+    python Generation/refinement/partial_t_ladder.py --target ADAM17 --t 1,2,3,5 --seeds 4
 
 Needs a free GPU (it competes with a live generation job) and runs ~1 h at the
 defaults: 5 noise levels x 3 seeds x 4 children = 60 ESMFold2 folds.

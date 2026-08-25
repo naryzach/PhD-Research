@@ -20,8 +20,8 @@ foundry env. ESMFold2 requires Python >= 3.12:
     pip install transformers torch pandas
 
 Then, from the repo root (so it can find Local/iterative_refinement/):
-    python Generation/score_with_esmfold2.py            # scores the stratified manifest
-    python Generation/score_with_esmfold2.py --all       # scores every design in round summaries
+    python Generation/refinement/score_with_esmfold2.py            # scores the stratified manifest
+    python Generation/refinement/score_with_esmfold2.py --all       # scores every design in round summaries
 
 Output: Local/iterative_refinement/esmfold2_scores.csv
         columns: design_id, target_name, full_seq, esm_iptm, esm_ptm, esm_plddt,
@@ -53,7 +53,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-OUT_BASE = (Path(__file__).parent / ".." / "Local" / "iterative_refinement").resolve()
+OUT_BASE = (Path(__file__).resolve().parents[2] / "Local" / "iterative_refinement")
 
 # Designs are submitted binder-first, so chain A = binder, chain B = target.
 BINDER_CHAIN = "A"

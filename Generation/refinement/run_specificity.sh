@@ -8,8 +8,8 @@
 #
 # Usage:
 #   conda activate foundry
-#   bash Generation/run_specificity.sh              # start (or resume if state exists)
-#   FRESH=1 bash Generation/run_specificity.sh      # archive old state, start clean
+#   bash Generation/refinement/run_specificity.sh              # start (or resume if state exists)
+#   FRESH=1 bash Generation/refinement/run_specificity.sh      # archive old state, start clean
 #
 # Run it on different GPUs than run_generation.sh if you want both campaigns at once
 # (ESMFOLD2_GPUS=auto skips GPUs already busy, but RFd3/LMPNN are single-GPU, so pin
@@ -37,7 +37,7 @@ MAX_RETRIES=5
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Output root — overridable via SPEC_OUT_BASE. Exported so specificity_refinement.py
 # uses the SAME root (it redirects the inherited iterative OUT_BASE to this).
-export SPEC_OUT_BASE="${SPEC_OUT_BASE:-$HERE/../Local/specificity_refinement}"
+export SPEC_OUT_BASE="${SPEC_OUT_BASE:-$HERE/../../Local/specificity_refinement}"
 OUT_BASE="$SPEC_OUT_BASE"
 STATE="$OUT_BASE/specificity_state.json"
 LOG_DIR="$OUT_BASE/logs"

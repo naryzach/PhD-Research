@@ -82,7 +82,8 @@ for _noisy in ("transforms", "atomworks.io", "atomworks.ml", "foundry", "lightni
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 _HERE    = Path(__file__).parent.resolve()
-OUT_BASE = Path(os.environ.get("SPEC_OUT_BASE") or (_HERE / ".." / "Local" / "specificity_refinement"))
+_ROOT    = _HERE.parents[1]
+OUT_BASE = Path(os.environ.get("SPEC_OUT_BASE") or (_ROOT / "Local" / "specificity_refinement"))
 
 # CRITICAL ISOLATION FIX: the inherited IterativeRefiner methods (run_iteration,
 # _write_round_summary, update_hof, export_for_af3, ...) reference iterative_

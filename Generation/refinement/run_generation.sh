@@ -18,8 +18,8 @@
 # Usage:
 #   conda activate foundry
 #   export ESMFOLD2_PYTHON=/path/to/envs/esmfold2/bin/python
-#   bash Generation/run_generation.sh              # start (or resume if state exists)
-#   FRESH=1 bash Generation/run_generation.sh      # archive old state, start clean
+#   bash Generation/refinement/run_generation.sh              # start (or resume if state exists)
+#   FRESH=1 bash Generation/refinement/run_generation.sh      # archive old state, start clean
 #
 # On a SLURM cluster, submit this with sbatch (request the GPUs + a long walltime).
 
@@ -36,8 +36,8 @@ export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:T
 # IMPORTANT: do NOT co-schedule this with run_specificity.sh on the SAME GPUs — they
 # will starve each other's ESMFold2 (CUDA OOM) and silently leave designs unscored,
 # hitting the last-processed targets hardest. Pin each run to its own device(s):
-#   CUDA_VISIBLE_DEVICES=0,1 bash Generation/run_generation.sh
-#   CUDA_VISIBLE_DEVICES=2,3 bash Generation/run_specificity.sh
+#   CUDA_VISIBLE_DEVICES=0,1 bash Generation/refinement/run_generation.sh
+#   CUDA_VISIBLE_DEVICES=2,3 bash Generation/refinement/run_specificity.sh
 # If you only have one GPU set, run them SEQUENTIALLY, not at once.
 
 # ── Config (edit here) ───────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Output root — overridable via REFINE_OUT_BASE so a fresh anneal can run in its own
 # directory without clobbering a preserved/salvaged pool. Exported so the python
 # child (iterative_refinement.py) uses the SAME root.
-export REFINE_OUT_BASE="${REFINE_OUT_BASE:-$HERE/../Local/iterative_refinement}"
+export REFINE_OUT_BASE="${REFINE_OUT_BASE:-$HERE/../../Local/iterative_refinement}"
 OUT_BASE="$REFINE_OUT_BASE"
 STATE="$OUT_BASE/refinement_state.json"
 LOG_DIR="$OUT_BASE/logs"

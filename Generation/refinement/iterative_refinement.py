@@ -87,6 +87,8 @@ from rf3.utils.inference import InferenceInput
 # Generation/; make it importable whether run as a script or imported by
 # specificity_refinement.
 sys.path.insert(0, str(Path(__file__).parent.resolve()))
+# Generation/ too: binding_recipe.py and the RF3 helpers stayed there.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import calibrated_scoring as cs
 import sv_bridge as svb
 
@@ -117,6 +119,7 @@ torch.set_float32_matmul_precision("medium")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 _HERE     = Path(__file__).parent.resolve()
+_ROOT     = _HERE.parents[1]          # repo root (Generation/refinement/ -> ../..)
 # AF3 co-fold complexes are the RFd3 design template (chain A = FULL-LENGTH 188-aa
 # TIMP3, chain B = target, in the AF3-predicted binding pose). Two fixes vs the
 # original:
@@ -129,13 +132,13 @@ _HERE     = Path(__file__).parent.resolve()
 #      (122-188) is fixed scaffold in the contig; scaffold_len=188 in TARGETS.
 # Regenerate templates with Generation/prep_af3_templates.py. Revert: point back to
 # "HADDOCK_Outputs", set binder_chain="B"/target_chain="A", scaffold_len=121.
-DATA_DIR  = _HERE / ".." / "Data" / "TIMP_Complexes" / "AF3_Templates"
+DATA_DIR  = _ROOT / "Data" / "TIMP_Complexes" / "AF3_Templates"
 # Output root is overridable via REFINE_OUT_BASE so an unrelated run (e.g. a fresh
 # anneal) can target a separate directory without clobbering a preserved/ salvaged
 # pool. Defaults to Local/iterative_refinement. rescore_pool.py and
 # select_binders_to_order.py honor the same variable.
-OUT_BASE  = Path(os.environ.get("REFINE_OUT_BASE") or (_HERE / ".." / "Local" / "iterative_refinement"))
-CKPT_DIR  = _HERE / ".." / "Tools" / "foundry_checkpoints"
+OUT_BASE  = Path(os.environ.get("REFINE_OUT_BASE") or (_ROOT / "Local" / "iterative_refinement"))
+CKPT_DIR  = _ROOT / "Tools" / "foundry_checkpoints"
 
 # ── Target definitions ────────────────────────────────────────────────────────
 # binder_chain / target_chain refer to chain IDs in the SOURCE PDB only.
@@ -247,10 +250,20 @@ PARTIAL_T_INIT         = 3.0    # Angstroms of noise, first conformation round
 PARTIAL_T_MIN          = 1.0    # floor: fine loop refinement
 PARTIAL_T_DECAY        = 0.90   # per-iteration multiplier (3.0 -> 1.0 over ~11 rounds)
 BEAM_MAX_PER_PARENT    = 3      # cap seeds sharing one parent lineage
-BEAM_MIN_LOOP_DIFF     = 2      # min differing loop residues between two beam seeds.
+BEAM_MIN_LOOP_DIFF     = 2
+BEAM_RANK_METRIC       = "sv_pdockq"   # what the beam breeds on; the AF3-validated metric      # min differing loop residues between two beam seeds.
                                 # Not optional: reused designs were already 26% unique
                                 # on MMP9 with one sequence appearing 91 times.
-DRIFT_MAX_SCAFFOLD     = 6.0    # A; seeds whose scaffold strayed further are ineligible
+# Raised from 6.0 at it_68. The gate was rejecting the frontier on exactly the two
+# targets that needed it: 8 of MMP2's top-10 sv_pdockq designs (scaffold drift
+# clustering at ~8.4 A) and 8 of ADAM17's (6.6-8.3 A), while ADAM10 and MMP9 lost
+# none. Those rejects are not malformed -- across the top 30 per target the drifted
+# and passing groups are indistinguishable in confidence (MMP2 82.1 vs 83.4 esm_plddt,
+# ADAM17 85.1 vs 84.5; interface plddt 82.9 vs 83.8 and 88.3 vs 87.8) and score the
+# same or better. Excluding them from breeding while keeping them in the HOF -- and in
+# any construct order -- was inconsistent. Drift is measured against the ORIGINAL
+# template every round, so this raises a cap; it does not open a ratchet.
+DRIFT_MAX_SCAFFOLD     = 9.0    # A; seeds whose scaffold strayed further are ineligible
 DRIFT_MAX_TARGET       = 4.0    # A; ditto for the supposedly-fixed target chain
 
 # SCALE-DEPENDENT, and currently NON-BINDING. 0.87 was fit against the old composite
@@ -604,6 +617,18 @@ def _contacts_score(n_contacts):
     return min(1.0, _safe(n_contacts) / N_CONTACTS_NORM)
 
 
+def _text(v) -> str:
+    """str() of a value, with pandas NaN/None flattened to "" (NaN is truthy)."""
+    if v is None:
+        return ""
+    try:
+        if isinstance(v, float) and np.isnan(v):
+            return ""
+    except TypeError:
+        pass
+    return str(v)
+
+
 def _ranges(chain: str, resids: list) -> list:
     """Collapse residue ids into contiguous 'A12-30' selection tokens."""
     out, ids = [], sorted(set(int(i) for i in resids))
@@ -860,6 +885,50 @@ class IterativeRefiner:
 
     # ── Conformation refinement: beam seeds + partial diffusion ───────────────
 
+    def _seed_candidates(self, target_name: str, metric: str = BEAM_RANK_METRIC) -> list:
+        """
+        Designs the beam may seed from, best first on `metric`.
+
+        Drawn from the scored POOL (every it_*/round_summary.csv), not the HOF.
+        Three filters used to compound between a design being good and being
+        allowed to breed, measured at it_68:
+
+          HOF membership  capped at HOF_SIZE and ranked on composite_score, so the
+                          frontier never entered it -- MMP2's best HOF entry was
+                          sv_pdockq 0.554 against a pool best of 0.601.
+          beam ordering   also composite_score, and composite ranks the frontier
+                          terribly: MMP2's 0.601 design sat 1151st by composite,
+                          ADAM17's 0.639 at 1586th, ADAM10's 0.620 at 1979th.
+          drift gate      see DRIFT_MAX_SCAFFOLD.
+
+        Net effect: MMP2's beam parents topped out at 0.494 against a 0.601 pool.
+        Ranking the HOF differently could not fix that -- the designs were not in
+        it -- so the beam reads the pool directly and sorts on the metric that was
+        actually validated against AF3.
+        """
+        rows = []
+        for csv in sorted(OUT_BASE.glob("it_*/round_summary.csv")):
+            try:
+                d = pd.read_csv(csv, on_bad_lines="skip")
+            except Exception:
+                continue
+            if "target_name" not in d.columns or "esm_cif" not in d.columns:
+                continue
+            d = d[d.target_name == target_name]
+            if metric not in d.columns:
+                continue
+            d = d[d[metric].notna() & d.esm_cif.notna()]
+            if len(d):
+                rows.append(d)
+        if not rows:
+            logger.warning(f"[{target_name}] no pooled candidates carry '{metric}'; "
+                           f"falling back to the HOF on composite_score.")
+            return sorted(self.state["hof"].get(target_name, []),
+                          key=lambda e: e.get("composite_score", 0) or 0, reverse=True)
+        pool = pd.concat(rows, ignore_index=True)
+        pool = pool.drop_duplicates(subset="design_id").sort_values(metric, ascending=False)
+        return pool.to_dict("records")
+
     def _beam_seeds(self, target_name: str, n_want: int) -> list:
         """
         Pick up to `n_want` HOF designs to seed the next round, and graft each onto
@@ -879,8 +948,7 @@ class IterativeRefiner:
         """
         import conformation_seed as cseed
 
-        entries = sorted(self.state["hof"].get(target_name, []),
-                         key=lambda e: e.get("composite_score", 0) or 0, reverse=True)
+        entries = self._seed_candidates(target_name)
         tcfg = TARGETS[target_name]
         tpl = str(DATA_DIR / tcfg["pdb"])
         loops = [lc["name"] for lc in self.selected_loops]
@@ -893,10 +961,14 @@ class IterativeRefiner:
             cif = e.get("esm_cif")
             if not cif or not Path(cif).exists():
                 continue
-            parent = str(e.get("parent_id") or e.get("design_id", ""))[:40]
-            if lineage.get(parent, 0) >= BEAM_MAX_PER_PARENT:
+            # NaN-safe: pooled rows come from pandas, and `float("nan") or x` returns
+            # the NaN (it is truthy), which would collapse every pre-tag design into a
+            # single "nan" lineage and cap the beam at BEAM_MAX_PER_PARENT seeds.
+            parent = _text(e.get("parent_id")) or _text(e.get("design_id"))
+            parent = parent[:40]
+            if parent and lineage.get(parent, 0) >= BEAM_MAX_PER_PARENT:
                 continue
-            sig = "".join(str(e.get(f"loop_{n}_seq", "")) for n in loops)
+            sig = "".join(_text(e.get(f"loop_{n}_seq")) for n in loops)
             if any(sum(a != b for a, b in zip(sig, o)) + abs(len(sig) - len(o))
                    < BEAM_MIN_LOOP_DIFF for o in loopsigs):
                 n_dup += 1

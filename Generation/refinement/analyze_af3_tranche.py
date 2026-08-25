@@ -15,8 +15,8 @@ round summaries for design_id, target, composite_score and the SV battery. Band
 labels are recomputed as terciles of the local score within each target, which is
 what the original banding meant anyway.
 
-    python Generation/analyze_af3_tranche.py Local/iterative_refinement/folds_*.zip
-    python Generation/analyze_af3_tranche.py *.zip --out af3_results.csv
+    python Generation/refinement/analyze_af3_tranche.py Local/iterative_refinement/folds_*.zip
+    python Generation/refinement/analyze_af3_tranche.py *.zip --out af3_results.csv
 
 Prints per-metric Spearman correlations (raw and target-centred) between the local
 composite and each AF3 metric, plus any SV metrics present, and writes a tidy CSV.
@@ -33,6 +33,7 @@ import numpy as np
 import pandas as pd
 
 _HERE = Path(__file__).resolve().parent
+_ROOT = _HERE.parents[1]
 
 
 def jobs_from_zip(zpath: Path) -> pd.DataFrame:
@@ -92,7 +93,7 @@ def main():
     args = ap.parse_args()
 
     out_base = Path(args.out_base) if args.out_base else Path(
-        os.environ.get("REFINE_OUT_BASE") or (_HERE / ".." / "Local" / "iterative_refinement"))
+        os.environ.get("REFINE_OUT_BASE") or (_ROOT / "Local" / "iterative_refinement"))
     out_base = out_base.resolve()
 
     paths = []

@@ -22,9 +22,9 @@ structure. They do not enter the gate or the composite; the only consumer is the
 log-only and also left blank (the raw PAE matrix survives in <design>_pae.npy
 if they are ever wanted).
 
-    python Generation/recover_from_cifs.py --dry-run
-    python Generation/recover_from_cifs.py
-    python Generation/recover_from_cifs.py --out-base Local/specificity_refinement
+    python Generation/refinement/recover_from_cifs.py --dry-run
+    python Generation/refinement/recover_from_cifs.py
+    python Generation/refinement/recover_from_cifs.py --out-base Local/specificity_refinement
 
 Then run rescore_pool.py to fold only the designs that have no CIF at all.
 Idempotent and safe to re-run; each round summary is backed up once to *.bak.
@@ -40,6 +40,7 @@ import numpy as np
 import pandas as pd
 
 _HERE = Path(__file__).resolve().parent
+_ROOT = _HERE.parents[1]
 sys.path.insert(0, str(_HERE))
 import calibrated_scoring as cs        # numpy-only; no atomworks/torch needed
 
@@ -174,7 +175,7 @@ def main():
     args = ap.parse_args()
 
     out_base = Path(args.out_base) if args.out_base else Path(
-        os.environ.get("REFINE_OUT_BASE") or (_HERE / ".." / "Local" / "iterative_refinement"))
+        os.environ.get("REFINE_OUT_BASE") or (_ROOT / "Local" / "iterative_refinement"))
     out_base = out_base.resolve()
 
     csvs = sorted(out_base.glob("it_*/round_summary.csv"),
@@ -363,7 +364,7 @@ def main():
                   "this succeeds.")
             return
 
-    print("\nNext: python Generation/rescore_pool.py --dry-run   "
+    print("\nNext: python Generation/refinement/rescore_pool.py --dry-run   "
           "(should now list only the designs with no CIF).")
 
 

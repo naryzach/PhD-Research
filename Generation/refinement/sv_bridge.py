@@ -37,7 +37,7 @@ import sys
 from pathlib import Path
 
 # Make the Structural-Validation analysis stack importable.
-_SV = Path(__file__).resolve().parents[1] / "Structural-Validation"
+_SV = Path(__file__).resolve().parents[2] / "Structural-Validation"
 for _p in (_SV, _SV / "analysis", _SV / "utils"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
