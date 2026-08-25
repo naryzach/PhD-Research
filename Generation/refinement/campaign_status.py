@@ -86,7 +86,7 @@ def main() -> int:
 
     print("MECHANISM - perturbed vs fresh, same rounds")
     print(f"{'target':8} {'fresh':>8} {'perturbed':>10} {'delta':>8} {'n_pert':>7}  flag")
-    flags = []
+    flags, measured = [], 0
     for t in TARGETS:
         g = cur[cur.target_name == t]
         if "bb_origin" not in g.columns or g.bb_origin.isna().all():
@@ -97,6 +97,7 @@ def main() -> int:
         if not len(fr) or not len(pe):
             print(f"{t:8}  (waiting for both groups)")
             continue
+        measured += 1
         delta = pe.mean() - fr.mean()
         flag = ""
         if delta < 0.03:
@@ -114,18 +115,28 @@ def main() -> int:
         pb = prior[prior.target_name == t][METRIC].max() if len(prior) else np.nan
         cb = cur[cur.target_name == t][METRIC].max() if len(cur) else np.nan
         gains[t] = cb - pb
-        print(f"{t:8} {pb:11.3f} {cb:11.3f} {cb - pb:+8.3f}")
+        fmt = lambda v, w: f"{v:{w}.3f}" if v == v else "-".rjust(w)
+        g = f"{cb - pb:+8.3f}" if (cb == cb and pb == pb) else "-".rjust(8)
+        print(f"{t:8} {fmt(pb, 11)} {fmt(cb, 11)} {g}")
 
     print()
-    if flags:
+    if not measured:
+        print(f"WAITING: no completed round under this configuration yet "
+              f"(nothing since it_{args.since}). A round takes several hours across "
+              "four targets; the summary is written when it finishes. Nothing has "
+              "been measured, so nothing is known - check back later.")
+    elif flags:
         print(f"ACTION: transmission has collapsed on {', '.join(flags)}. "
               "The loop is not working there - worth a look.")
     elif n_rounds < args.window:
-        print(f"HOLD: mechanism healthy, {args.window - n_rounds} more rounds before "
-              "the frontier number means anything. Change nothing.")
-    elif max(gains.values()) >= 0.02:
-        print(f"CLIMBING: frontier gained {max(gains.values()):+.3f} on "
-              f"{max(gains, key=gains.get)}. Keep running.")
+        print(f"HOLD: mechanism healthy on {measured}/{len(TARGETS)} targets, "
+              f"{args.window - n_rounds} more rounds before the frontier number "
+              "means anything. Change nothing.")
+    elif not [v for v in gains.values() if v == v]:
+        print("WAITING: rounds exist but none carry sv_pdockq yet.")
+    elif max(v for v in gains.values() if v == v) >= 0.02:
+        best = max((v, k) for k, v in gains.items() if v == v)
+        print(f"CLIMBING: frontier gained {best[0]:+.3f} on {best[1]}. Keep running.")
     else:
         print("CEILING: mechanism worked and the frontier did not move over the full "
               "window. sv_pdockq ~0.6 is a real limit for this scaffold and these "
