@@ -83,6 +83,15 @@ echo "Pairs: $PAIRS | Loops: $LOOPS | ${BACKBONES_PER_TARGET}bb x ${SEQS_PER_BAC
      "T:${INIT_TEMPERATURE}->${MIN_TEMPERATURE} decay ${TEMP_DECAY} | ${MAX_ITERATIONS} iters" | tee -a "$LOG"
 
 # ── Run with crash-resume ────────────────────────────────────────────────────
+# See run_generation.sh: a signal is an operator decision, not a transient crash.
+_child=""
+_shutdown() {
+  echo "=== stopped by signal at $(date) ===" | tee -a "$LOG"
+  [[ -n "$_child" ]] && kill "$_child" 2>/dev/null
+  exit 130
+}
+trap _shutdown INT TERM
+
 attempt=0
 while (( attempt <= MAX_RETRIES )); do
   echo "=== launch attempt $attempt at $(date) ===" | tee -a "$LOG"
@@ -96,11 +105,17 @@ while (( attempt <= MAX_RETRIES )); do
     --temp-decay "$TEMP_DECAY" \
     --esmfold2-gpus "$ESMFOLD2_GPUS" \
     --max-iterations "$MAX_ITERATIONS" \
-    >> "$LOG" 2>&1
+    >> "$LOG" 2>&1 &
+  _child=$!
+  wait "$_child"
   rc=$?
   if (( rc == 0 )); then
     echo "=== specificity generation completed cleanly at $(date) ===" | tee -a "$LOG"
     break
+  fi
+  if (( rc >= 128 )); then  # killed by a signal: deliberate, so stop
+    echo "=== terminated by signal (rc=$rc) at $(date); not retrying ===" | tee -a "$LOG"
+    exit "$rc"
   fi
   if (( rc == 3 )); then   # EXIT_ESMFOLD2_DEAD — retrying cannot fix a dead ranker
     {

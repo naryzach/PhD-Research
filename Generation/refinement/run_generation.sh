@@ -163,6 +163,18 @@ if [[ "$CONFORMATION_MODE" == "1" ]]; then
               --partial-t-min "$PARTIAL_T_MIN" --beam-fresh-fraction "$BEAM_FRESH_FRACTION")
 fi
 
+# A signal is an operator decision, not a transient crash. Without this the retry
+# loop treats `pkill -f iterative_refinement.py` as a failure and relaunches 30s
+# later, so the run appears to survive being killed ("new jobs continue to spool").
+# Kill the wrapper and the child goes with it.
+_child=""
+_shutdown() {
+  echo "=== stopped by signal at $(date) ===" | tee -a "$LOG"
+  [[ -n "$_child" ]] && kill "$_child" 2>/dev/null
+  exit 130
+}
+trap _shutdown INT TERM
+
 attempt=0
 while (( attempt <= MAX_RETRIES )); do
   echo "=== launch attempt $attempt at $(date) ===" | tee -a "$LOG"
@@ -178,11 +190,17 @@ while (( attempt <= MAX_RETRIES )); do
     --max-iterations "$MAX_ITERATIONS" \
     --hof-reuse-frac "$HOF_REUSE_FRAC"     ${conf_flags[@]+"${conf_flags[@]}"} \
     ${sv_flags[@]+"${sv_flags[@]}"} \
-    >> "$LOG" 2>&1
+    >> "$LOG" 2>&1 &
+  _child=$!
+  wait "$_child"
   rc=$?
   if (( rc == 0 )); then
     echo "=== generation completed cleanly at $(date) ===" | tee -a "$LOG"
     break
+  fi
+  if (( rc >= 128 )); then  # killed by a signal (143=TERM, 130=INT): deliberate, so stop
+    echo "=== terminated by signal (rc=$rc) at $(date); not retrying ===" | tee -a "$LOG"
+    exit "$rc"
   fi
   if (( rc == 3 )); then   # EXIT_ESMFOLD2_DEAD — retrying cannot fix a dead ranker
     {
