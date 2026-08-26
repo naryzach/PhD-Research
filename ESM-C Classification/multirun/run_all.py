@@ -109,6 +109,10 @@ def main():
     ap.add_argument("--enum-checkpoint-every", type=int, default=1_000_000,
                     help="save enumerate_cloop.py progress every N sequences so a crash only "
                          "loses work since the last checkpoint, not the whole sweep (0 disables)")
+    ap.add_argument("--enum-save-all", action="store_true",
+                    help="also persist every loop's per-target probabilities (not just the "
+                         "top-K) as parquet shards under <enum_dir>/all_probs/ -- off by "
+                         "default since it's ~1-2.5GB/variant; opt in per run")
     # shap_hotspots.py passthrough
     ap.add_argument("--n-explain", type=int, default=300)
     ap.add_argument("--background-size", type=int, default=50)
@@ -202,7 +206,11 @@ def main():
                     run(cmd, log_dir / f"shap_{tag}.log", args.dry_run)
 
             if "enumerate" in steps:
-                enum_done = out_dir / "enumeration" / out_name / "top_selective.csv"
+                # top_selective.csv doesn't exist for single-target models (no runner-up to
+                # compare against -- see enumerate_cloop.py), so use top_<first target>.csv
+                # instead: it's written unconditionally, and only once the whole sweep (all
+                # 20^L loops) has finished and the heaps are final.
+                enum_done = out_dir / "enumeration" / out_name / f"top_{cfg['targets'][0]}.csv"
                 if enum_done.exists() and not args.force:
                     print(f"[skip] enumerate[{subtype}] already done ({enum_done})")
                 else:
@@ -214,6 +222,8 @@ def main():
                           "--out", out_name]
                     if args.force:
                         cmd += ["--no-resume"]  # --force means start clean, not "resume anyway"
+                    if args.enum_save_all:
+                        cmd += ["--save-all"]
                     run(cmd, log_dir / f"enumerate_{tag}.log", args.dry_run)
 
             if "analyze" in steps:

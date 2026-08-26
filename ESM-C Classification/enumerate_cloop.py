@@ -7,7 +7,19 @@ Checkpointing: progress (current index + the running top-K heaps) is saved to
 <out_dir>/checkpoint.json every --checkpoint-every sequences (atomic write --
 temp file + rename, so a crash mid-write can't corrupt it). Re-running the
 same command automatically resumes from the last checkpoint instead of
-restarting the whole sweep; pass --no-resume to force a clean restart."""
+restarting the whole sweep; pass --no-resume to force a clean restart.
+
+Persistent full-sweep record (--save-all): by default only the bounded top-K
+(per target + most-selective) ever gets written -- everything else is scored
+once to maybe update those heaps, then discarded, so no full record of all
+64^L evaluated loops exists unless you ask for one. --save-all writes every
+loop's probabilities for every target to <out_dir>/all_probs/<start>_<end>.parquet
+shard files, one shard per --checkpoint-every loops (same cadence as the heap
+checkpoint, so each shard is a properly-closed, valid parquet file the moment
+it's written -- a crash only loses the current in-progress shard, same
+guarantee as the heap checkpoint). Read all shards at once with
+``pd.read_parquet(out_dir / "all_probs")`` (pandas/pyarrow read a directory of
+parquet files as one dataset natively)."""
 import argparse, heapq, json, os, time
 from pathlib import Path
 import numpy as np, pandas as pd, torch
@@ -60,6 +72,9 @@ def main():
                     help="save progress every N sequences (0 disables checkpointing)")
     ap.add_argument("--no-resume", action="store_true",
                     help="ignore any existing checkpoint and start this range from scratch")
+    ap.add_argument("--save-all", action="store_true",
+                    help="persist every loop's per-target probabilities (not just the top-K) "
+                         "as parquet shards under <out_dir>/all_probs/ -- see module docstring")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -83,6 +98,9 @@ def main():
     out_dir = resolve_path(cfg, cfg["output_dir"]) / "enumeration" / (args.out or f"{tag}_{args.start}_{args.end}")
     out_dir.mkdir(parents=True, exist_ok=True)
     ckpt_path = out_dir / "checkpoint.json"
+    all_probs_dir = out_dir / "all_probs"
+    if args.save_all:
+        all_probs_dir.mkdir(parents=True, exist_ok=True)
 
     K = args.topk
     resumed = None if args.no_resume else load_checkpoint(ckpt_path, args.start, args.end, targets)
@@ -91,27 +109,48 @@ def main():
         done = idx - args.start
         print(f"[resume] picking up at {idx:,} ({done:,}/{args.end-args.start:,} already done "
               f"from a previous checkpoint)")
+        if args.save_all:
+            print(f"[save-all] resuming -- shards before {idx:,} (if any) are from the earlier "
+                  f"run; new shards start at {idx:,}")
     else:
         idx = args.start
         heaps = {t: [] for t in targets}
         sel = []
         done = 0
 
+    def flush_all_probs_shard(shard_start, shard_end, buf_loops, buf_probs):
+        if not buf_loops:
+            return
+        arr = np.concatenate(buf_probs, axis=0)
+        cols = {"loop": buf_loops}
+        for ti, t in enumerate(targets):
+            cols[f"prob_{t}"] = arr[:, ti].astype(np.float32)
+        shard_path = all_probs_dir / f"{shard_start}_{shard_end}.parquet"
+        pd.DataFrame(cols).to_parquet(shard_path, index=False)
+        print(f"  [save-all] shard {shard_start:,}-{shard_end:,} ({len(buf_loops):,} rows) "
+              f"-> {shard_path.name}", flush=True)
+
     t0 = time.time(); b = 0; since_ckpt = 0
+    shard_start = idx
+    buf_loops, buf_probs = [], []
     while idx < args.end:
         n = min(args.batch_size, args.end - idx)
         loops = [idx_to_loop(idx + j, L) for j in range(n)]
         probs = score(loops)
+        if args.save_all:
+            buf_loops.extend(loops)
+            buf_probs.append(probs)
         for j in range(n):
             pj = probs[j]
             for ti, t in enumerate(targets):
                 h = heaps[t]; v = float(pj[ti])
                 if len(h) < K: heapq.heappush(h, (v, loops[j]))
                 elif v > h[0][0]: heapq.heapreplace(h, (v, loops[j]))
-            o = np.argsort(pj)[::-1]; m = float(pj[o[0]] - pj[o[1]])
-            rec = (m, loops[j], targets[o[0]], float(pj[o[0]]), float(pj[o[1]]))
-            if len(sel) < K: heapq.heappush(sel, rec)
-            elif m > sel[0][0]: heapq.heapreplace(sel, rec)
+            if len(targets) >= 2:  # "selective" (margin over runner-up) needs >=2 targets to compare
+                o = np.argsort(pj)[::-1]; m = float(pj[o[0]] - pj[o[1]])
+                rec = (m, loops[j], targets[o[0]], float(pj[o[0]]), float(pj[o[1]]))
+                if len(sel) < K: heapq.heappush(sel, rec)
+                elif m > sel[0][0]: heapq.heapreplace(sel, rec)
         idx += n; done += n; b += 1; since_ckpt += n
         if args.log_every and b % args.log_every == 0:
             el = time.time() - t0; r = done / el
@@ -121,6 +160,13 @@ def main():
             save_checkpoint(ckpt_path, args.start, args.end, idx, heaps, sel)
             since_ckpt = 0
             print(f"  [checkpoint] {idx:,}/{args.end:,} saved -> {ckpt_path}", flush=True)
+            if args.save_all:
+                flush_all_probs_shard(shard_start, idx, buf_loops, buf_probs)
+                shard_start = idx
+                buf_loops, buf_probs = [], []
+
+    if args.save_all:
+        flush_all_probs_shard(shard_start, idx, buf_loops, buf_probs)
 
     (out_dir / "run_meta.json").write_text(
         json.dumps({"loop_subtype": subtype, "start_char": start_char, "loop_len": L,
@@ -128,9 +174,13 @@ def main():
     for t in targets:
         pd.DataFrame(sorted(heaps[t], reverse=True), columns=[f"prob_{t}", "loop"]
                      ).to_csv(out_dir / f"top_{t}.csv", index=False)
-    pd.DataFrame(sorted(sel, reverse=True),
-                 columns=["margin", "loop", "top_target", "top_prob", "runnerup_prob"]
-                 ).to_csv(out_dir / "top_selective.csv", index=False)
+    if len(targets) >= 2:
+        pd.DataFrame(sorted(sel, reverse=True),
+                     columns=["margin", "loop", "top_target", "top_prob", "runnerup_prob"]
+                     ).to_csv(out_dir / "top_selective.csv", index=False)
+    else:
+        print(f"[info] single-target model ({targets[0]}) -- no runner-up to compare against, "
+              f"skipping top_selective.csv (analyze_enumeration.py already handles it being absent)")
     if ckpt_path.exists():
         ckpt_path.unlink()  # sweep finished cleanly -- checkpoint no longer needed
     print(f"\nDone {done:,} in {(time.time()-t0)/3600:.2f} h -> {out_dir}")

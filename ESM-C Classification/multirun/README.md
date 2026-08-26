@@ -69,11 +69,35 @@ each sweep/explain-set from its last checkpoint instead of restarting from 0
 parameters, so it won't silently resume onto a mismatched config). `--force`
 clears any checkpoint and starts clean instead.
 
+**`mmp9_other` fix:** `enumerate_cloop.py` used to crash immediately on any
+single-target model -- the "most selective" tracking needs a runner-up target
+to compare against, which doesn't exist when there's only one head. Fixed:
+single-target sweeps (just `mmp9_other` in this repo) now skip
+`top_selective.csv` entirely (with a one-line note in the log) instead of
+crashing; `analyze_enumeration.py` already handled that file being absent, so
+nothing downstream needed to change. Caught this on a local CPU smoke test
+before it could crash `mmp9_other`'s real sweep on the cluster.
+
+**Persistent full-sweep record (`--enum-save-all` / `enumerate_cloop.py
+--save-all`):** off by default. Normally only the bounded top-50K-per-target
++ top-50K-selective heaps ever get written -- every other one of the 64M
+evaluated loops is scored once to maybe update those heaps, then discarded,
+so there's no way to retroactively ask "what did the model say about loop X"
+for anything outside those lists. `--save-all` persists **every** loop's
+per-target probabilities to `<enum_dir>/all_probs/<start>_<end>.parquet`
+shards, one shard per checkpoint interval (same cadence and same
+crash-safety guarantee as the heap checkpoint -- each shard is a fully
+closed, valid parquet file the moment it's written). Read them all at once
+with `pd.read_parquet(enum_dir / "all_probs")` (pandas/pyarrow read a
+directory of parquet files as one dataset natively, no manual concatenation
+needed). Rough size: ~1-2.5 GB per full 64M sweep with this on -- opt in per
+run with `--enum-save-all` when you actually want it.
+
 Useful flags:
 
 - `--steps data,train` / `--steps shap,enumerate,analyze` / `--steps visualize` -- run a subset
 - `--smoke` -- tiny fast pass through every step (sanity-checks the whole chain)
-- `--topk` / `--enum-batch-size` / `--enum-checkpoint-every` -- enumerate_cloop.py tuning
+- `--topk` / `--enum-batch-size` / `--enum-checkpoint-every` / `--enum-save-all` -- enumerate_cloop.py tuning
 - `--n-explain` / `--background-size` / `--shap-chunk-size` -- shap_hotspots.py tuning
 - `--dry-run` -- print the exact commands without running them
 
@@ -88,6 +112,7 @@ Everything lands under `../../Local/esmc_multirun/<variant>/`:
   (from `visualize.py`; runs once per variant, not per loop subtype)
 - `shap/<ab|c>loop/` -- SHAP hotspot heatmaps + CSVs (from `shap_hotspots.py`)
 - `enumeration/<ab|c>loop_full/` -- top-K per target + selective loops from the
-  full 20^6 sweep (from `enumerate_cloop.py`), plus `analysis/` figures (from
-  `analyze_enumeration.py`)
+  full 20^6 sweep (from `enumerate_cloop.py`; no `top_selective.csv` for
+  single-target models), plus `analysis/` figures (from `analyze_enumeration.py`)
+  and, only with `--enum-save-all`, `all_probs/*.parquet` (every loop, not just top-K)
 - `logs/` -- per-step stdout, so a multi-day cluster run leaves a trail
