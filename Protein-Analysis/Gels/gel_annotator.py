@@ -168,6 +168,24 @@ STAIN_LUTS: Dict[str, List[Tuple[int, Tuple[int, int, int]]]] = {
         (254, (255, 182,  62)),
         (255, (255, 255, 255)),
     ],
+    # GelRed (post-stain): same indigo->purple->red->orange->white progression as
+    # etbr_uv, but with every stop pushed out to a much higher grey value. GelRed
+    # post-stains (applied after the run, not cast into the gel) don't carry the
+    # EtBr concentration gradient etbr_uv was tuned for, and typical GelRed scans
+    # run with a gel-matrix background around grey 60-90 rather than near 0 -- with
+    # etbr_uv's stops (purple by 20, red by 55) that background reads as red/orange
+    # instead of the matrix's true indigo/purple. Hand calibration, measured
+    # against the 2026-08-26 GelRed DNA-gel scan.
+    "gelred": [
+        (  0, (  3,   0,   8)),
+        ( 65, ( 42,  20,  92)),
+        ( 90, (125,  55, 158)),
+        (110, (218,  82,  92)),
+        (150, (248,  88,  48)),
+        (200, (255, 128,  12)),
+        (254, (255, 182,  62)),
+        (255, (255, 255, 255)),
+    ],
     # SYBR Green: black → green → white.
     "sybr_green": [
         (  0, (  0,   0,   0)),
@@ -210,7 +228,7 @@ STAIN_LUTS: Dict[str, List[Tuple[int, Tuple[int, int, int]]]] = {
 
 # Order used for the swatch preview (matches the Image Lab dialog, Ponceau last).
 SWATCH_ORDER = [
-    "gray", "etbr", "etbr_uv", "coomassie", "stain_free", "sybr_green", "sypro_ruby",
+    "gray", "etbr", "etbr_uv", "gelred", "coomassie", "stain_free", "sybr_green", "sypro_ruby",
     "flamingo", "silver", "false_color", "spectrum", "gold_silver", "pseudo",
     "ponceau",
 ]
@@ -237,6 +255,8 @@ STAIN_ALIASES = {
     "etbr": "etbr", "ethidium": "etbr", "ethidium_bromide": "etbr",
     "etbr_uv": "etbr_uv", "etbr_photo": "etbr_uv", "uv": "etbr_uv",
     "ethidium_uv": "etbr_uv", "ethidium_bromide_uv": "etbr_uv",
+    "gelred": "gelred", "gel_red": "gelred", "gelred_uv": "gelred",
+    "gelred_poststain": "gelred", "gelred_post_stain": "gelred",
     "sybr_green": "sybr_green", "sybr": "sybr_green", "sybrgreen": "sybr_green",
     "green": "sybr_green",
     "spectrum": "spectrum", "rainbow": "spectrum",

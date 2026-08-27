@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    background: transparent;
+  }
+  #wrap { padding: 26px 8px 30px 8px; }
+  #track {
+    position: relative;
+    height: 64px;
+    border-radius: 6px;
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    background-color: #333;
+    border: 1px solid rgba(128, 128, 128, 0.45);
+    cursor: copy;
+    user-select: none;
+  }
+  .handle {
+    position: absolute;
+    top: 0;
+    width: 0;
+    height: 64px;
+    transform: translateX(-50%);
+    cursor: ew-resize;
+    touch-action: none;
+  }
+  .handle .stem {
+    position: absolute;
+    top: 0;
+    left: -1px;
+    width: 2px;
+    height: 64px;
+    background: #fff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.65);
+  }
+  .handle .knob {
+    position: absolute;
+    top: -7px;
+    left: -8px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.75), 0 1px 3px rgba(0, 0, 0, 0.5);
+  }
+  .handle .knob2 {
+    position: absolute;
+    top: 55px;
+    left: -8px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.75), 0 1px 3px rgba(0, 0, 0, 0.5);
+  }
+  .handle .label {
+    position: absolute;
+    top: -26px;
+    left: 0;
+    transform: translateX(-50%);
+    font-size: 11px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(30, 30, 30, 0.88);
+    color: #fff;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .handle.dragging .label { background: rgba(200, 70, 20, 0.92); }
+  .handle.dragging .stem, .handle.dragging .knob, .handle.dragging .knob2 {
+    box-shadow: 0 0 0 2px rgba(255, 150, 60, 0.9);
+  }
+  #hint {
+    font-size: 11px;
+    color: #888;
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="track"></div>
+  <div id="hint">Drag a marker to move it &middot; double-click the bar to add a stop &middot; double-click a marker to remove it</div>
+</div>
+<canvas id="sampler" style="display:none;"></canvas>
+<script>
+(function () {
+  const ST_RENDER = "streamlit:render";
+
+  function post(type, extra) {
+    window.parent.postMessage(Object.assign({
+      isStreamlitMessage: true,
+      type: type,
+    }, extra || {}), "*");
+  }
+  const Streamlit = {
+    setComponentReady: () => post("streamlit:componentReady", { apiVersion: 1 }),
+    setFrameHeight: (h) => post("streamlit:setFrameHeight", { height: h }),
+    setComponentValue: (v) => post("streamlit:setComponentValue", { value: v, dataType: "json" }),
+  };
+
+  const track = document.getElementById("track");
+  const wrap = document.getElementById("wrap");
+  const sampler = document.getElementById("sampler");
+  const sctx = sampler.getContext("2d", { willReadFrequently: true });
+
+  let stops = [];        // [{id, gray, hex}]
+  let invert = false;
+  let imgLoaded = false;
+  let nonce = 0;
+  let dragging = null;   // {id, el}
+
+  function displayPos(gray) {          // gray (0-255) -> visual position (0-255, left->right)
+    return invert ? (255 - gray) : gray;
+  }
+  function grayFromDisplay(pos) {      // visual position (0-255) -> gray
+    return invert ? (255 - pos) : pos;
+  }
+  function hexAt(fracX) {
+    if (!imgLoaded) return "#808080";
+    const x = Math.max(0, Math.min(sampler.width - 1, Math.round(fracX * (sampler.width - 1))));
+    const d = sctx.getImageData(x, 0, 1, 1).data;
+    return "#" + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, "0")).join("");
+  }
+
+  function resize() {
+    Streamlit.setFrameHeight(wrap.scrollHeight + 8);
+  }
+
+  function render() {
+    track.querySelectorAll(".handle").forEach((el) => el.remove());
+    stops.forEach((s) => {
+      const pos = displayPos(s.gray);
+      const el = document.createElement("div");
+      el.className = "handle";
+      el.style.left = (pos / 255 * 100) + "%";
+      el.dataset.id = s.id;
+      el.innerHTML =
+        '<div class="label">' + s.gray + "</div>" +
+        '<div class="stem"></div>' +
+        '<div class="knob" style="background:' + s.hex + ';"></div>' +
+        '<div class="knob2" style="background:' + s.hex + ';"></div>';
+      el.addEventListener("pointerdown", onHandleDown);
+      el.addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        removeStop(s.id);
+      });
+      track.appendChild(el);
+    });
+    setTimeout(resize, 0);
+  }
+
+  function sendValue() {
+    nonce += 1;
+    Streamlit.setComponentValue({
+      nonce: nonce,
+      stops: stops.map((s) => ({ id: s.id, gray: s.gray, hex: s.hex })),
+    });
+  }
+
+  function trackFrac(clientX) {
+    const r = track.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+  }
+
+  function onHandleDown(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = e.currentTarget.dataset.id;
+    const s = stops.find((st) => st.id === id);
+    if (!s) return;
+    e.currentTarget.classList.add("dragging");
+    dragging = { id: id, el: e.currentTarget };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.currentTarget.addEventListener("pointermove", onHandleMove);
+    e.currentTarget.addEventListener("pointerup", onHandleUp);
+  }
+  function onHandleMove(e) {
+    if (!dragging) return;
+    const s = stops.find((st) => st.id === dragging.id);
+    if (!s) return;
+    const frac = trackFrac(e.clientX);
+    const pos = Math.round(frac * 255);
+    s.gray = grayFromDisplay(pos);
+    dragging.el.style.left = (pos / 255 * 100) + "%";
+    dragging.el.querySelector(".label").textContent = s.gray;
+  }
+  function onHandleUp(e) {
+    if (!dragging) return;
+    dragging.el.classList.remove("dragging");
+    dragging.el.removeEventListener("pointermove", onHandleMove);
+    dragging.el.removeEventListener("pointerup", onHandleUp);
+    dragging = null;
+    sendValue();
+  }
+
+  track.addEventListener("dblclick", (e) => {
+    if (e.target !== track) return;   // a handle's own dblclick handler already stopped propagation
+    const frac = trackFrac(e.clientX);
+    const pos = Math.round(frac * 255);
+    const gray = grayFromDisplay(pos);
+    const hex = hexAt(frac);
+    stops.push({ id: "js-" + Date.now() + "-" + Math.floor(Math.random() * 1e6), gray: gray, hex: hex });
+    render();
+    sendValue();
+  });
+
+  function removeStop(id) {
+    if (stops.length <= 2) return;
+    stops = stops.filter((s) => s.id !== id);
+    render();
+    sendValue();
+  }
+
+  window.addEventListener("message", (event) => {
+    const data = event.data;
+    if (!data || data.type !== ST_RENDER) return;
+    const args = data.args || {};
+    invert = !!args.invert;
+    stops = (args.stops || []).map((s) => ({ id: s.id, gray: s.gray, hex: s.hex }));
+    if (args.swatch_png) {
+      track.style.backgroundImage = "url(data:image/png;base64," + args.swatch_png + ")";
+      const im = new Image();
+      im.onload = () => {
+        sampler.width = im.naturalWidth;
+        sampler.height = 1;
+        sctx.drawImage(im, 0, 0);
+        imgLoaded = true;
+      };
+      im.src = "data:image/png;base64," + args.swatch_png;
+    }
+    render();
+  });
+
+  Streamlit.setComponentReady();
+  setTimeout(resize, 50);
+})();
+</script>
+</body>
+</html>
