@@ -171,18 +171,14 @@ STAIN_LUTS: Dict[str, List[Tuple[int, Tuple[int, int, int]]]] = {
     # GelRed (post-stain): same indigo->purple->red->orange->white progression as
     # etbr_uv, but with every stop pushed out to a much higher grey value. GelRed
     # post-stains (applied after the run, not cast into the gel) don't carry the
-    # EtBr concentration gradient etbr_uv was tuned for, and typical GelRed scans
-    # run with a gel-matrix background around grey 60-90 rather than near 0 -- with
-    # etbr_uv's stops (purple by 20, red by 55) that background reads as red/orange
-    # instead of the matrix's true indigo/purple. Hand calibration, measured
-    # against the 2026-08-26 GelRed DNA-gel scan.
+    # EtBr concentration gradient etbr_uv was tuned for
     "gelred": [
         (  0, (  3,   0,   8)),
-        ( 65, ( 42,  20,  92)),
-        ( 90, (125,  55, 158)),
-        (110, (218,  82,  92)),
-        (150, (248,  88,  48)),
-        (200, (255, 128,  12)),
+        ( 43, ( 42,  20,  92)),
+        ( 85, (125,  55, 158)),
+        (128, (218,  82,  92)),
+        (170, (248,  88,  48)),
+        (213, (255, 128,  12)),
         (254, (255, 182,  62)),
         (255, (255, 255, 255)),
     ],
