@@ -22,7 +22,16 @@ set -uo pipefail
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 # ── Config (edit here) ───────────────────────────────────────────────────────
-PAIRS="MMP ADAM"                     # MMP2-vs-MMP9, ADAM10-vs-ADAM17
+PAIRS="MMP ADAM"                     # MMP9-vs-MMP2, ADAM17-vs-ADAM10 (flipped 2026-08-27)
+# Conformation refinement, using the settings the generation campaign measured.
+# partial_t 3.0->1.0 comes from partial_t_ladder.py: parent->child transmission is
+# +0.87/+0.80/+0.69 at t=1/2/3 and collapses to +0.18/-0.31 at t=5/8.
+CONFORMATION_MODE="${CONFORMATION_MODE:-1}"
+BEAM_WIDTH="${BEAM_WIDTH:-10}"
+PARTIAL_T="${PARTIAL_T:-3.0}"
+PARTIAL_T_MIN="${PARTIAL_T_MIN:-1.0}"
+BEAM_FRESH_FRACTION="${BEAM_FRESH_FRACTION:-0.25}"
+SV_BATTERY="${SV_BATTERY:-1}"        # sv_* columns; the first campaign ran without them
 LOOPS="AB C EF"
 BACKBONES_PER_TARGET=50
 SEQS_PER_BACKBONE=3
@@ -95,6 +104,13 @@ trap _shutdown INT TERM
 attempt=0
 while (( attempt <= MAX_RETRIES )); do
   echo "=== launch attempt $attempt at $(date) ===" | tee -a "$LOG"
+  conf_flags=()
+  if [[ "$CONFORMATION_MODE" == "1" ]]; then
+    conf_flags=(--conformation-mode --beam-width "$BEAM_WIDTH" --partial-t "$PARTIAL_T"
+                --partial-t-min "$PARTIAL_T_MIN" --beam-fresh-fraction "$BEAM_FRESH_FRACTION")
+  fi
+  sv_flags=()
+  (( SV_BATTERY )) && sv_flags+=(--sv-battery)
   python "$HERE/specificity_refinement.py" \
     --pair $PAIRS \
     --loops $LOOPS \
@@ -105,6 +121,8 @@ while (( attempt <= MAX_RETRIES )); do
     --temp-decay "$TEMP_DECAY" \
     --esmfold2-gpus "$ESMFOLD2_GPUS" \
     --max-iterations "$MAX_ITERATIONS" \
+    ${conf_flags[@]+"${conf_flags[@]}"} \
+    ${sv_flags[@]+"${sv_flags[@]}"} \
     >> "$LOG" 2>&1 &
   _child=$!
   wait "$_child"

@@ -95,9 +95,19 @@ OUT_BASE = Path(os.environ.get("SPEC_OUT_BASE") or (_ROOT / "Local" / "specifici
 ir.OUT_BASE = OUT_BASE
 
 # ── Specificity pair definitions ──────────────────────────────────────────────
+# FLIPPED 2026-08-27. These ran on/off backwards for the whole first campaign:
+# on=MMP2/off=MMP9 selects MMP2>MMP9, and on=ADAM10/off=ADAM17 selects ADAM10>ADAM17 --
+# the inverse of the M9>M2 and A17>A10 binders the project actually wants. The old
+# run's *rejected* tail was the wanted population (456 M9>M2 and 125 A17>A10 designs
+# with a positive flipped margin), but it is a discard pile: folded at pLDDT 68-75
+# against 83-85 in the main campaign, and unrefined because the search was walking
+# away from it. Re-running in the right direction is cheaper than salvaging it.
+# Direction also matters for the assay: MMP9 is the most robust FCS axis (n=9-14 per
+# construct) while ADAM10 is currently unusable (Local/FCS_Key_Findings_2026-07), so
+# A17>A10 results are unmeasurable until that assay is re-run.
 SPECIFICITY_PAIRS = {
-    "MMP":  {"on_target": "MMP2",  "off_target": "MMP9"},
-    "ADAM": {"on_target": "ADAM10", "off_target": "ADAM17"},
+    "MMP":  {"on_target": "MMP9",   "off_target": "MMP2"},
+    "ADAM": {"on_target": "ADAM17", "off_target": "ADAM10"},
 }
 
 # Specificity composite (2026-07 recalibration; see calibrated_scoring.py).
@@ -489,6 +499,21 @@ def main():
                         help=f"Temperature floor (default {ir.MIN_TEMPERATURE}).")
     parser.add_argument("--temp-decay", type=float, default=None,
                         help=f"Per-iteration temperature multiplier (default {ir.TEMP_DECAY}).")
+    parser.add_argument("--conformation-mode", action="store_true",
+                        help="Perturb beam seeds with RFd3 partial diffusion instead of "
+                             "re-rolling sequences on frozen geometry.")
+    parser.add_argument("--beam-width", type=int, default=None,
+                        help=f"Seeds carried per pair per round (default {ir.BEAM_WIDTH}).")
+    parser.add_argument("--partial-t", type=float, default=None,
+                        help=f"Angstroms of noise, first conformation round "
+                             f"(default {ir.PARTIAL_T_INIT}).")
+    parser.add_argument("--partial-t-min", type=float, default=None,
+                        help=f"Noise floor (default {ir.PARTIAL_T_MIN}).")
+    parser.add_argument("--beam-fresh-fraction", type=float, default=None,
+                        help=f"Fraction of backbones generated fresh each round "
+                             f"(default {ir.BEAM_FRESH_FRACTION}).")
+    parser.add_argument("--sv-battery", action="store_true",
+                        help="Log the full Structural-Validation interface battery.")
     parser.add_argument("--no-adaptive-bias", action="store_true",
                         help="Disable adaptive loop-length narrowing (keeps full diversity).")
     args = parser.parse_args()
@@ -507,6 +532,25 @@ def main():
         ir.TEMP_DECAY = args.temp_decay
     if args.no_adaptive_bias:
         ir.ADAPTIVE_BIAS_START = 10**9
+    if args.sv_battery:
+        ir.SV_BATTERY = True
+    if args.conformation_mode:
+        ir.CONFORMATION_MODE = True
+        # Breed on the SPECIFICITY objective. _seed_candidates defaults to sv_pdockq,
+        # which is the generation campaign's target -- here composite_score already
+        # carries on_quality + selectivity (SPECIFICITY_COMPOSITE_WEIGHTS), so ranking
+        # the beam on it selects parents that are both good binders AND selective.
+        # Ranking on sv_pdockq would breed affinity and leave selectivity to chance,
+        # which is exactly what the generation campaign did.
+        ir.BEAM_RANK_METRIC = "composite_score"
+    if args.beam_width is not None:
+        ir.BEAM_WIDTH = args.beam_width
+    if args.partial_t is not None:
+        ir.PARTIAL_T_INIT = args.partial_t
+    if args.partial_t_min is not None:
+        ir.PARTIAL_T_MIN = args.partial_t_min
+    if args.beam_fresh_fraction is not None:
+        ir.BEAM_FRESH_FRACTION = args.beam_fresh_fraction
 
     OUT_BASE.mkdir(parents=True, exist_ok=True)
     refiner = SpecificityRefiner(pair_keys=args.pair, active_loops=args.loops)

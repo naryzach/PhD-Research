@@ -41,6 +41,7 @@ import json
 import glob
 import hashlib
 import zipfile
+from functools import lru_cache
 import argparse
 from pathlib import Path
 
@@ -306,6 +307,33 @@ def convergence_nd_rmsd(af3_atoms, esm_atoms,
 
 # ── AF3 parsing ───────────────────────────────────────────────────────────────
 
+@lru_cache(maxsize=1)
+def _target_sequences() -> tuple:
+    """{target_seq: target_name} harvested from the pipeline's own round summaries."""
+    out = {}
+    for csv in sorted(OUT_BASE.glob("it_*/round_summary.csv"), reverse=True):
+        try:
+            d = pd.read_csv(csv, usecols=["target_name", "target_seq"], on_bad_lines="skip")
+        except Exception:
+            continue
+        for t, g in d.dropna().groupby("target_name"):
+            out.setdefault(g.target_seq.iloc[0], str(t))
+        if len(out) >= 4:
+            break
+    return tuple(out.items())
+
+
+def _target_for_sequence(seq: str):
+    """Exact match first; then containment, so a trimmed construct still resolves."""
+    m = dict(_target_sequences())
+    if seq in m:
+        return m[seq]
+    for s, t in m.items():
+        if seq and (seq in s or s in seq):
+            return t
+    return None
+
+
 def parse_af3_zip(zip_path: str) -> list:
     """One record per AF3 job: ipTM, pTM, per-residue pLDDT, PAE, token map, CIF atoms."""
     recs = []
@@ -327,11 +355,21 @@ def parse_af3_zip(zip_path: str) -> list:
                     continue
                 scd = json.loads(zf.read(sc))
                 fdd = json.loads(zf.read(fd))
+                # Resolve the target from the TARGET CHAIN SEQUENCE, not the job name.
+                # The name-based regex below only ever matched the retired
+                # "refine_it<N>_<TARGET>_<idx>" convention; every current exporter uses
+                # a different one (stratified: "strat_<ts>_<TARGET>_<BAND>_<idx>";
+                # ordering: "ord<date>_<design_id>_<on|off>_<TARGET>"), so it silently
+                # set target="?" on every record and the designs dropped out of the
+                # per-target selection. The chain sequence cannot drift with naming.
+                tgt_seq = seqs[1]["proteinChain"]["sequence"]
+                tgt_by_seq = _target_for_sequence(tgt_seq)
                 m = re.search(r"(?:fold_)?refine_it\d+_([A-Za-z0-9]+)_\d+", jd.get("name", ""), re.I)
                 cp = scd.get("chain_ptm") or []
                 recs.append({
                     "name": jd.get("name", ""),
-                    "target": (m.group(1).upper() if m else "?"),
+                    "target": (tgt_by_seq or (m.group(1).upper() if m else "?")),
+                    "target_seq": tgt_seq,
                     "binder_seq": binder_seq,
                     "iptm": float(scd.get("iptm", 0.0)),
                     "ptm": float(scd.get("ptm", 0.0)),

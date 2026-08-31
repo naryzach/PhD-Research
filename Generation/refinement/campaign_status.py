@@ -55,6 +55,9 @@ def main() -> int:
                                 / "Local" / "iterative_refinement"))
     ap.add_argument("--since", type=int, default=69,
                     help="first round of the current configuration")
+    ap.add_argument("--marginal-window", type=int, default=5,
+                    help="rounds over which to measure whether the frontier is STILL "
+                         "moving (the number that should drive the decision)")
     ap.add_argument("--window", type=int, default=10,
                     help="rounds to run before the frontier verdict is meaningful")
     args = ap.parse_args()
@@ -108,16 +111,29 @@ def main() -> int:
         print(f"{t:8} {fr.mean():8.3f} {pe.mean():10.3f} {delta:+8.3f} "
               f"{len(pe):7} {flag}")
 
-    print("\nFRONTIER - best sv_pdockq, before vs since")
-    print(f"{'target':8} {'prior best':>11} {'best since':>11} {'gain':>8}")
-    gains = {}
+    # CUMULATIVE gain answers "did this configuration ever help", which stays true
+    # forever once it is true. MARGINAL gain answers "is it still helping", which is
+    # the question that decides whether to keep burning GPU. Reporting only the
+    # cumulative number made the tool say CLIMBING through eleven flat rounds at
+    # it_74-85, where the running max moved +0.005/+0.001/0.000/0.000.
+    print("\nFRONTIER - best sv_pdockq")
+    print(f"{'target':8} {'prior best':>11} {'best since':>11} {'cumulative':>11} "
+          f"{'last ' + str(args.marginal_window):>9}")
+    gains, marginal = {}, {}
+    cutoff = (cur.it.max() - args.marginal_window) if len(cur) else np.nan
     for t in TARGETS:
-        pb = prior[prior.target_name == t][METRIC].max() if len(prior) else np.nan
-        cb = cur[cur.target_name == t][METRIC].max() if len(cur) else np.nan
+        g_prior = prior[prior.target_name == t][METRIC]
+        g_cur = cur[cur.target_name == t]
+        pb = g_prior.max() if len(g_prior) else np.nan
+        cb = g_cur[METRIC].max() if len(g_cur) else np.nan
+        # what the max was `marginal_window` rounds ago, vs what it is now
+        earlier = g_cur[g_cur.it <= cutoff][METRIC].max() if len(g_cur) else np.nan
         gains[t] = cb - pb
+        marginal[t] = (cb - earlier) if earlier == earlier else np.nan
         fmt = lambda v, w: f"{v:{w}.3f}" if v == v else "-".rjust(w)
-        g = f"{cb - pb:+8.3f}" if (cb == cb and pb == pb) else "-".rjust(8)
-        print(f"{t:8} {fmt(pb, 11)} {fmt(cb, 11)} {g}")
+        g = f"{cb - pb:+11.3f}" if (cb == cb and pb == pb) else "-".rjust(11)
+        m = f"{marginal[t]:+9.3f}" if marginal[t] == marginal[t] else "-".rjust(9)
+        print(f"{t:8} {fmt(pb, 11)} {fmt(cb, 11)} {g} {m}")
 
     print()
     if not measured:
@@ -134,13 +150,20 @@ def main() -> int:
               "means anything. Change nothing.")
     elif not [v for v in gains.values() if v == v]:
         print("WAITING: rounds exist but none carry sv_pdockq yet.")
-    elif max(v for v in gains.values() if v == v) >= 0.02:
-        best = max((v, k) for k, v in gains.items() if v == v)
-        print(f"CLIMBING: frontier gained {best[0]:+.3f} on {best[1]}. Keep running.")
+    elif [v for v in marginal.values() if v == v] and \
+            max(v for v in marginal.values() if v == v) >= 0.02:
+        best = max((v, k) for k, v in marginal.items() if v == v)
+        print(f"CLIMBING: frontier gained {best[0]:+.3f} on {best[1]} in the last "
+              f"{args.marginal_window} rounds. Keep running.")
     else:
-        print("CEILING: mechanism worked and the frontier did not move over the full "
-              "window. sv_pdockq ~0.6 is a real limit for this scaffold and these "
-              "three loops - stop and order constructs spanning the range.")
+        mx = max((v for v in marginal.values() if v == v), default=float("nan"))
+        cum = max((v for v in gains.values() if v == v), default=float("nan"))
+        print(f"PLATEAU: the last {args.marginal_window} rounds moved the frontier "
+              f"by at most {mx:+.3f} (cumulative gain for this configuration is still "
+              f"{cum:+.3f}, but that is history, not headroom).")
+        print("  The configuration worked and has now converged. More rounds buy "
+              "designs no in-silico instrument you have can tell apart - stop and "
+              "order constructs spanning the range.")
     return 0
 
 
