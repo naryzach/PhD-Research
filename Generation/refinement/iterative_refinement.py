@@ -353,7 +353,14 @@ ESMFOLD2_PYTHON     = os.environ.get(
     str(Path.home() / "miniconda3" / "envs" / "esmfold2" / "bin" / "python"),
 )
 ESMFOLD2_SCRIPT     = str(_HERE / "score_with_esmfold2.py")
-ESMFOLD2_TIMEOUT_S  = 3600   # whole-batch timeout (model load + N designs)
+# Whole-batch timeout (model load + N designs). Env-configurable because it is a
+# throughput budget, not a safety limit, and the right value scales with how many
+# complexes a batch folds and how big they are. Measured 2026-09-01: the specificity
+# run folds TWICE per design (on- and off-target) and silently lost 68% of every round
+# to this timeout -- a near-constant 35/150 for ADAM17 and 60/150 for MMP9, the fixed
+# cut point that gives a timeout away. Generation's long-standing ADAM17 deficit
+# (~130/150 where other targets hit 150) is the same cause, milder.
+ESMFOLD2_TIMEOUT_S  = int(os.environ.get("ESMFOLD2_TIMEOUT_S", "3600"))
 # Extra flags appended to every scorer invocation. rescore_pool.py sets
 # ["--resume"] so a shard killed mid-batch restarts from its partial CSV
 # instead of re-folding everything it already did.
@@ -1429,6 +1436,18 @@ class IterativeRefiner:
 
         logger.info(f"[{target_name}] ESMFold2 done in {(time.time()-t0)/60:.1f} min "
                     f"({n_done}/{len(candidates)} scored)")
+        # Low yield is normally the whole-batch TIMEOUT, not a model failure, and it is
+        # invisible in the line above unless you know what a healthy count looks like.
+        # The tell is a near-constant scored count round after round: the specificity run
+        # sat at 35/150 (ADAM17) and 60/150 (MMP9) every round for a week.
+        _yield = (n_done / len(candidates)) if candidates else 1.0
+        if _yield < 0.70:
+            logger.warning(
+                f"[{target_name}] only {_yield:.0%} of designs scored "
+                f"({n_done}/{len(candidates)}). If this count is near-constant each "
+                f"round it is the batch timeout (ESMFOLD2_TIMEOUT_S="
+                f"{ESMFOLD2_TIMEOUT_S}s), not a model fault -- raise it, or fold fewer "
+                f"designs per round.")
         if ESMFOLD2_STRICT and rows and n_done == 0:
             logger.error(
                 f"[{target_name}] ESMFold2 scored 0 of {len(rows)} designs — the ranker is "

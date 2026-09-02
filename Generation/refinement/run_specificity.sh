@@ -44,6 +44,11 @@ MAX_RETRIES=5
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Whole-batch ESMFold2 timeout. This is a throughput budget, not a safety
+# limit: 300 complexes/round (on+off per design) and the ADAM pair is the largest.
+# A near-constant scored count each round means the batch is being cut off here.
+export ESMFOLD2_TIMEOUT_S="${ESMFOLD2_TIMEOUT_S:-10800}"
 # Output root — overridable via SPEC_OUT_BASE. Exported so specificity_refinement.py
 # uses the SAME root (it redirects the inherited iterative OUT_BASE to this).
 export SPEC_OUT_BASE="${SPEC_OUT_BASE:-$HERE/../../Local/specificity_refinement}"

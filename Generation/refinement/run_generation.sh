@@ -79,6 +79,11 @@ SV_OCCLUSION_MIN=""                 # optional: override catalytic-occlusion thr
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Whole-batch ESMFold2 timeout. This is a throughput budget, not a safety
+# limit: 150 complexes/round; ADAM17 has historically lost ~13% to this.
+# A near-constant scored count each round means the batch is being cut off here.
+export ESMFOLD2_TIMEOUT_S="${ESMFOLD2_TIMEOUT_S:-3600}"
 # Output root — overridable via REFINE_OUT_BASE so a fresh anneal can run in its own
 # directory without clobbering a preserved/salvaged pool. Exported so the python
 # child (iterative_refinement.py) uses the SAME root.
