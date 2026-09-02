@@ -69,6 +69,7 @@ from iterative_refinement import (
     _normalize_plddt,
 )
 import calibrated_scoring as cs  # calibrated priors + interface geometry (2026-07)
+import sv_bridge as svb          # SV interface battery (sv_pdockq et al.)
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -77,6 +78,15 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
+# Own handler, propagate=False -- same reason as iterative_refinement: RFd3's engine
+# reconfigures the root logger when it runs, which silently discards every line logged
+# after the first backbone call.
+logger.setLevel(logging.INFO)
+logger.propagate = False
+if not logger.handlers:
+    _h = logging.StreamHandler(sys.stdout)
+    _h.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    logger.addHandler(_h)
 for _noisy in ("transforms", "atomworks.io", "atomworks.ml", "foundry", "lightning"):
     logging.getLogger(_noisy).setLevel(logging.ERROR)
 
@@ -237,6 +247,40 @@ class SpecificityRefiner(IterativeRefiner):
             cd_on  = on_feats.get("esm_iface_contact_density")
             cd_off = off_feats.get("esm_iface_contact_density")
 
+            # SV battery on BOTH complexes. This override replaces the parent's
+            # run_esmfold2, which is where `if SV_BATTERY: ...` lives -- so without this
+            # block the --sv-battery flag is silently inert here, no sv_* column is ever
+            # written, and calc_composite renormalises away its pdockq term (weight 0.50).
+            # The on-target score then degrades to the LEGACY composite, the ranker
+            # measured at rho=+0.11 against AF3 -- and with BEAM_RANK_METRIC on
+            # composite_score, the beam would breed on it.
+            sv_on, sv_off = {}, {}
+            if ir.SV_BATTERY:
+                try:
+                    sv_on = svb.sv_battery(on_m.get("esm_cif"), ir.DESIGN_BINDER_CHAIN,
+                                           ir.DESIGN_TARGET_CHAIN, target_id=on_t) or {}
+                except Exception as exc:
+                    logger.debug(f"[{on_t}] sv_battery(on) failed for {c['design_id']}: {exc}")
+                if off_m:
+                    try:
+                        sv_off = svb.sv_battery(off_m.get("esm_cif"), ir.DESIGN_BINDER_CHAIN,
+                                                ir.DESIGN_TARGET_CHAIN, target_id=off_t) or {}
+                    except Exception as exc:
+                        logger.debug(f"[{off_t}] sv_battery(off) failed for "
+                                     f"{c['design_id']}: {exc}")
+            c.update(sv_on)                      # sv_* == ON-target, as elsewhere
+            pq_on, pq_off = sv_on.get("sv_pdockq"), sv_off.get("sv_pdockq")
+            c["sv_pdockq_off"] = pq_off
+            # Logged, not yet used as the objective: a pdockq-based selectivity gap. It
+            # rests on the one interface metric validated against AF3, where the
+            # contact-density gap below rests on one that barely clears significance
+            # (rho=+0.194, p=0.049 at n=103). Switch the objective with
+            # SPECIFICITY_SELECTIVITY_METRIC once there is selectivity ground truth to
+            # justify it -- neither is validated as a SELECTIVITY predictor today.
+            c["selectivity_pdockq"] = ((pq_on - pq_off)
+                                       if (cs._isnum(pq_on) and cs._isnum(pq_off))
+                                       else float("nan"))
+
             c.update({
                 "esm_iptm_on":   iptm_on,
                 "esm_plddt_on":  plddt_on,
@@ -260,9 +304,14 @@ class SpecificityRefiner(IterativeRefiner):
                                                        "esm_iface_n_iface_res": on_feats.get("esm_iface_n_iface_res")})
                               and (_safe(c.get("selectivity_cd"), 0.0) > 0)),
             })
+            # sv_pdockq must be passed EXPLICITLY: this dict is hand-built, so merging
+            # sv_on into `c` above does not reach esmfold2_stage_score. Without it the
+            # pdockq term (weight 0.50) renormalises away and on_quality silently
+            # degrades to the legacy composite.
             c["composite_score"] = calc_specificity_composite(
                 {"esm_plddt": plddt_on, "esm_iface_contact_density": cd_on,
-                 "esm_iface_n_iface_res": on_feats.get("esm_iface_n_iface_res")},
+                 "esm_iface_n_iface_res": on_feats.get("esm_iface_n_iface_res"),
+                 "sv_pdockq": pq_on},
                 {"esm_iface_contact_density": cd_off}, model="esm")
             self.state["specificity_hof"].setdefault(pk, []).append(c)
             n_done += 1
