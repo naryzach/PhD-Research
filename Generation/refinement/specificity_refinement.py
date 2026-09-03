@@ -324,6 +324,17 @@ class SpecificityRefiner(IterativeRefiner):
 
         logger.info(f"[{on_t}↔{off_t}] ESMFold2 specificity scoring done in "
                     f"{(time.time()-t0)/60:.1f} min ({n_done}/{len(candidates)} scored)")
+        # Duplicated from the parent's run_esmfold2 ON PURPOSE: this method overrides it,
+        # so anything added there never runs on the specificity path. That is how the
+        # SV battery sat inert and how a 68%-loss round looked healthy for a week.
+        _yield = (n_done / len(candidates)) if candidates else 1.0
+        if _yield < 0.70:
+            logger.warning(
+                f"[{on_t}] only {_yield:.0%} of designs scored ({n_done}/"
+                f"{len(candidates)}). This path folds TWICE per design, so the batch is "
+                f"2x the generation campaign's. If the count is near-constant each round "
+                f"it is the batch timeout (ESMFOLD2_TIMEOUT_S={ir.ESMFOLD2_TIMEOUT_S}s) "
+                f"-- fold fewer designs per round rather than raising it further.")
         return candidates
 
     # ── Specificity HOF summary ───────────────────────────────────────────────

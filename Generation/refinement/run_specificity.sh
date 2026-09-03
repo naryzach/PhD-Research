@@ -34,7 +34,15 @@ BEAM_FRESH_FRACTION="${BEAM_FRESH_FRACTION:-0.25}"
 SV_BATTERY="${SV_BATTERY:-1}"        # sv_* columns; the first campaign ran without them
 LOOPS="AB C EF"
 BACKBONES_PER_TARGET=50
-SEQS_PER_BACKBONE=3
+# 1, not 3. This path folds the on- AND off-target, so 50x3 designs = 300 complexes per
+# round -- double the generation campaign's batch, on the two LARGEST complexes (ADAM17
+# 188+256 aa). Measured 2026-09-02/03: that batch does not finish inside three hours and
+# every round was being cut off by the timeout.
+# Cutting SEQUENCES rather than backbones is the right lever: the variance decomposition
+# says loop CONFORMATION carries ~89% of sv_pdockq and loop SEQUENCE ~11%, so sampling 3
+# sequences per backbone spent 3x the fold budget on the axis that matters least.
+# 50 designs = 100 complexes/round, which fits comfortably.
+SEQS_PER_BACKBONE="${SEQS_PER_BACKBONE:-1}"   # SEQS_PER_BACKBONE=3 restores the old batch
 INIT_TEMPERATURE=0.60
 MIN_TEMPERATURE=0.10
 TEMP_DECAY=0.94
