@@ -90,9 +90,24 @@ else
   fi
 fi
 
-if [[ "${FRESH:-0}" == "1" && -f "$STATE" ]]; then
-  bak="$STATE.$(date +%Y%m%d_%H%M%S).bak"; mv "$STATE" "$bak"
-  echo "FRESH: archived existing state -> $bak (anneal starts hot at T=$INIT_TEMPERATURE)" | tee -a "$LOG"
+if [[ "${FRESH:-0}" == "1" ]]; then
+  # Archive the WHOLE prior run — state AND it_* dirs + hof summaries — not just the
+  # state file. Moving only the state (the old behaviour) leaves the round dirs in
+  # place, so the fresh run restarts at it_0 and OVERWRITES it_0/round_summary.csv
+  # while it_1..it_N survive from the previous objective. Measured 2026-09-04: the
+  # pool then reported 10 rounds with the state at iteration 1, blending the
+  # contact-density and pdockq objectives in one directory with no way to tell them
+  # apart. Same archiving as run_generation.sh. Moved, not deleted.
+  if compgen -G "$OUT_BASE/it_*" > /dev/null || [[ -f "$STATE" ]]; then
+    arch="$OUT_BASE/_archived_$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$arch"
+    [[ -f "$STATE" ]] && mv "$STATE" "$arch"/
+    for s in specificity_hof_summary.csv hof_summary.csv; do
+      [[ -f "$OUT_BASE/$s" ]] && mv "$OUT_BASE/$s" "$arch"/
+    done
+    for d in "$OUT_BASE"/it_*; do [[ -e "$d" ]] && mv "$d" "$arch"/; done
+    echo "FRESH: archived prior run -> $arch (anneal starts hot at T=$INIT_TEMPERATURE)" | tee -a "$LOG"
+  fi
 fi
 if [[ -f "$STATE" ]]; then
   echo "RESUMING: $STATE exists — anneal continues from the saved iteration/temperature." | tee -a "$LOG"
