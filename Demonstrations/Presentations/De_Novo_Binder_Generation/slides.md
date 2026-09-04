@@ -635,10 +635,10 @@ transition: fade-out
         A systematic tally comparing the design intent of all 13 engineered TIMP3 loop variants against aggregated flow-cytometry results — the full-library complement to the MMP9-vs-MMP2 primary result on the next slide.
       </p>
       <ul class="text-[10px] list-disc pl-4 space-y-1.5 opacity-70 mt-3">
-        <li><b>Hits (6/13):</b> Binding trend matched computational design intent. Standout: <b>AB 4</b> (ADAM17-directed, normalized median ratio 1.26 — ranked 1st of 12 testable constructs).</li>
-        <li><b>Partials (2/13):</b> Directionally correct but not statistically significant.</li>
-        <li><b>Misses (2/13):</b> <b>C 13</b> predicted low-affinity but measured NMR 1.11; <b>C 15</b> predicted MMP9-preferential but measured MMP2-preferential on this broader (non-ANOVA) metric — consistent with C 15's own MMP9-vs-MMP2 result being borderline rather than clean on the narrow test too (previous slide).</li>
-        <li><b>Untestable (3/13):</b> Limited by low target activity, degraded prep quality, or mismatch in screening thresholds (incl. C 16 / ABC 21, which failed to display on yeast at all).</li>
+        <li><b>Hits (5/13):</b> Binding trend matched computational design intent — AB 1, AB 6, AB 7 (both its ADAM17+ and ADAM17&gt;ADAM10 sub-criteria, on a single available ADAM10 trial), C 11, and C 12.</li>
+        <li><b>Partials (3/13):</b> AB 3, AB 5 directionally correct but not statistically significant; <b>AB 4</b> hits its ADAM17+ target but the single available ADAM10 trial actually bound <em>more</em> than ADAM17 — so its selectivity sub-criterion misses even though the primary binding criterion holds.</li>
+        <li><b>Misses (3/13):</b> <b>C 13</b> predicted low-affinity but measured NMR 1.11; <b>C 14</b>'s single available ADAM10 trial also bound more than ADAM17, missing its selectivity criterion; <b>C 15</b> predicted MMP9-preferential but measured MMP2-preferential on this broader (non-ANOVA) metric — consistent with C 15's own MMP9-vs-MMP2 result being borderline rather than clean on the narrow test too (previous slide).</li>
+        <li><b>Untestable (2/13):</b> <b>AB 2</b>'s MMP9-vs-population ANOVA call was non-significant; <b>C 16</b> failed to display on yeast at all.</li>
       </ul>
     </div>
     <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
@@ -729,9 +729,9 @@ transition: fade-out
         Linear correlation of computational ipTM against experimental yeast-display normalized median ratio (NMR), 12 constructs across three targets.
       </p>
       <ul class="text-[10px] list-disc pl-4 space-y-1.5 opacity-70 mt-3">
-        <li><b>ADAM17:</b> Weak negative (r = -0.163, p = 0.613).</li>
-        <li><b>MMP2:</b> Essentially zero (r = 0.029, p = 0.928).</li>
-        <li><b>MMP9:</b> Moderate negative (r = -0.471, p = 0.123).</li>
+        <li><b>ADAM17:</b> Weak negative (r = -0.238, p = 0.456).</li>
+        <li><b>MMP2:</b> Weak negative (r = -0.207, p = 0.519).</li>
+        <li><b>MMP9:</b> Essentially zero (r = -0.022, p = 0.947).</li>
       </ul>
     </div>
     <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
@@ -752,25 +752,25 @@ transition: fade-out
 ---
 
 # Some Binders Are Just Sticky
-Raw AlphaFold3 confidence looked useless for ranking binding — a simple confound explains why, and correcting for it recovers the signal.
+Raw AlphaFold3 confidence looks useless for ranking binding; a stickiness confound explains part of why, but correcting for it doesn't yet recover a significant signal on the full current dataset.
 
 <div class="grid grid-cols-2 gap-6 mt-4 items-start">
   <div class="space-y-3">
     <div class="p-3 bg-white/5 rounded border border-white/10 text-[10px] leading-relaxed opacity-80">
-      <b class="text-blue-400">Some constructs are just "sticky":</b> binding correlates strongly <em>across targets</em> for a given construct — a construct that binds one protease tends to bind them all, regardless of target. This general stickiness accounts for roughly half of the variance in raw binding scores; only about a third reflects genuine target-specific interaction, with the rest coming from baseline differences between targets themselves.
+      <b class="text-blue-400">Some constructs are just "sticky":</b> binding correlates strongly <em>across targets</em> for a given construct — a construct that binds one protease tends to bind them all, regardless of target. This general stickiness accounts for roughly two-thirds of the variance in binding scores; well under a third reflects genuine target-specific interaction, with a small remainder from baseline differences between targets themselves.
     </div>
-    <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px] leading-relaxed opacity-80">
-      <b class="text-emerald-400">Correct for stickiness and the signal reappears:</b> once each construct's general stickiness is subtracted out, structural metrics (interface PAE, loop pLDDT) predict what's left — target-specific binding — far above their raw correlation. The categorical selectivity result (AB 6, C 12, C 15) was real all along; it was just masked in the raw numbers.
+    <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px] leading-relaxed opacity-80">
+      <b class="text-amber-400">Correcting for stickiness narrows the gap, but doesn't clear significance:</b> after removing each construct's stickiness, loop-pLDDT's correlation with the target-specific residual moves in the right direction (ρ=0.20, p=0.23, n=36) but isn't significant; ipTM stays flat (ρ=0.09, p=0.58). The categorical hits (AB 6, C 12, C 15) are still confirmed by their own wet-lab statistics — that finding doesn't depend on this correlation holding up.
     </div>
     <div class="p-3 bg-red-500/10 rounded border border-red-500/20 text-[10px] leading-relaxed opacity-80">
-      <b class="text-red-400">ipTM tracks expression, not binding:</b> ipTM correlates more with how well a construct <em>expresses</em> than with how well it <em>binds</em>, and is nearly saturated across these designs — too compressed to rank fine differences. Loop-pLDDT and interface PAE carry the real signal.
+      <b class="text-red-400">ipTM tracks expression, not binding:</b> ipTM correlates with how well a construct <em>expresses</em> (ρ=0.37, p=0.027) but not with target-specific binding (ρ=0.09, p=0.58), and is nearly saturated across these designs (0.77–0.90) — too compressed to rank fine differences.
     </div>
   </div>
   <div class="space-y-2 flex flex-col items-center w-full">
     <CategoryBars dataset="variance" title="Variance Decomposition (%)" />
     <CategoryBars dataset="rho" title="Stickiness-Corrected Correlation (ρ)" />
     <p class="text-[9px] opacity-40 italic text-center">
-      Top: stickiness / target baseline / genuine target-specific signal. Bottom: once stickiness is removed, PAE/loop-pLDDT track binding; ipTM tracks expression, not binding.
+      Top: stickiness / target baseline / genuine target-specific signal, recomputed against the current full dataset. Bottom: even after removing stickiness, loop-pLDDT/ipTM correlation with binding is still weak and not statistically significant (n=36); ipTM instead tracks expression.
     </p>
   </div>
 </div>
@@ -836,13 +836,13 @@ The appeal of HADDOCK was exact retention of each target's real crystal structur
       <b class="text-emerald-400">Mechanistic check:</b> AF3/ESMFold2 co-folds reproduce the native crystal's real zinc-chelation geometry; the HADDOCK-docked poses bury the zinc loop non-specifically, well off that geometry.
     </div>
     <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px] leading-relaxed opacity-80">
-      <b class="text-amber-400">Self-consistency check:</b> the two co-fold methods agree with each other on construct pose; the four HADDOCK docking tracks (varying which structure — AF3, ESMFold2, or crystal — supplied each monomer) disagree with <em>each other</em> nearly as much as with the co-folds. A method that can't reproduce its own answer across equivalent inputs isn't a reliable design base, independent of any binding data.
+      <b class="text-amber-400">Self-consistency check:</b> both co-fold methods produce consistently good-quality poses (mean DockQ ≈0.47–0.49); all four HADDOCK docking tracks (varying which structure — AF3, ESMFold2, or crystal — supplied each monomer) score far lower and about equally poorly (DockQ 0.07–0.08), regardless of which inputs were docked. A method that can't produce a good pose across any combination of equivalent inputs isn't a reliable design base, independent of any binding data.
     </div>
   </div>
   <div class="space-y-3 flex flex-col items-center">
-    <CategoryBars dataset="haddock" title="Construct Cα RMSD Across Sources (Å)" />
+    <CategoryBars dataset="haddock" title="Mean DockQ Across Sources" />
     <p class="text-[9px] opacity-40 italic text-center">
-      Cross-source pose convergence: the two co-folds agree closely; the four HADDOCK tracks scatter widely from each other and from the co-folds.
+      Cross-source pose quality (DockQ, higher = better): both co-fold methods land around 0.47–0.49; all four HADDOCK docking tracks sit far lower (0.07–0.08), each roughly as poor as the others.
     </p>
   </div>
 </div>

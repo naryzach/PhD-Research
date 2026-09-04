@@ -34,7 +34,7 @@ const items = computed(() => {
       return esmcPerf
     case 'haddock':
       return [
-        { label: 'AF3 + ESMFold2 (co-folds)', value: haddock.cofold_rmsd, color: '#34d399' },
+        ...haddock.cofold_dockq.map(t => ({ ...t, color: '#34d399' })),
         ...haddock.haddock_tracks.map(t => ({ ...t, color: '#f5576c' })),
       ]
     default:

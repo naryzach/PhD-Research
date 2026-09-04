@@ -105,7 +105,7 @@ const gateYVal = ref(3.1)
 
 const canvasRef = ref(null)
 const plotSize = 260
-const gridRes = 120
+const gridRes = 60
 
 // Alphabetize samples
 const samples = computed(() => Object.keys(fcsSamples[activeDate.value]).sort())
