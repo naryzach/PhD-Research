@@ -131,15 +131,40 @@ SPECIFICITY_PAIRS = {
 #                 read selectivity. Neutral (0.5) when the geometry isn't available.
 SPECIFICITY_COMPOSITE_WEIGHTS = {"on_quality": 0.50, "selectivity": 0.50}
 CONTACT_DENSITY_GAP_SCALE = 20.0   # a contact-density gap of this magnitude ~ saturates selectivity
+PDOCKQ_GAP_SCALE = 0.40            # ditto for a pdockq gap (observed best: +0.25 to +0.47)
+
+# Which on-minus-off gap the selectivity term optimises. Switched to "pdockq" 2026-09-04
+# on ten rounds of evidence that the contact-density gap is not a usable objective:
+#
+#   selectivity_cd     the metric being optimised. Its FRONTIER never moved -- MMP9's
+#                      best was +10.375 at it_3 and +10.375 at it_10, ADAM17's +12.553
+#                      at both -- while its population mean rose 6.5x on MMP9. The
+#                      search worked hard and found nothing better.
+#   selectivity_pdockq NOT optimised, and its frontier moved anyway: ADAM17 0.335 ->
+#                      0.472. On MMP9, cd's 6.5x population gain bought no pdockq gain
+#                      at all (-0.018 -> -0.007); on ADAM17 the two moved in OPPOSITE
+#                      directions (cd -2.35 -> -2.71 while pdockq +0.034 -> +0.095).
+#
+# Neither gap is validated as a SELECTIVITY predictor -- there is no selectivity ground
+# truth yet. But sv_pdockq is the one interface metric validated against AF3 (rho ~ +0.59
+# across three independent samples) where contact density barely clears significance
+# (+0.194, p=0.049), so its gap is the better-grounded objective. Set to "cd" to revert.
+SPECIFICITY_SELECTIVITY_METRIC = "pdockq"
 HOF_SIZE = 75   # per specificity pair
 
 
-def _cd_gap_norm(cd_on, cd_off) -> float:
-    """Normalize an on-minus-off contact-density gap to [0,1]; 0.5 = neutral/unknown."""
-    if not (cs._isnum(cd_on) and cs._isnum(cd_off)):
-        return 0.5
-    g = (float(cd_on) - float(cd_off)) / CONTACT_DENSITY_GAP_SCALE
+def _gap_norm(on, off, scale) -> float:
+    """Normalize an on-minus-off gap to [0,1]; 0.5 = neutral/unknown."""
+    if not (cs._isnum(on) and cs._isnum(off)):
+        return None
+    g = (float(on) - float(off)) / scale
     return float(min(1.0, max(0.0, (g + 1.0) / 2.0)))
+
+
+def _cd_gap_norm(cd_on, cd_off) -> float:
+    """Back-compat wrapper; 0.5 when the geometry isn't available."""
+    v = _gap_norm(cd_on, cd_off, CONTACT_DENSITY_GAP_SCALE)
+    return 0.5 if v is None else v
 
 
 def calc_specificity_composite(on_metrics: dict, off_metrics: dict = None,
@@ -154,13 +179,25 @@ def calc_specificity_composite(on_metrics: dict, off_metrics: dict = None,
     off_metrics = off_metrics or {}
     if model == "af3":
         on_q = cs.af3_binding_prior(on_metrics)
-        cd_on, cd_off = on_metrics.get("af3_iface_contact_density"), off_metrics.get("af3_iface_contact_density")
+        cd_key = "af3_iface_contact_density"
     else:
         on_q = cs.esmfold2_stage_score(on_metrics)
-        cd_on, cd_off = on_metrics.get("esm_iface_contact_density"), off_metrics.get("esm_iface_contact_density")
+        cd_key = "esm_iface_contact_density"
     if not (on_q == on_q):   # NaN guard
         on_q = 0.0
-    return float(w["on_quality"] * on_q + w["selectivity"] * _cd_gap_norm(cd_on, cd_off))
+
+    sel = None
+    if SPECIFICITY_SELECTIVITY_METRIC == "pdockq":
+        sel = _gap_norm(on_metrics.get("sv_pdockq"), off_metrics.get("sv_pdockq"),
+                        PDOCKQ_GAP_SCALE)
+    # Fall back to the contact-density gap when pdockq is unavailable (AF3-scored rows,
+    # or any pool predating --sv-battery) rather than scoring those designs as neutral.
+    if sel is None:
+        sel = _gap_norm(on_metrics.get(cd_key), off_metrics.get(cd_key),
+                        CONTACT_DENSITY_GAP_SCALE)
+    if sel is None:
+        sel = 0.5
+    return float(w["on_quality"] * on_q + w["selectivity"] * sel)
 
 
 class SpecificityRefiner(IterativeRefiner):
@@ -312,7 +349,8 @@ class SpecificityRefiner(IterativeRefiner):
                 {"esm_plddt": plddt_on, "esm_iface_contact_density": cd_on,
                  "esm_iface_n_iface_res": on_feats.get("esm_iface_n_iface_res"),
                  "sv_pdockq": pq_on},
-                {"esm_iface_contact_density": cd_off}, model="esm")
+                {"esm_iface_contact_density": cd_off, "sv_pdockq": pq_off},
+                model="esm")
             self.state["specificity_hof"].setdefault(pk, []).append(c)
             n_done += 1
 
