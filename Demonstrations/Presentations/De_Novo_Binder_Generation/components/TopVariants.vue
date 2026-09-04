@@ -13,8 +13,8 @@
         </button>
       </div>
       <div class="flex gap-3 text-[7px] uppercase tracking-wide font-bold opacity-60">
-        <span class="flex items-center gap-1"><span class="dot confirmed"></span>Confirmed (ANOVA+Tukey p&lt;0.05)</span>
-        <span class="flex items-center gap-1"><span class="dot directional"></span>Directional (n.s.)</span>
+        <span class="flex items-center gap-1"><span class="dot confirmed"></span>Confirmed (p&lt;0.05)</span>
+        <span class="flex items-center gap-1"><span class="dot directional"></span>Directional (n.s. or single-source)</span>
         <span class="flex items-center gap-1"><span class="dot control"></span>Control</span>
       </div>
     </div>

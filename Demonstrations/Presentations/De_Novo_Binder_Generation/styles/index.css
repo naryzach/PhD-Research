@@ -2,46 +2,259 @@
   color: inherit;
 }
 
-/* 1. Hide the navigation bar components (arrows, dividers, tools) */
-.slidev-nav-controls button,
-.slidev-nav-controls .VerticalDivider,
-.slidev-nav-controls .MenuButton,
-.slidev-nav-controls [class*="Divider"] {
-  display: none !important;
-}
-
-/* 2. Keep and style the slide number as a standalone navigator in the bottom left */
-.slidev-nav-controls div.h-40px.flex {
-  display: flex !important;
-  position: fixed;
-  bottom: 12px;
-  left: 12px;
-  z-index: 100;
-  background: rgba(15, 23, 42, 0.5);
-  padding: 4px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  transition: all 0.3s;
-}
-.slidev-nav-controls div.h-40px.flex:hover {
-  background: rgba(15, 23, 42, 0.9);
-  border-color: rgba(255, 255, 255, 0.3);
-}
-
-/* 3. Hide the persistent slide list (Navigator) */
-/* We only allow the Go To dialog to show when specifically active (.top-5) */
-#slidev-goto-dialog:not(.top-5),
-.slidev-navigator,
-.slidev-sidebar,
-.slidev-toc {
-  display: none !important;
-}
-
-/* Restore title typography */
+/* Title: solid color instead of gradient, on both themes */
 h1 {
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: #2563eb !important;
+  background: none !important;
+  -webkit-background-clip: initial !important;
+  background-clip: initial !important;
+  -webkit-text-fill-color: initial !important;
+}
+html.dark h1 {
+  color: #4facfe !important;
+}
+
+/* ---------------------------------------------------------------------
+   Light-mode readability pass.
+   This deck's boxes/accents (bg-white/5, border-white/10, text-white,
+   text-*-300/400) were designed for the dark background — on white they
+   read as near-invisible or washed out. Re-tone them under html.light,
+   leaving the dark theme (the deck's default look) untouched.
+--------------------------------------------------------------------- */
+html.light .slidev-layout {
+  --accent-blue: #1d4ed8;
+  --accent-cyan: #0e7490;
+  --accent-emerald: #047857;
+  --accent-violet: #6d28d9;
+  --accent-amber: #b45309;
+  --accent-red: #b91c1c;
+  --accent-slate: #475569;
+}
+
+html.light .text-blue-100,
+html.light .text-blue-200,
+html.light .text-blue-300,
+html.light .text-blue-400 { color: var(--accent-blue) !important; }
+html.light .text-cyan-300,
+html.light .text-cyan-400 { color: var(--accent-cyan) !important; }
+html.light .text-emerald-300,
+html.light .text-emerald-400 { color: var(--accent-emerald) !important; }
+html.light .text-violet-300,
+html.light .text-violet-400 { color: var(--accent-violet) !important; }
+html.light .text-amber-300,
+html.light .text-amber-400 { color: var(--accent-amber) !important; }
+html.light .text-red-300,
+html.light .text-red-400 { color: var(--accent-red) !important; }
+html.light .text-slate-400 { color: var(--accent-slate) !important; }
+
+/* Glass-morphism boxes: swap the white-on-dark tint for a black-on-light one */
+html.light .bg-white\/4,
+html.light .bg-white\/5 { background-color: rgba(15, 23, 42, 0.045) !important; }
+html.light .border-white\/5 { border-color: rgba(15, 23, 42, 0.08) !important; }
+html.light .border-white\/10 { border-color: rgba(15, 23, 42, 0.14) !important; }
+html.light .border-white\/20 { border-color: rgba(15, 23, 42, 0.22) !important; }
+html.light .text-white { color: #0f172a !important; }
+html.light .text-white\/40,
+html.light .text-white\/50,
+html.light .text-white\/60,
+html.light .text-white\/70,
+html.light .text-white\/80,
+html.light .text-white\/90 { color: #1e293b !important; }
+
+/* ---------------------------------------------------------------------
+   Dark "device-screen" component cards (bg-black/NN, bg-blue-900) are
+   ALREADY opaque and dark on their own -- they don't change with page
+   theme, and their internal text was designed against that dark card,
+   not the page background. The blanket light-mode rules above were
+   darkening that internal text too (it matches the same class names),
+   making it unreadable against the still-dark card. Undo the light-mode
+   overrides for anything nested inside one of these self-contained cards.
+--------------------------------------------------------------------- */
+html.light [class*="bg-black/9"] .text-white,
+html.light .bg-blue-900 .text-white { color: #ffffff !important; }
+html.light [class*="bg-black/9"] .text-white\/40,
+html.light .bg-blue-900 .text-white\/40 { color: rgba(255, 255, 255, 0.4) !important; }
+html.light [class*="bg-black/9"] .text-white\/50,
+html.light .bg-blue-900 .text-white\/50 { color: rgba(255, 255, 255, 0.5) !important; }
+html.light [class*="bg-black/9"] .text-white\/60,
+html.light .bg-blue-900 .text-white\/60 { color: rgba(255, 255, 255, 0.6) !important; }
+html.light [class*="bg-black/9"] .text-white\/70,
+html.light .bg-blue-900 .text-white\/70 { color: rgba(255, 255, 255, 0.7) !important; }
+html.light [class*="bg-black/9"] .text-white\/80,
+html.light .bg-blue-900 .text-white\/80 { color: rgba(255, 255, 255, 0.8) !important; }
+html.light [class*="bg-black/9"] .text-white\/90,
+html.light .bg-blue-900 .text-white\/90 { color: rgba(255, 255, 255, 0.9) !important; }
+html.light [class*="bg-black/9"] .bg-white\/4,
+html.light [class*="bg-black/9"] .bg-white\/5 { background-color: rgba(255, 255, 255, 0.05) !important; }
+html.light [class*="bg-black/9"] .border-white\/5 { border-color: rgba(255, 255, 255, 0.05) !important; }
+html.light [class*="bg-black/9"] .border-white\/10,
+html.light .bg-blue-900 .border-white\/10,
+html.light .bg-blue-900 .border-white\/20 { border-color: rgba(255, 255, 255, 0.15) !important; }
+html.light [class*="bg-black/9"] .border-white\/20 { border-color: rgba(255, 255, 255, 0.2) !important; }
+html.light [class*="bg-black/9"] .text-blue-100,
+html.light [class*="bg-black/9"] .text-blue-200,
+html.light [class*="bg-black/9"] .text-blue-300,
+html.light [class*="bg-black/9"] .text-blue-400,
+html.light .bg-blue-900 .text-blue-200 { color: #7dd3fc !important; }
+html.light [class*="bg-black/9"] .text-cyan-300,
+html.light [class*="bg-black/9"] .text-cyan-400 { color: #67e8f9 !important; }
+html.light [class*="bg-black/9"] .text-emerald-300,
+html.light [class*="bg-black/9"] .text-emerald-400 { color: #6ee7b7 !important; }
+html.light [class*="bg-black/9"] .text-violet-300,
+html.light [class*="bg-black/9"] .text-violet-400 { color: #c4b5fd !important; }
+html.light [class*="bg-black/9"] .text-amber-300,
+html.light [class*="bg-black/9"] .text-amber-400 { color: #fcd34d !important; }
+html.light [class*="bg-black/9"] .text-red-300,
+html.light [class*="bg-black/9"] .text-red-400 { color: #fca5a5 !important; }
+html.light [class*="bg-black/9"] .text-slate-400 { color: #94a3b8 !important; }
+
+/* ---------------------------------------------------------------------
+   Chart cards, fully re-themed for light mode (not just kept dark).
+   Two families:
+   (A) The 8 SVG bar/scatter/heatmap components share a bg-black/90
+       wrapper + a small consistent set of scoped tick/label/axis
+       classes + a couple of inline SVG stroke colors for gridlines.
+   (B) TScoreTable / TopVariants / LoopConfig / MetricExplorer have no
+       wrapper background at all -- they render translucent glass
+       pieces assuming a dark page. Both families get the same
+       treatment: flip the card/pieces to a light backdrop and darken
+       their text, instead of leaving them as permanently-dark islands.
+   Their own hover-only detail popups (already fully opaque + dark on
+   their own terms, e.g. MetricExplorer's popup-card, LoopConfig's
+   loop-tooltip, CategoryBars' tooltip-overlay, FcsChart's blue-900
+   tooltip) are deliberately left alone -- dark floating tooltips read
+   fine regardless of page theme, and changing them adds risk for
+   little visible benefit since they're transient, not on-screen by
+   default.
+--------------------------------------------------------------------- */
+html.light :is(.bind-med-bars, .calib-scatter, .category-bars, .cross-reactivity,
+  .esmc-conf, .fcs-chart-final, .heatmap, .selectivity-bars) {
+  background: #ffffff !important;
+  border-color: rgba(15, 23, 42, 0.15) !important;
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.08) !important;
+}
+html.light :is(.bind-med-bars, .calib-scatter, .category-bars, .cross-reactivity,
+  .esmc-conf, .fcs-chart-final, .heatmap, .selectivity-bars) .text-white {
+  color: #0f172a !important;
+}
+html.light :is(.bind-med-bars, .calib-scatter, .category-bars, .cross-reactivity,
+  .esmc-conf, .fcs-chart-final, .heatmap, .selectivity-bars) [class*="text-white/"] {
+  color: #1e293b !important;
+}
+html.light :is(.bind-med-bars, .calib-scatter, .category-bars, .cross-reactivity,
+  .esmc-conf, .fcs-chart-final, .heatmap, .selectivity-bars) [class*="border-white/"] {
+  border-color: rgba(15, 23, 42, 0.15) !important;
+}
+html.light :is(.bind-med-bars, .calib-scatter, .category-bars, .cross-reactivity,
+  .esmc-conf, .fcs-chart-final, .heatmap, .selectivity-bars) [class*="bg-white/"] {
+  background-color: rgba(15, 23, 42, 0.05) !important;
+}
+html.light :is(.bind-med-bars, .calib-scatter, .category-bars, .cross-reactivity,
+  .esmc-conf, .fcs-chart-final, .heatmap, .selectivity-bars) [class*="text-blue-"] {
+  color: var(--accent-blue) !important;
+}
+html.light :is(.bind-med-bars, .calib-scatter, .category-bars, .cross-reactivity,
+  .esmc-conf, .fcs-chart-final, .heatmap, .selectivity-bars) [class*="text-cyan-"] {
+  color: var(--accent-cyan) !important;
+}
+html.light :is(.bind-med-bars, .calib-scatter, .category-bars, .cross-reactivity,
+  .esmc-conf, .fcs-chart-final, .heatmap, .selectivity-bars) [class*="text-emerald-"] {
+  color: var(--accent-emerald) !important;
+}
+html.light :is(.bind-med-bars, .calib-scatter, .category-bars, .cross-reactivity,
+  .esmc-conf, .fcs-chart-final, .heatmap, .selectivity-bars) [class*="text-violet-"] {
+  color: var(--accent-violet) !important;
+}
+html.light :is(.bind-med-bars, .calib-scatter, .category-bars, .cross-reactivity,
+  .esmc-conf, .fcs-chart-final, .heatmap, .selectivity-bars) [class*="text-amber-"] {
+  color: var(--accent-amber) !important;
+}
+html.light :is(.bind-med-bars, .calib-scatter, .category-bars, .cross-reactivity,
+  .esmc-conf, .fcs-chart-final, .heatmap, .selectivity-bars) [class*="text-red-"] {
+  color: var(--accent-red) !important;
+}
+html.light :is(.bind-med-bars, .calib-scatter, .category-bars, .cross-reactivity,
+  .esmc-conf, .fcs-chart-final, .heatmap, .selectivity-bars) [class*="text-slate-"] {
+  color: var(--accent-slate) !important;
+}
+/* Inline SVG gridlines / reference lines (presentation attributes -- a
+   plain stylesheet rule already outranks these, no !important needed,
+   but included for safety against any future inline style additions). */
+html.light :is(.bind-med-bars, .calib-scatter, .category-bars, .cross-reactivity,
+  .esmc-conf, .fcs-chart-final, .heatmap, .selectivity-bars) line[stroke*="255,255,255"] {
+  stroke: rgba(15, 23, 42, 0.15) !important;
+}
+html.light :is(.bind-med-bars, .calib-scatter, .category-bars, .cross-reactivity,
+  .esmc-conf, .fcs-chart-final, .heatmap, .selectivity-bars) line[stroke="white"],
+html.light :is(.bind-med-bars, .calib-scatter, .category-bars, .cross-reactivity,
+  .esmc-conf, .fcs-chart-final, .heatmap, .selectivity-bars) line[stroke="#ffffff"] {
+  stroke: #0f172a !important;
+}
+/* Scoped tick/label/axis text classes -- distinct names per component
+   but all light-gray-on-dark by design; darken them together. */
+html.light :is(.bind-med-bars, .calib-scatter, .category-bars, .cross-reactivity,
+  .esmc-conf, .fcs-chart-final, .heatmap, .selectivity-bars)
+  :is(.tick, .label, .pct, .lbl, .axis-label, .axis-title, .y-axis-tick, .x-axis-label, .legend-text) {
+  fill: rgba(15, 23, 42, 0.65) !important;
+}
+
+/* CategoryBars' own hover tooltip (.tooltip-overlay) and FcsChart's hover
+   tooltip (.bg-blue-900) are dark floating popups nested INSIDE cards that
+   just went light above -- re-assert their light-on-dark text since they
+   keep their own dark backdrop regardless of page theme. */
+html.light .category-bars .tooltip-overlay .text-white,
+html.light .fcs-chart-final .bg-blue-900 .text-white { color: #ffffff !important; }
+html.light .category-bars .tooltip-overlay [class*="text-white/"],
+html.light .fcs-chart-final .bg-blue-900 [class*="text-white/"] { color: rgba(255, 255, 255, 0.85) !important; }
+html.light .category-bars .tooltip-overlay [class*="bg-white/"],
+html.light .fcs-chart-final .bg-blue-900 [class*="border-white/"] { background-color: rgba(255, 255, 255, 0.1) !important; border-color: rgba(255, 255, 255, 0.2) !important; }
+html.light .fcs-chart-final .bg-blue-900 .text-blue-200 { color: #7dd3fc !important; }
+
+/* --- TScoreTable, TopVariants, LoopConfig, MetricExplorer: no wrapper
+   background of their own -- give them one, and darken the specific
+   near-white text colors identified by hand (each uses its own class
+   names, cataloged individually since they don't share a common set). */
+html.light .tscore-container,
+html.light .variants-container,
+html.light .loop-config,
+html.light .metrics-grid {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.08);
+}
+
+html.light .tscore-container .tscore-table thead { background: #f8fafc !important; }
+html.light .tscore-container .tval { color: #0f172a !important; }
+html.light .tscore-container .target { color: var(--accent-slate) !important; }
+html.light .tscore-container .variant-name code,
+html.light .tscore-container .filter-btn.active { color: var(--accent-blue) !important; }
+html.light .tscore-container .filter-btn { border-color: rgba(15, 23, 42, 0.12) !important; }
+
+html.light .variants-container .card-name code { color: var(--accent-blue) !important; }
+html.light .variants-container .toggle-btn.active { color: var(--accent-blue) !important; }
+html.light .variants-container .toggle-btn,
+html.light .variants-container .variant-card { border-color: rgba(15, 23, 42, 0.12) !important; }
+html.light .variants-container .dot.directional { background: rgba(15, 23, 42, 0.3) !important; }
+
+html.light .loop-config .loop-name { color: #0f172a !important; }
+html.light .loop-config .selected-item { color: var(--accent-blue) !important; }
+html.light .loop-config .scaffold-label,
+html.light .loop-config .available-item { color: var(--accent-slate) !important; }
+html.light .loop-config .residue-track { border-color: rgba(15, 23, 42, 0.12) !important; }
+
+html.light .metrics-grid .formula { color: #0f172a !important; background: rgba(15, 23, 42, 0.05) !important; }
+html.light .metrics-grid .brief { color: var(--accent-slate) !important; }
+html.light .metrics-grid .metric-card,
+html.light .metrics-grid .metric-card.active,
+html.light .metrics-grid .card-header { border-color: rgba(15, 23, 42, 0.12) !important; }
+
+/* The built-in "go to slide" dialog doesn't fully hide itself off-screen in
+   this Slidev version (it's taller than the -top-20 offset it uses when
+   closed, so it bleeds into view as a giant overlapping slide-title list).
+   Force it fully hidden except in its genuinely-open state (.top-5).
+   We ship our own always-working slide jumper instead (global-bottom.vue). */
+#slidev-goto-dialog:not(.top-5) {
+  display: none !important;
 }

@@ -48,7 +48,7 @@ function barOpacity(d) {
 
         <!-- significance bracket -->
         <text :x="xFor(i) + barWidth + 3" :y="yFor(Math.max(d.mmp9 + d.mmp9_sem, d.mmp2 + d.mmp2_sem)) - 6"
-          text-anchor="middle" class="sig" :style="{ fill: d.sig === 'n.s.' ? 'rgba(255,255,255,0.35)' : '#34d399' }">{{ d.sig }}</text>
+          text-anchor="middle" class="sig" :style="{ fill: d.sig === 'n.s.' ? '#94a3b8' : '#34d399' }">{{ d.sig }}</text>
 
         <!-- label -->
         <text :x="xFor(i) + barWidth + 3" :y="chartHeight + 16" text-anchor="middle" class="label">{{ d.construct }}</text>
@@ -59,10 +59,11 @@ function barOpacity(d) {
       <span class="font-bold text-white">{{ hovered }}</span> —
       MMP9 {{ data.find(d => d.construct === hovered).mmp9.toFixed(3) }} ± {{ data.find(d => d.construct === hovered).mmp9_sem.toFixed(3) }},
       MMP2 {{ data.find(d => d.construct === hovered).mmp2.toFixed(3) }} ± {{ data.find(d => d.construct === hovered).mmp2_sem.toFixed(3) }}
-      <span v-if="data.find(d => d.construct === hovered).p"> (Tukey p={{ data.find(d => d.construct === hovered).p }})</span>
+      <span v-if="data.find(d => d.construct === hovered).p != null"> (Welch p={{ data.find(d => d.construct === hovered).p }})</span>
+      <div v-if="data.find(d => d.construct === hovered).note" class="mt-0.5 text-[8px] text-amber-300/80 max-w-[500px] mx-auto leading-snug">{{ data.find(d => d.construct === hovered).note }}</div>
     </div>
     <div class="text-[8px] opacity-40 italic text-center mt-1">
-      Mean ± SEM. Stars = Tukey-HSD significant MMP9-vs-MMP2 pair (AB 6/C 12/C 15); n.s. = designed non-selective controls and WT reference.
+      Mean ± SEM, pooled across all vendors/dates through 2026-07-01. Hover a construct for vendor-batch detail. n.s. = not significant at current n.
     </div>
   </div>
 </template>
