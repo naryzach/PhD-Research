@@ -154,11 +154,24 @@ HOF_SIZE = 75   # per specificity pair
 
 
 def _gap_norm(on, off, scale) -> float:
-    """Normalize an on-minus-off gap to [0,1]; 0.5 = neutral/unknown."""
+    """
+    Normalize an on-minus-off gap to (0,1); 0.5 = neutral/unknown.
+
+    tanh, not a clipped linear ramp. The linear version was flat beyond +/- scale, and
+    with PDOCKQ_GAP_SCALE=0.40 that dead zone was reachable: ADAM17 climbed its
+    selectivity frontier 0.357 -> 0.521 through it_4, crossed +0.40 into the flat
+    region, and did not improve again for four rounds while MMP9 -- whose whole range
+    (max +0.208) stayed on the live part of the ramp -- kept a working gradient. Once
+    the best designs saturate, the beam ranks them on on_quality alone and selectivity
+    stops driving exactly where it matters most.
+
+    tanh keeps the linear version's sensitivity in the bulk (a +0.06 gap maps to 0.574
+    either way) and stays strictly monotone forever: +0.52 -> 0.931, +0.60 -> 0.953.
+    """
     if not (cs._isnum(on) and cs._isnum(off)):
         return None
     g = (float(on) - float(off)) / scale
-    return float(min(1.0, max(0.0, (g + 1.0) / 2.0)))
+    return float((np.tanh(g) + 1.0) / 2.0)
 
 
 def _cd_gap_norm(cd_on, cd_off) -> float:
