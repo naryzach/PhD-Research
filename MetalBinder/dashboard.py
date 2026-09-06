@@ -324,7 +324,8 @@ def load_cross_docking_data(base_path):
 
 # --- Data Source Selection ---
 if "data_mode" not in st.session_state:
-    st.session_state["data_mode"] = "Cloud (R2)" if fs else "Local"
+    _remote_base = st.secrets.get("REMOTE_DATA_BASE_URL", None) or st.secrets.get("admin", {}).get("REMOTE_DATA_BASE_URL", None)
+    st.session_state["data_mode"] = "Cloud (R2)" if (fs or _remote_base) else "Local"
 
 df, full_seq_df, available_ions, base_path, is_remote_mode = load_data(mode=st.session_state["data_mode"])
 

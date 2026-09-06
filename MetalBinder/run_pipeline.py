@@ -36,10 +36,24 @@ from rfd3.inference.input_parsing import DesignInputSpecification
 #   export CHAI1_PYTHON=~/miniconda3/envs/chai1/bin/python
 CHAI1_PYTHON  = os.environ.get("CHAI1_PYTHON", sys.executable)
 CHAI1_SCRIPT  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "score_with_chai1.py")
-# Chai-1 loads the model fresh each design call; allow more time than ESMFold2.
-# Rough estimate: ~2 min model load + ~3 min inference per design on a V100.
-# For 20 designs that is ~100 min; 7200 s gives comfortable headroom.
-CHAI1_TIMEOUT = 7200   # seconds
+# Chai-1 scores every design in ONE subprocess call, in a plain per-design
+# Python loop (chai-lab loads its model weights once, but does not batch
+# designs together) — so total wall time scales ~linearly with batch size,
+# not sublinearly like RFd3's batched backbone generation does. Measured
+# locally at production settings (num_trunk_recycles=3, num_diffn_timesteps=
+# 200, num_diffn_samples=5) on an RTX 5070 Ti: ~6 min/design after the
+# one-time ~1 min model load. A fixed 7200s (2h) ceiling — sized for an old
+# assumption of ~20 designs at lower-quality settings — silently truncates
+# any batch of ~20+ designs at full quality: subprocess.run raises
+# TimeoutExpired, the whole Chai-1 subprocess is killed mid-batch, and every
+# design (not just the unfinished ones) ends up with NaN pLDDT/ptm — this is
+# exactly the kind of failure that looks like "it ran" but produced nothing.
+# So the timeout is computed per-run from the actual number of designs,
+# padded generously (~2x the measured per-design time) for GPU contention /
+# hardware variance, with a floor for tiny batches.
+CHAI1_SECONDS_PER_DESIGN = 480   # ~2x the measured ~6 min/design, for margin
+CHAI1_LOAD_OVERHEAD      = 300   # one-time model-load allowance
+CHAI1_TIMEOUT_FLOOR      = 1800  # minimum timeout regardless of batch size
 SAVE_CHAI1_STRUCTS = True   # write predicted CIFs (free — already computed)
 
 # Custom Utilities
@@ -205,7 +219,13 @@ def main():
                 length=f"{new_total_len}-{new_total_len}",
                 ligand=ion,
                 select_buried={ion: "ALL"},
-                allow_ligand_on_existing_chain=True,
+                # allow_ligand_on_existing_chain was removed from the
+                # installed rfd3.inference.input_parsing.DesignInputSpecification
+                # (pydantic model, extra="forbid") — it now rejects this kwarg
+                # outright with a ValidationError instead of ignoring it. The
+                # ligand is already on the same chain as the protein in the
+                # input CIF (context_array above), and current rfd3 handles
+                # that from `input`/`ligand` alone with no separate flag.
                 extra={}
             )
             
@@ -384,23 +404,61 @@ def main():
         if SAVE_CHAI1_STRUCTS:
             cmd += ["--cif-dir", chai_cif_dir]
 
+        # See CHAI1_SECONDS_PER_DESIGN comment above — this must scale with
+        # batch size, not be a fixed ceiling, or large batches get killed
+        # mid-run with every design (not just the unfinished ones) left NaN.
+        chai_timeout = max(
+            CHAI1_TIMEOUT_FLOOR,
+            CHAI1_LOAD_OVERHEAD + CHAI1_SECONDS_PER_DESIGN * len(chai_rows),
+        )
+
         # Strip PYTHONPATH so the subprocess sees only its own site-packages.
         child_env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
         try:
             print(f"Calling Chai-1 on {len(chai_rows)} designs "
-                  f"(timeout {CHAI1_TIMEOUT}s) ...", flush=True)
+                  f"(timeout {chai_timeout}s) ...", flush=True)
             proc = subprocess.run(
                 cmd, capture_output=True, text=True,
-                timeout=CHAI1_TIMEOUT, env=child_env,
+                timeout=chai_timeout, env=child_env,
             )
-            if proc.returncode != 0:
-                print(f"Chai-1 subprocess failed:\n{proc.stderr[-600:].strip()}")
-            elif os.path.exists(chai_scores_csv):
+            # NOTE: always try to read chai_scores_csv first, regardless of
+            # returncode. score_with_chai1.py exits non-zero both when NOTHING
+            # was scored and when the run was only PARTIALLY complete (some
+            # designs missing pLDDT/pTM) — the latter case still writes a
+            # valid (partial) CSV that we must not throw away. Checking
+            # `returncode != 0` first — as this used to — meant a partial
+            # failure's real scores were silently discarded and every design
+            # in the batch fell back to NaN with no explanation printed.
+            if os.path.exists(chai_scores_csv):
                 chai_df = pd.read_csv(chai_scores_csv)
                 chai_scores = {str(r["design_id"]): r
                                for r in chai_df.to_dict("records")}
                 print(f"Chai-1 scored {len(chai_scores)}/{len(chai_rows)} designs.",
                       flush=True)
+                if proc.returncode != 0 or len(chai_scores) < len(chai_rows):
+                    missing = len(chai_rows) - len(chai_scores)
+                    print(
+                        f"*** CHAI-1 INCOMPLETE — {missing}/{len(chai_rows)} "
+                        f"design(s) missing or partial (subprocess returncode="
+                        f"{proc.returncode}). Those design(s) will have NaN "
+                        f"pLDDT/pTM/RMSD downstream. stderr tail:\n"
+                        f"{proc.stderr[-600:].strip()}\n"
+                        f"stdout tail:\n{proc.stdout[-600:].strip()} ***",
+                        flush=True,
+                    )
+            elif proc.returncode != 0:
+                print(f"Chai-1 subprocess failed (no output CSV written):\n"
+                      f"{proc.stderr[-600:].strip()}\n"
+                      f"stdout tail:\n{proc.stdout[-600:].strip()}", flush=True)
+            else:
+                print(
+                    "*** CHAI-1 produced NO output CSV despite exiting cleanly — "
+                    "no scores available for ANY design in this batch; all "
+                    "pLDDT/pTM/RMSD will be NaN downstream. This should not "
+                    "happen — please investigate. stdout tail:\n"
+                    f"{proc.stdout[-600:].strip()} ***",
+                    flush=True,
+                )
         except FileNotFoundError:
             print(
                 f"\n*** CHAI-1 SKIPPED — python not found at: {CHAI1_PYTHON}\n"
@@ -411,7 +469,7 @@ def main():
                 flush=True,
             )
         except subprocess.TimeoutExpired:
-            print(f"Chai-1 timed out after {CHAI1_TIMEOUT}s. "
+            print(f"Chai-1 timed out after {chai_timeout}s. "
                   "pLDDT/pTM will be NaN for this batch.", flush=True)
 
     # ── 3b. Per-design: RMSD from Chai-1 structure + binding metrics ──────────
