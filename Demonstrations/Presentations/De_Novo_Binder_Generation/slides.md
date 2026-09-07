@@ -20,16 +20,16 @@ mdc: true
 
 <div class="mt-10 flex justify-center gap-4">
   <div class="px-4 py-2 bg-white/5 rounded border border-white/10">
-    <div class="text-[10px] uppercase opacity-40 tracking-widest">Confirmed Selective</div>
-    <div class="text-blue-400 font-bold uppercase text-xs">AB 6 — MMP9 &gt; MMP2 (p=0.001)</div>
+    <div class="text-[10px] uppercase opacity-40 tracking-widest">Confirmed Selective (pooled)</div>
+    <div class="text-blue-400 font-bold uppercase text-xs">C 15 — MMP9 &gt; MMP2 (ANOVA p=0.035)</div>
   </div>
   <div class="px-4 py-2 bg-white/5 rounded border border-white/10">
     <div class="text-[10px] uppercase opacity-40 tracking-widest">Primary Targets</div>
     <div class="text-blue-400 font-bold uppercase text-xs">MMP9 vs MMP2</div>
   </div>
   <div class="px-4 py-2 bg-white/5 rounded border border-white/10">
-    <div class="text-[10px] uppercase opacity-40 tracking-widest">Also Directional</div>
-    <div class="text-emerald-400 font-bold uppercase text-xs">C 12, C 15</div>
+    <div class="text-[10px] uppercase opacity-40 tracking-widest">Directional, Not Confirmed Pooled</div>
+    <div class="text-emerald-400 font-bold uppercase text-xs">AB 6, C 12</div>
   </div>
 </div>
 
@@ -109,11 +109,11 @@ Hover over each loop to see its position, native length, and expansion range.
 <div class="grid grid-cols-3 gap-4 mt-6">
   <div class="p-3 bg-blue-500/10 rounded border border-blue-500/20 text-[10px]">
     <b class="text-blue-400 block mb-1">AB Loop (res 31–36)</b>
-    <span class="opacity-70">Primary MMP active-site contact. AB 6 (13 aa insertion) achieved the strongest, most reproducible selectivity signal (see Results).</span>
+    <span class="opacity-70">Primary MMP active-site contact. AB 6 (13 aa insertion) gave a strong single-vendor-batch signal; not yet confirmed on the full pooled dataset (see Results).</span>
   </div>
   <div class="p-3 bg-violet-500/10 rounded border border-violet-500/20 text-[10px]">
     <b class="text-violet-400 block mb-1">C Loop (res 63–68)</b>
-    <span class="opacity-70">Second primary contact loop. C 12 and C 15 both trend MMP9-selective, not yet independently confirmed (see Results). Up to 13 aa insertions tolerated.</span>
+    <span class="opacity-70">Second primary contact loop. C 15 is the one MMP9-selectivity result confirmed on the full pooled dataset; C 12 trends the same direction but isn't independently confirmed (see Results). Up to 13 aa insertions tolerated.</span>
   </div>
   <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px]">
     <b class="text-emerald-400 block mb-1">EF Loop (res 93–96)</b>
@@ -325,7 +325,7 @@ Three parallel design axes in the same synthesis order — not just an ADAM17 si
   <div class="p-4 bg-emerald-500/10 rounded border border-emerald-500/20 space-y-2">
     <h4 class="text-emerald-300 font-bold text-[11px] uppercase tracking-widest">MMP9-Selective (5)</h4>
     <p class="text-[10px] leading-relaxed opacity-70">
-      AB 1, AB 2, AB 6 (AB loop) and C 12, C 15 (C loop) — designed for M9&gt;M2 preference. AB 6 confirmed within its single-vendor batch; C 12/C 15 directional (trend M9&gt;M2, not independently confirmed); AB 1/AB 2 directionally correct but underpowered. The primary result of this campaign.
+      AB 1, AB 2, AB 6 (AB loop) and C 12, C 15 (C loop) — designed for M9&gt;M2 preference. C 15 is confirmed on the full pooled dataset (ANOVA p=0.035, MMP9 its own top target); AB 6 and C 12 are directional (trend M9&gt;M2) but not independently confirmed pooled — AB 6's strong single-vendor-batch result (p=0.001) hasn't reproduced at that magnitude across later trials; AB 1/AB 2 directionally correct but underpowered. The primary result of this campaign.
     </p>
   </div>
   <div class="p-4 bg-blue-500/10 rounded border border-blue-500/20 space-y-2">
@@ -602,7 +602,7 @@ transition: fade-out
 ---
 
 # Key Findings: One Confirmed Hit, Two Directional
-AB 6 holds up on the full current dataset; C 12/C 15 are consistent in direction but not independently confirmed.
+C 15 holds up on the full pooled dataset (ANOVA p=0.035); AB 6/C 12 are consistent in direction but not independently confirmed pooled.
 
 <div class="mt-3">
   <SelectivityBars />
@@ -610,10 +610,10 @@ AB 6 holds up on the full current dataset; C 12/C 15 are consistent in direction
 
 <div class="grid grid-cols-3 gap-4 mt-3 text-[9px]">
   <div class="p-2 bg-emerald-500/10 rounded border border-emerald-500/20">
-    <b class="text-emerald-300">AB 6 — confirmed:</b> clean MMP9&gt;MMP2 signal (p=0.001) in its single-vendor batch; directionally the same but not yet significant pooled across all vendors.
+    <b class="text-emerald-300">C 15 — confirmed:</b> MMP9&gt;MMP2 signal significant pooled across all vendors/dates (ANOVA p=0.035, MMP9 its own top target).
   </div>
   <div class="p-2 bg-blue-500/10 rounded border border-blue-500/20">
-    <b class="text-blue-300">C 12 / C 15 — directional, not confirmed:</b> both trend MMP9&gt;MMP2; neither is a false positive — both need more trials, not a different design.
+    <b class="text-blue-300">AB 6 / C 12 — directional, not confirmed pooled:</b> both trend MMP9&gt;MMP2; AB 6's single-vendor-batch result (p=0.001, n=2v2) hasn't reproduced at that magnitude pooled — neither is a false positive, both need more trials, not a different design.
   </div>
   <div class="p-2 bg-violet-500/10 rounded border border-violet-500/20">
     <b class="text-violet-300">Controls behaved:</b> non-selective designs stayed non-significant; WT TIMP3 shows a mild, real MMP9 preference (p=0.033) the variants amplify, not invent.
@@ -632,17 +632,17 @@ transition: fade-out
     <div class="p-4 bg-white/5 rounded border border-white/10">
       <h4 class="text-blue-400 font-bold text-[10px] uppercase tracking-widest mb-3">Model vs. Bench Scorecard</h4>
       <p class="text-[11px] leading-relaxed opacity-75">
-        A systematic tally comparing the design intent of all 13 engineered TIMP3 loop variants against aggregated flow-cytometry results — the full-library complement to the MMP9-vs-MMP2 primary result on the next slide.
+        A systematic tally comparing the design intent of all 13 engineered TIMP3 loop variants against aggregated flow-cytometry results — the full-library complement to the MMP9-vs-MMP2 primary result on the previous slide. <b>Rebuilt 2026-09-04</b> on raw Binding Efficiency under an explicit, documented rule (the original figure's generator script did not survive) — pairwise intents (e.g. M9&gt;M2) score by direction alone; absolute intents (e.g. M9+) require both a significant omnibus ANOVA <i>and</i> that target being the construct's own top target; High/Low intents are scored against the TIMP3-WT reference mean.
       </p>
       <ul class="text-[10px] list-disc pl-4 space-y-1.5 opacity-70 mt-3">
-        <li><b>Hits (5/13):</b> Binding trend matched computational design intent — AB 1, AB 6, AB 7 (both its ADAM17+ and ADAM17&gt;ADAM10 sub-criteria, on a single available ADAM10 trial), C 11, and C 12.</li>
-        <li><b>Partials (3/13):</b> AB 3, AB 5 directionally correct but not statistically significant; <b>AB 4</b> hits its ADAM17+ target but the single available ADAM10 trial actually bound <em>more</em> than ADAM17 — so its selectivity sub-criterion misses even though the primary binding criterion holds.</li>
-        <li><b>Misses (3/13):</b> <b>C 13</b> predicted low-affinity but measured NMR 1.11; <b>C 14</b>'s single available ADAM10 trial also bound more than ADAM17, missing its selectivity criterion; <b>C 15</b> predicted MMP9-preferential but measured MMP2-preferential on this broader (non-ANOVA) metric — consistent with C 15's own MMP9-vs-MMP2 result being borderline rather than clean on the narrow test too (previous slide).</li>
-        <li><b>Untestable (2/13):</b> <b>AB 2</b>'s MMP9-vs-population ANOVA call was non-significant; <b>C 16</b> failed to display on yeast at all.</li>
+        <li><b>Hits (9/13):</b> AB 1, AB 4, AB 5, AB 6, AB 7, C 12, C 13, C 14, C 15 — binding direction matched design intent (absolute "+" claims additionally require a significant omnibus ANOVA where that's the only sub-claim).</li>
+        <li><b>Partials (1/13):</b> <b>AB 3</b> ("High") reaches 0.89&times; the TIMP3-WT mean — elevated, but short of the 1.2&times; threshold for a clean Hit.</li>
+        <li><b>Misses (0/13):</b> none under this rule.</li>
+        <li><b>Untestable (3/13):</b> <b>AB 2</b>, <b>ABC 22</b>, and <b>C 11</b> — each an absolute-intent ("+") construct whose omnibus ANOVA across targets is not significant (p=0.58, 0.36, 0.07 respectively), so the claim can't be scored either way.</li>
       </ul>
     </div>
     <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
-      <b class="text-amber-400">Reading this against the headline result:</b> The MMP9-vs-MMP2 result on the previous slide is the <i>narrow</i> confirmatory test on the 4 constructs explicitly designed for that axis. This scorecard is the <i>broad</i> exploratory result — directional agreement across all 13 constructs on every design axis (MMP9, ADAM17, "Low") and every metric, most of which were underpowered (n=1–3 trials). The two now agree reasonably well: AB 6 is the clear hit on both; C 12/C 15 are inconsistent/borderline on both.
+      <b class="text-amber-400">Reading this against the headline result:</b> The MMP9-vs-MMP2 result on the previous slide is the <i>narrow</i> confirmatory test on the 4 constructs explicitly designed for that axis. This scorecard is the <i>broad</i> exploratory result across all 13 constructs on every design axis (MMP9, ADAM17, "Low"/"High"), most of which were underpowered (n=1&ndash;3 trials) — a pairwise "Hit" here needs only the right direction, not significance, so it's a much looser bar than the previous slide's pooled ANOVA. The two now agree cleanly on <b>C 15</b> (Hit on both, and the only one with a significant pooled ANOVA); AB 6/C 12 are Hits here on direction alone, consistent with — not stronger than — their "directional, not confirmed" status on the previous slide.
     </div>
   </div>
   <div class="space-y-3 flex flex-col items-center">
@@ -760,7 +760,7 @@ Raw AlphaFold3 confidence looks useless for ranking binding; a stickiness confou
       <b class="text-blue-400">Some constructs are just "sticky":</b> binding correlates strongly <em>across targets</em> for a given construct — a construct that binds one protease tends to bind them all, regardless of target. This general stickiness accounts for roughly two-thirds of the variance in binding scores; well under a third reflects genuine target-specific interaction, with a small remainder from baseline differences between targets themselves.
     </div>
     <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px] leading-relaxed opacity-80">
-      <b class="text-amber-400">Correcting for stickiness narrows the gap, but doesn't clear significance:</b> after removing each construct's stickiness, loop-pLDDT's correlation with the target-specific residual moves in the right direction (ρ=0.20, p=0.23, n=36) but isn't significant; ipTM stays flat (ρ=0.09, p=0.58). The categorical hits (AB 6, C 12, C 15) are still confirmed by their own wet-lab statistics — that finding doesn't depend on this correlation holding up.
+      <b class="text-amber-400">Correcting for stickiness narrows the gap, but doesn't clear significance:</b> after removing each construct's stickiness, loop-pLDDT's correlation with the target-specific residual moves in the right direction (ρ=0.20, p=0.23, n=36) but isn't significant; ipTM stays flat (ρ=0.09, p=0.58). C 15's pooled-confirmed hit (and AB 6/C 12's directional signal) rests on its own wet-lab statistics, not on this AF-metric correlation — that finding doesn't depend on this correlation holding up.
     </div>
     <div class="p-3 bg-red-500/10 rounded border border-red-500/20 text-[10px] leading-relaxed opacity-80">
       <b class="text-red-400">ipTM tracks expression, not binding:</b> ipTM correlates with how well a construct <em>expresses</em> (ρ=0.37, p=0.027) but not with target-specific binding (ρ=0.09, p=0.58), and is nearly saturated across these designs (0.77–0.90) — too compressed to rank fine differences.
@@ -980,7 +980,7 @@ Population-level signal from the most recent complete-enough window — hedged, 
 
 <div class="mt-4 grid grid-cols-2 gap-4">
   <div class="p-2.5 bg-white/5 rounded border border-white/10 text-[9px] opacity-70 leading-snug">
-    <b class="text-blue-400">Consistent with Round 1:</b> this deck's own first-generation result already carried a similar asymmetry — AB 6 (MMP9&gt;MMP2) is the confirmed hit; the equivalent ADAM17&gt;ADAM10 claim (AB 4) rested on weak ADAM10 data. Two independent generations now agree the ADAM17/ADAM10 axis is the harder one.
+    <b class="text-blue-400">Consistent with Round 1:</b> this deck's own first-generation result already carried a similar asymmetry — C 15 (MMP9&gt;MMP2) is the pooled-confirmed hit; the equivalent ADAM17&gt;ADAM10 claim (AB 4) rested on weak ADAM10 data. Two independent generations now agree the ADAM17/ADAM10 axis is the harder one.
   </div>
   <div class="p-2.5 bg-amber-500/10 rounded border border-amber-500/20 text-[9px] opacity-80">
     <b class="text-amber-400">Not yet actionable:</b> no ordering/synthesis output exists from this pipeline yet — it's still early, and these percentages will be re-measured before any candidate is proposed.
@@ -1111,23 +1111,23 @@ transition: slide-up
 ---
 
 # Appendix
-### ESM-C Sequence Classifier — Exploratory, Not Yet a Production Ranker
+### ESM-C Sequence Classifier — Updated 2026-09-05: MMP9 Head Now Adopted
 
 ---
 layout: default
 transition: fade-out
 ---
 
-# ESM-C Sequence Classifier (Exploratory)
-An early-stage, structure-free classifier explored as a possible future sequence-level pre-filter — not currently used to rank or select designs in the active pipeline.
+# ESM-C Sequence Classifier
+<b class="text-amber-300">Updated 2026-09-05</b> — the single-classifier numbers below are superseded by a 5-variant comparison; see paper §"Sequence-Based Ranking" for full detail. This slide now reports the current, traceable `all3_original` enumeration.
 
 <div class="grid grid-cols-2 gap-6 mt-6 items-start">
   <div class="space-y-3">
     <div class="p-3 bg-white/5 rounded border border-white/10 text-[10px] leading-relaxed opacity-80">
-      <b class="text-blue-400">Scale:</b> A fine-tuned 300M-parameter ESM-C classifier enumerated all ~64M possible 6-residue C-loop sequences; retained the top 50,000 predicted binders per target (P≥0.99) for ADAM17, MMP3, MMP9. MMP9 and MMP3 share 38.1% Jaccard overlap; ADAM17 is highly distinct (0.066).
+      <b class="text-blue-400">Scale:</b> A fine-tuned <code>Synthyra/ESMplusplus_large</code> classifier enumerated all ~64M possible 6-residue C-loop sequences; retained the top 50,000 predicted binders per target (P≥0.99) for ADAM17, MMP3, MMP9. MMP9/MMP3 share 36.8% Jaccard overlap; MMP9/ADAM17 are the most distinct pair (6.2%).
     </div>
     <div class="p-3 bg-white/5 rounded border border-white/10 text-[10px] leading-relaxed opacity-80">
-      <b class="text-cyan-400">Consensus motifs found:</b> A shared core <code>L-S-x-x-T</code> (positions 1,2,5) across all three targets; selectivity is carried by positions 3/4/6 — ADAM17 <code>LSSDTT</code>, MMP3 <code>LSPDTT</code>, MMP9 <code>LSPTTL</code>. These are candidate leads for a future order, not yet acted on.
+      <b class="text-cyan-400">Consensus motifs found:</b> ADAM17 <code>LPSDTT</code>, MMP3 <code>LSPDTT</code>, MMP9 <code>LSPTTL</code>. Positions 1 (L) and 5 (T) are shared by all three; ADAM17 diverges at positions 2-3, MMP9 diverges at positions 4/6 — candidate leads for a future order, not yet acted on.
     </div>
   </div>
   <div class="flex flex-col items-center">
@@ -1140,24 +1140,24 @@ layout: default
 transition: fade-out
 ---
 
-# ESM-C: Early Signal, Not Yet Sufficient to Adopt
-Held-out classifier performance, plus a direct check against flow-cytometry results — encouraging, but underpowered.
+# ESM-C: Now the Adopted MMP9 Ranker
+Held-out classifier performance across 5 training-data variants — MMP9 is genuinely strong; ADAM17 modest; MMP3 a base-rate mirage. Deployment: rank by the MMP9/`everything_combined` head.
 
 <div class="grid grid-cols-2 gap-6 mt-6 items-start">
   <div class="space-y-3">
     <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px] leading-relaxed opacity-80">
-      <b class="text-emerald-400">Held-out performance:</b> ROC-AUC 0.912, PR-AUC 0.746, MCC 0.722, F1 0.734 (n=6,788, 381 MMP9 positives). ~99.7% of top predictions are absent from training data — genuine generalization, not memorization.
+      <b class="text-emerald-400">Best MMP9 variant (`everything_combined`):</b> ROC-AUC 0.955, PR-AUC 0.845, MCC 0.721, F1 0.753 (n=8,059). `mmp9_other`, trained on a much larger, more realistic MMP9-only dataset, is close behind (MCC 0.716). Both far outperform the small-data variants (MCC 0.43-0.45) and `cloop_only` (MCC ≈0, chance).
     </div>
-    <div class="p-3 bg-violet-500/10 rounded border border-violet-500/20 text-[10px] leading-relaxed opacity-80">
-      <b class="text-violet-400">Encouraging early check against real FCS binding:</b> Spearman ρ=0.86 (ADAM17, p=0.014, n=7) and ρ=0.75 (MMP9 Double+%, p=0.052, n=7) on out-of-distribution AB-loop constructs — outperforming monomeric AlphaFold LpLDDT (r≈-0.26) on the same constructs.
+    <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px] leading-relaxed opacity-80">
+      <b class="text-amber-400">Prior wet-lab correlation claim (ρ=0.86, n=7) — not re-verified:</b> an earlier check against real FCS binding on a tiny out-of-distribution subset has not been re-derived against current data this pass and should not be cited as current support; see paper DATA_PROVENANCE.md.
     </div>
-    <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px] opacity-80">
-      <b class="text-amber-400">Why it's not adopted yet:</b> n=7 is far too small to act on, and the strict novel-loop held-out subset contains 0 positive binders, so out-of-distribution generalization can't be quantified statistically. Wet-lab validation on a dedicated batch is required before ESM-C output could drive a synthesis order.
+    <div class="p-3 bg-blue-500/10 rounded border border-blue-500/20 text-[10px] opacity-80">
+      <b class="text-blue-400">Open question, not yet resolved:</b> `mmp9_other`'s completed C-loop enumeration (2026-09-05) lands on a different top motif (<code>PYGSLC</code>) than `all3_original`'s (<code>LSPTTL</code>) for the same target — both confirmed current large-model runs. Not picked one way or the other pending investigation.
     </div>
   </div>
   <div class="flex flex-col items-center">
-    <CategoryBars dataset="esmc" title="Held-Out Test Performance (MMP9)" />
-    <p class="text-[9px] opacity-40 italic text-center mt-1">Held-out ROC/PR performance on MMP9.</p>
+    <CategoryBars dataset="esmc" title="Held-Out Test Performance (MMP9, everything_combined)" />
+    <p class="text-[9px] opacity-40 italic text-center mt-1">Held-out ROC/PR performance, current best MMP9 variant.</p>
   </div>
 </div>
 
@@ -1171,12 +1171,12 @@ class: text-center
 
 <div class="mt-8 grid grid-cols-3 gap-6 max-w-2xl mx-auto text-center">
   <div>
-    <div class="text-emerald-400 font-black text-2xl">p=0.001</div>
-    <div class="text-[9px] opacity-40 uppercase tracking-widest mt-1">AB 6 — MMP9 &gt; MMP2, Confirmed</div>
+    <div class="text-emerald-400 font-black text-2xl">p=0.035</div>
+    <div class="text-[9px] opacity-40 uppercase tracking-widest mt-1">C 15 — MMP9 &gt; MMP2, Confirmed Pooled</div>
   </div>
   <div>
-    <div class="text-blue-400 font-black text-2xl">3.5×</div>
-    <div class="text-[9px] opacity-40 uppercase tracking-widest mt-1">Peak Selectivity (AB 6)</div>
+    <div class="text-blue-400 font-black text-2xl">2.6×</div>
+    <div class="text-[9px] opacity-40 uppercase tracking-widest mt-1">Peak Selectivity (C 15, pooled)</div>
   </div>
   <div>
     <div class="text-violet-400 font-black text-2xl">3</div>

@@ -60,6 +60,7 @@ Experimental Pipeline
 
 ### ESM-C Fine-Tuning Setup (`train.py`)
 - **Base Architecture:** evolutionaryscale/ESM-C (via Hugging Face `Synthyra/ESMplusplus_small`, 300M params).
+- <span class="text-amber-400">**Provenance note (2026-09-05):**</span> this specific run used the *small* ESM-C backbone — a real, since-flagged pilot-data risk (see `ESM_Classification.tex` §"ESM-C Fine-Tuning for TIMP3 Binder Classification" and `DATA_PROVENANCE.md`). The current production pipeline (`Local/esmc_multirun/`) retrains all targets on the confirmed **`Synthyra/ESMplusplus_large`** (600M) backbone across 5 data-slice variants — see updated results below.
 - **Target-Specific Heads:** Independent binary heads for ADAM17, MMP3, and MMP9.
 - **Sequence Pooling:** Loop-token pooling (pooling only the 6-aa variable loop tokens, preventing the constant scaffold from washing out the signal).
 - **Loss Function:** Masked Binary Cross-Entropy (BCE) loss so each sample only supervises the target head it was screened against.
@@ -78,16 +79,17 @@ Experimental Pipeline
 - Compare ML-flagged candidates vs. generative candidates
 
 ### Held-Out Evaluation Performance
-- **Validation Selection:** Evaluated on PR-AUC, ROC-AUC, MCC, and F1-score.
-- **Test Metrics & Optimal Classification Thresholds:**
+<span class="text-amber-400 text-[10px]">**Updated 2026-09-05:** the table below was an early, since-superseded snapshot of a single variant (`all3_original`) and used raw PR-AUC, which overstates MMP3 (see below). Replaced with the current, confirmed-`ESMplusplus_large`, best-per-target values across all 5 trained variants (source: `Local/Daily_Brief/2026-08-14/esmc_variant_model_selection_20260814_stats.csv`; full 15-row table in `ESM_Classification.tex` Table `tab:esmc_variants_current`).</span>
+- **Validation Selection:** Evaluated on MCC and PR-lift (PR-AUC minus the positive-rate floor) rather than raw PR-AUC, which inflates MMP3 under its 93% positive rate.
+- **Best-variant-per-target, current data:**
 
-| Target Protease | Test Size (N) | Pos. Rate | PR-AUC | ROC-AUC | MCC | F1-Score | Optimal Threshold |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **ADAM17** | 347 | 31.4% | **0.517** | **0.712** | **0.266** | **0.538** | 0.246 |
-| **MMP3** | 5,618 | 92.9% | **0.982** | **0.815** | **0.273** | **0.907** | 0.290 |
-| **MMP9** | 1,231 | 66.1% | **0.869** | **0.791** | **0.442** | **0.824** | 0.341 |
+| Target Protease | Best Variant | Test Size (N) | Pos. Rate | ROC-AUC | MCC | PR-lift |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **MMP9** | `everything_combined` | 8,059 | 14.8% | **0.955** | **0.721** | **0.697** |
+| **ADAM17** | `cloop_only` | 348 | 30.7% | **0.750** | **0.329** | **0.263** |
+| **MMP3** | `everything_combined` | 5,610 | 92.4% | 0.804 | **0.252** | 0.055 |
 
-- **Key Takeaways:** Excellent classification performance on MMP3 and MMP9 targets. Moderate predictive capability on ADAM17, which serves as a baseline for active de novo design selection.
+- **Key Takeaways:** MMP9 is the one consistently strong target (MCC ≈0.72). ADAM17 is modest but real everywhere (MCC ≈0.27–0.33). **MMP3's headline raw PR-AUC (≈0.98, not shown above) is a base-rate mirage** driven by its ~93% positive rate — true PR-lift is only 0.05–0.06 and MCC 0.19–0.25 regardless of variant; MMP3 predictions from this classifier should not be trusted for ranking until that class is rebalanced.
 
 ---
 
@@ -103,6 +105,7 @@ Experimental Pipeline
   - **MMP9:** `LSPTTL`
 - **Mutational Insights:** Specificity is dictated by three positions on a shared `LS-x-x-T` core scaffold (positions 1, 2, 5). P3 separates ADAM17 (S) from MMP3/9 (P), and P4/P6 separate MMP9 (T, L) from MMP3 (D, T).
 - **Novelty:** 100% of the top 300 deduped candidate loops are completely absent from the classifier training data.
+- <span class="text-amber-400 text-[10px]">**Current re-run (`all3_original`, 2026-09-05) validates this:** Jaccard MMP9-MMP3 0.368, ADAM17-MMP3 0.143, ADAM17-MMP9 0.063 (near-identical); consensus motifs MMP3 `LSPDTT` and MMP9 `LSPTTL` unchanged, ADAM17 now `LPSDTT` (small shift from `LSSDTT`, position 2-3). The original June 29 source file no longer exists, so this current run is the traceable citation going forward.</span>
 
 ---
 
@@ -120,6 +123,7 @@ Experimental Pipeline
   - **Single Target Focus:** Quantitative performance validation is currently restricted to MMP9 due to data availability.
   - **Strict Novel-Loop Challenge:** The out-of-distribution test set contains 0 positives (out of 152 sequences), leaving out-of-distribution generalization unvalidated.
 - **Next Steps:** Future wet-lab binding screening is required to obtain labeled data for ADAM17, MMP3, and novel out-of-distribution loop designs.
+- <span class="text-amber-400 text-[10px]">**Provenance note (2026-09-05):** this classifier is the small-model (`ESMplusplus_small`) pilot run flagged above — not an independent confirmation. The confirmed-large-model equivalent on the same source data (`mmp9_other` variant) scores ROC-AUC 0.920, MCC 0.716, PR-lift 0.695 on the same 6,788-sequence test set.</span>
 
 ---
 layout: default
@@ -136,22 +140,21 @@ transition: fade-out
         Probability distribution histograms comparing predicted binding confidence of the top 50,000 enumerated loop candidates across three targets.
       </p>
       <ul class="text-[10px] list-disc pl-4 space-y-1.5 opacity-70 mt-3">
-        <li><b>MMP9 Domination:</b> Extremely high/tight distribution (mean = 0.999996, max = 1.0), defining a strict preference.</li>
-        <li><b>MMP3 Modesty:</b> Flat and low-confidence distribution (mean = 0.5599, max = 0.6663).</li>
-        <li><b>ADAM17 Flatness:</b> Extremely narrow/low distribution (mean = 0.5323, max = 0.5375).</li>
+        <li><b>Superseded 2026-09-05:</b> the original July 4 source file no longer exists and this "MMP9 saturates, others flat" claim could not be re-verified (see `DATA_PROVENANCE.md`).</li>
+        <li><b>Current, real data (`all3_original`, confirmed `ESMplusplus_large`):</b> all three targets' retained top-50,000 sets cluster near 1.0 by construction, but at visibly different scales — ADAM17 lowest (0.994–0.997), MMP9 middle (0.996–0.998), MMP3 highest (0.998–1.000).</li>
       </ul>
     </div>
     <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
-      <b class="text-amber-400">Calibration Insights:</b> Because MMP9 confidence peaks near 1.0 while MMP3/ADAM17 remain near 0.5, selectivity metrics (like margin) are heavily skewed towards MMP9, requiring target-specific classification calibration.
+      <b class="text-amber-400">Calibration Insights (revised):</b> the different probability scales per target are evidence of per-target calibration skew (MMP3's classifier, trained on ~93% positive data, pushes probabilities closer to 1.0 regardless of true binding quality) — not an MMP9-specific saturation effect as originally claimed.
     </div>
   </div>
   <div class="space-y-3 flex flex-col items-center">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/esmc_target_probability_distributions.png"
-         alt="ESM-C Target Probability Distributions"
+    <img src="../../Papers/Resources/ESMC_General/esmc_target_probability_distributions.png"
+         alt="ESM-C Target Probability Distributions (current, 2026-09-05)"
          class="w-full rounded-lg border border-white/10 shadow-sm"
          style="max-height: 280px; object-fit: contain;">
     <p class="text-[9px] opacity-40 italic text-center">
-      Comparative predicted probability distributions for the top 50,000 designs per target (July 4).
+      Current, traceable distribution (2026-09-05): confirmed-`ESMplusplus_large` `all3_original` classifier, top-50,000 C-loop designs per target.
     </p>
   </div>
 </div>
@@ -171,22 +174,22 @@ transition: fade-out
         Performance evaluation of the ESM-C classifier on held-out test data, showing metrics across targets (ROC-AUC, PR-AUC, MCC, and F1-score).
       </p>
       <ul class="text-[10px] list-disc pl-4 space-y-1.5 opacity-70 mt-3">
-        <li><b>High Classification Skill:</b> Excellent classification performance on MMP9 (ROC-AUC = 0.91), showing high discriminative power.</li>
-        <li><b>Target Specificity:</b> Model metrics allow assessing predictive capability relative to class imbalances (PR-AUC vs. pos-rate).</li>
-        <li><b>Pipeline Utility:</b> Validates using the fine-tuned classifier to sort and select TwistBio constructs.</li>
+        <li><b>Updated 2026-09-05:</b> the ROC-AUC = 0.91 figure below was the single small-model (`ESMplusplus_small`) MMP9-only run, since superseded (see the Held-Out Evaluation Performance slide above). Current best MMP9 variant (confirmed `ESMplusplus_large`, `everything_combined`): ROC-AUC 0.955, MCC 0.721.</li>
+        <li><b>Target Specificity:</b> MCC and PR-lift (not raw PR-AUC) are used to compare targets fairly across class-imbalance differences — see the current 5-variant chart at right.</li>
+        <li><b>Pipeline Utility:</b> Deployment verdict: rank by the MMP9/`everything_combined` head; ADAM17 directionally useful but modest; do not trust MMP3 until rebalanced.</li>
       </ul>
     </div>
     <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
-      <b class="text-amber-400">Next Steps:</b> The baseline classification capability is established; feature attribution (SHAP plots) represents the next analytical extension.
+      <b class="text-amber-400">Next Steps:</b> Model-provenance check (confirmed all 5 current variants are `ESMplusplus_large`) and SHAP feature attribution are both complete — see `ESM_Classification.tex` §"Update: Model-Provenance Check, Final Performance, and Enumeration Refresh."
     </div>
   </div>
   <div class="space-y-3 flex flex-col items-center">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/esmc_performance.png"
-         alt="ESM-C Classifier Performance"
+    <img src="../../Papers/Resources/ESMC_General/esmc_performance.png"
+         alt="ESM-C Classifier Performance (current, 5-variant, 2026-09-04)"
          class="w-full rounded-lg border border-white/10 shadow-sm"
          style="max-height: 280px; object-fit: contain;">
     <p class="text-[9px] opacity-40 italic text-center">
-      Fine-tuned ESM-C classifier held-out test performance per target (July 5).
+      Current (2026-09-04) held-out performance (MCC, PR-lift) across all 5 confirmed-large-model variants, by target.
     </p>
   </div>
 </div>
@@ -207,7 +210,7 @@ transition: fade-out
         Correlation analysis plotting AlphaFold structural confidence score (LpLDDT) against bench-measured flow cytometry binding (NMR) for MMP9.
       </p>
       <ul class="text-[10px] list-disc pl-4 space-y-1.5 opacity-70 mt-3">
-        <li><b>Poor Correlation:</b> Correlation coefficient of $r = 0.19$, showing essentially no predictive relationship.</li>
+        <li><b>Poor Correlation:</b> Correlation coefficient of $r = 0.19$, showing essentially no predictive relationship. <span class="text-amber-400">(Consistent with the companion De_Novo_Binder_Generation paper's current recompute: LpLDDT $\rho=0.20$, $p=0.23$, not statistically significant, $n=36$ — this slide's claim was not itself re-derived this pass but is not contradicted.)</span></li>
         <li><b>Implications for Design:</b> Optimizing sequence libraries solely for structural confidence does not yield higher binding affinities.</li>
         <li><b>Pipeline Complement:</b> Emphasizes the need for fine-tuned sequence classifiers (like ESM-C) to filter candidates.</li>
       </ul>
@@ -242,13 +245,13 @@ transition: fade-out
         Evaluation of ESM-C predicted probabilities against actual flow-cytometry binding measurements for 11 matched constructs.
       </p>
       <ul class="text-[10px] list-disc pl-4 space-y-1.5 opacity-70 mt-3">
-        <li><b>Strong Positive Correlation:</b> ESM-C predicted probability correlates positively with raw binding (ADAM17 Pos Med Ratio: $\rho = 0.86^*$ on AB-loops; MMP9 Double+ %: $\rho = 0.62^*$ overall).</li>
-        <li><b>Robust Out-of-Distribution Generalization:</b> Even though the model was trained exclusively on C-loop sequence grafts, it successfully predicts binding for AB-loop insertions ($\rho=0.86^*$ for ADAM17, $\rho=0.75$ for MMP9).</li>
-        <li><b>Contrast with Structure:</b> Unlike AF3 and ESMFold2 structural metrics (which showed weak/unstable correlations with raw binding), ESM-C is a robust binding ranker.</li>
+        <li><b>Not re-verified (2026-09-05):</b> ESM-C predicted probability was reported to correlate positively with raw binding (ADAM17 Pos Med Ratio: $\rho = 0.86^*$ on AB-loops; MMP9 Double+ %: $\rho = 0.62^*$ overall) — <b>but this run used the small ESM-C model (`ESMplusplus_small`)</b>, and the companion De_Novo_Binder_Generation paper's data-provenance audit separately flagged this exact claim as unconfirmed given the small $n$ (4–11) and how much the classifier landscape has changed since.</li>
+        <li><b>Generalization claim:</b> reported at the time for AB-loop insertions ($\rho=0.86^*$ ADAM17, $\rho=0.75$ MMP9); not re-derived from current data this pass.</li>
+        <li><b>Current basis for the deployment decision:</b> the confirmed-large-model held-out performance table (previous slides), not this unconfirmed wet-lab correlation.</li>
       </ul>
     </div>
     <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
-      <b class="text-amber-400">Design Implications:</b> Treat structural confidence scores as foldability/developability checks; use ESM-C P(bind) as the primary ranker for ordering new candidates.
+      <b class="text-amber-400">Design Implications (revised):</b> This slide's historical correlation claim should not be cited as a current validated result. Structural confidence scores remain reasonable foldability/developability checks; the current ESM-C ranking decision rests on the confirmed-large-model MCC/PR-lift table, not on this figure.
     </div>
   </div>
   <div class="space-y-3 flex flex-col items-center">
@@ -269,5 +272,6 @@ transition: fade-out
 - ESM-based classification provides a data-driven complement to generative design
 - Predictive models leverage evolutionary information for binding prediction
 - Comparative framework validates ML categorizations against *de novo* outputs
+- <span class="text-amber-400 text-[10px]">**Current status (2026-09-05):** 5-variant, confirmed-`ESMplusplus_large` comparison shows MMP9 strong (MCC≈0.72), ADAM17 modest (MCC≈0.33), and MMP3's high raw PR-AUC as a base-rate mirage (true PR-lift 0.05–0.06). Two open questions remain unresolved: an early small-vs-large model discrepancy, and a motif disagreement between two large-model MMP9 classifiers. The $\rho=0.86$ wet-lab correlation is unconfirmed and traces to the small model — see `ESM_Classification.tex` and `DATA_PROVENANCE.md`.</span>
 
 

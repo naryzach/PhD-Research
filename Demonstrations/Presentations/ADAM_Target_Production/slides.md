@@ -606,8 +606,25 @@ layout: default
     </h2>
     <ul class="space-y-3 text-xs text-gray-700">
       <li><strong>Western Blot Detection:</strong> Image anti-FLAG fluorophore-labeled membranes to determine soluble vs. insoluble yields.</li>
-      <li><strong>ADAM17 Target Recovery:</strong> Re-isolate and sequence pMopac-ADAM17 after helper plasmid contamination was identified.</li>
+      <li><strong>ADAM17 Target Recovery:</strong> Re-clone pMopac-ADAM17 from scratch (rigorous phosphatase treatment + colony-PCR screening) — whole-plasmid nanopore sequencing confirmed the isolated plasmid is an <strong>empty parental vector</strong> (0/3,167 reads map to the 807 bp insert), not merely helper-plasmid contamination.</li>
       <li><strong>Functional Assays:</strong> Conduct Enzo MMP target assays to verify activity of purified ADAM10 fractions.</li>
     </ul>
   </div>
+</div>
+
+<!-- Status update added 2026-09-05 (data-provenance audit), synced against the now-corrected
+     ADAM_Target_Production.tex (see its DATA_PROVENANCE.md). This deck otherwise stops at
+     late June 2026 and was not extended to cover July-August progress in this pass; this box
+     exists specifically so the deck does not overstate ADAM10/ADAM17 status beyond what is
+     currently confirmed. -->
+<div class="mt-4 p-3 bg-red-50 border border-red-200 rounded text-2xs text-red-900">
+  <strong>Status update (per the paper, as of July 24, 2026 — not otherwise reflected in this deck):</strong>
+  In-house ADAM10 <em>production</em> remains validated (anti-FLAG Western, BCA 0.20&nbsp;mg/mL,
+  FPLC Fraction&nbsp;6). ADAM10 <em>binding</em> to displayed TIMP3 variants is <strong>not</strong>
+  confirmed: a June 10 channel-corrected read that appeared positive is now considered
+  unconfirmed (construct-QC vendor-provenance manifest flagged the preparations used; a
+  dedicated July 24 control test against displayed wild-type TIMP1/TIMP3 found no genuine
+  binding signal, even though the same material is independently active on a fluorogenic
+  substrate). A validated positive control and a titrated, quantified target are needed before
+  any ADAM10 binding/selectivity claim can be trusted.</div>
 </div>
