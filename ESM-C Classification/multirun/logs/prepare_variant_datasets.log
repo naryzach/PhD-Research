@@ -1,0 +1,14 @@
+TIMP_binder_all.csv: 47958 rows, targets x subtype:
+Target          ADAM17   MMP3  MMP9
+Ligand_Subtype                     
+AB-loop              0  37478  6560
+C-loop            2295      0  1625
+-> abloop_only.csv: 44038 rows, targets=['MMP3', 'MMP9']
+-> cloop_only.csv: 3920 rows, targets=['ADAM17', 'MMP9']
+-> everything_combined.csv: 93210 rows (47958 + 45252), targets x subtype:
+Target          ADAM17   MMP3   MMP9
+Ligand_Subtype                      
+AB-loop              0  37478   6560
+C-loop            2295      0  46877
+
+Derived CSVs written to /home/ryangustafson/Documents/GitHubProj/PhD-Research/Local/esmc_multirun/derived_data

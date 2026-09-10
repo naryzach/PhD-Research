@@ -91,6 +91,9 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--variants", default=None,
                     help=f"comma-separated subset of: {','.join(VARIANT_NAMES)} (default: all)")
+    ap.add_argument("--configs-dir", default="configs",
+                    help="subfolder of multirun/ to load variant yamls from, e.g. 'configs_small' "
+                         "for a run with a different model_id/output_dir (default: configs)")
     ap.add_argument("--steps", default="prepare,data,train,visualize,shap,enumerate,analyze",
                     help="comma-separated subset of: "
                          "prepare,data,train,visualize,shap,enumerate,analyze")
@@ -121,6 +124,22 @@ def main():
                          "only loses the current chunk, not the whole run")
     args = ap.parse_args()
 
+    if args.smoke:
+        # data_prep/--limit and train/--smoke already shrink those two steps, but
+        # enumerate_cloop.py has no smoke concept of its own -- left alone it runs the
+        # real full 20^6 sweep (~90+ hours/sweep) even under --smoke, which defeats the
+        # entire point of a "tiny fast pass through every step" sanity check. Only
+        # override values still at their un-smoked defaults, so an explicit
+        # --enum-start/--enum-end/--n-explain/--background-size still wins.
+        if args.enum_start == 0 and args.enum_end == 20**6:
+            args.enum_end = 2000
+        if args.n_explain == 300:
+            args.n_explain = 5
+        if args.background_size == 50:
+            args.background_size = 5
+        print(f"[smoke] shrinking enumerate to [0,{args.enum_end}), "
+              f"shap to n-explain={args.n_explain} background-size={args.background_size}")
+
     variants = args.variants.split(",") if args.variants else VARIANT_NAMES
     unknown = set(variants) - set(VARIANT_NAMES)
     if unknown:
@@ -145,8 +164,8 @@ def main():
 
     for v in plan:
         name = v["name"]
-        cfg_rel = f"multirun/configs/{name}.yaml"
-        cfg_abs = MULTIRUN_DIR / "configs" / f"{name}.yaml"
+        cfg_rel = f"multirun/{args.configs_dir}/{name}.yaml"
+        cfg_abs = MULTIRUN_DIR / args.configs_dir / f"{name}.yaml"
         cfg = load_config(cfg_abs)
         out_dir = resolve_path(cfg, cfg["output_dir"])
         log_dir = out_dir / "logs"
@@ -176,6 +195,8 @@ def main():
                     cmd += ["--log-every", str(args.log_every)]
                 run(cmd, log_dir / "train.log", args.dry_run)
 
+        model_dir = out_dir / ("model_smoke" if args.smoke else "model")
+
         if "visualize" in steps:
             viz_dir = out_dir / "visualizations"
             for color_by in ("target", "binding"):
@@ -184,7 +205,8 @@ def main():
                     print(f"[skip] visualize[{color_by}] already done ({png})")
                 else:
                     cmd = [sys.executable, "visualize.py", "--config", cfg_rel,
-                          "--split", "test", "--color-by", color_by, "--out", str(png)]
+                          "--split", "test", "--color-by", color_by, "--out", str(png),
+                          "--model-dir", str(model_dir)]
                     run(cmd, log_dir / f"visualize_{color_by}.log", args.dry_run)
 
         for subtype in v["loop_subtypes"]:
@@ -200,7 +222,8 @@ def main():
                     cmd = [sys.executable, "shap_hotspots.py", "--config", cfg_rel,
                           "--loop-subtype", subtype, "--n-explain", str(args.n_explain),
                           "--background-size", str(args.background_size),
-                          "--shap-chunk-size", str(args.shap_chunk_size)]
+                          "--shap-chunk-size", str(args.shap_chunk_size),
+                          "--model-dir", str(model_dir)]
                     if args.force:
                         cmd += ["--no-resume"]  # --force means start clean, not "resume anyway"
                     run(cmd, log_dir / f"shap_{tag}.log", args.dry_run)
@@ -219,7 +242,7 @@ def main():
                           "--batch-size", str(args.enum_batch_size),
                           "--start", str(args.enum_start), "--end", str(args.enum_end),
                           "--checkpoint-every", str(args.enum_checkpoint_every),
-                          "--out", out_name]
+                          "--out", out_name, "--model-dir", str(model_dir)]
                     if args.force:
                         cmd += ["--no-resume"]  # --force means start clean, not "resume anyway"
                     if args.enum_save_all:
