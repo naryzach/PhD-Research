@@ -4,15 +4,20 @@ import data from '../../../SharedAssets/data/De_Novo_Binder_Generation/primary_s
 
 const hovered = ref(null)
 const chartHeight = 170
-const barGroupWidth = 120
-const barWidth = 34
+const barGroupWidth = 88
+const barWidth = 26
 
-function xFor(i) { return 60 + i * barGroupWidth }
+function xFor(i) { return 44 + i * barGroupWidth }
 function yFor(v) { return chartHeight - v * chartHeight }
 function hFor(v) { return v * chartHeight }
 function barOpacity(d) {
   if (hovered.value && hovered.value !== d.construct) return 0.35
   return d.designed ? 1 : 0.5
+}
+function sigColor(sig) {
+  if (sig === '*') return '#34d399'
+  if (sig === 'n.s.*') return '#f59e0b'
+  return '#94a3b8'
 }
 </script>
 
@@ -48,7 +53,7 @@ function barOpacity(d) {
 
         <!-- significance bracket -->
         <text :x="xFor(i) + barWidth + 3" :y="yFor(Math.max(d.mmp9 + d.mmp9_sem, d.mmp2 + d.mmp2_sem)) - 6"
-          text-anchor="middle" class="sig" :style="{ fill: d.sig === 'n.s.' ? '#94a3b8' : '#34d399' }">{{ d.sig }}</text>
+          text-anchor="middle" class="sig" :style="{ fill: sigColor(d.sig) }">{{ d.sig === 'n.s.*' ? '~' : d.sig }}</text>
 
         <!-- label -->
         <text :x="xFor(i) + barWidth + 3" :y="chartHeight + 16" text-anchor="middle" class="label">{{ d.construct }}</text>
@@ -63,7 +68,7 @@ function barOpacity(d) {
       <div v-if="data.find(d => d.construct === hovered).note" class="mt-0.5 text-[8px] text-amber-300/80 max-w-[500px] mx-auto leading-snug">{{ data.find(d => d.construct === hovered).note }}</div>
     </div>
     <div class="text-[8px] opacity-40 italic text-center mt-1">
-      Mean ± SEM, pooled across all vendors/dates through 2026-07-01. Hover a construct for vendor-batch detail. n.s. = not significant at current n.
+      Mean ± SEM, vendor-matched (Enzo only — same-species, catalytic-domain-matched MMP9/MMP2) for AB 1/2/6, C 12/15, TIMP3-WT; C 13/AB 5 shown pooled (no Enzo MMP2 replication exists for these two controls). Hover for detail. * = p&lt;0.05, ~ = borderline (0.05–0.10), n.s. = not significant.
     </div>
   </div>
 </template>

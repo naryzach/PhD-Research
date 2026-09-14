@@ -20,16 +20,16 @@ mdc: true
 
 <div class="mt-10 flex justify-center gap-4">
   <div class="px-4 py-2 bg-white/5 rounded border border-white/10">
-    <div class="text-[10px] uppercase opacity-40 tracking-widest">Confirmed Selective (pooled)</div>
-    <div class="text-blue-400 font-bold uppercase text-xs">C 15 — MMP9 &gt; MMP2 (ANOVA p=0.035)</div>
+    <div class="text-[10px] uppercase opacity-40 tracking-widest">Confirmed Selective (vendor-matched)</div>
+    <div class="text-blue-400 font-bold uppercase text-xs">AB 2, AB 6 — MMP9 &gt; MMP2 (p&lt;0.002)</div>
   </div>
   <div class="px-4 py-2 bg-white/5 rounded border border-white/10">
     <div class="text-[10px] uppercase opacity-40 tracking-widest">Primary Targets</div>
     <div class="text-blue-400 font-bold uppercase text-xs">MMP9 vs MMP2</div>
   </div>
   <div class="px-4 py-2 bg-white/5 rounded border border-white/10">
-    <div class="text-[10px] uppercase opacity-40 tracking-widest">Directional, Not Confirmed Pooled</div>
-    <div class="text-emerald-400 font-bold uppercase text-xs">AB 6, C 12</div>
+    <div class="text-[10px] uppercase opacity-40 tracking-widest">Borderline, Vendor-Matched</div>
+    <div class="text-emerald-400 font-bold uppercase text-xs">AB 1, C 15</div>
   </div>
 </div>
 
@@ -109,11 +109,11 @@ Hover over each loop to see its position, native length, and expansion range.
 <div class="grid grid-cols-3 gap-4 mt-6">
   <div class="p-3 bg-blue-500/10 rounded border border-blue-500/20 text-[10px]">
     <b class="text-blue-400 block mb-1">AB Loop (res 31–36)</b>
-    <span class="opacity-70">Primary MMP active-site contact. AB 6 (13 aa insertion) gave a strong single-vendor-batch signal; not yet confirmed on the full pooled dataset (see Results).</span>
+    <span class="opacity-70">Primary MMP active-site contact. AB 6 and AB 2 (both 11–13 aa insertions) are confirmed selective once compared on vendor-matched constructs; AB 1 is borderline (see Results).</span>
   </div>
   <div class="p-3 bg-violet-500/10 rounded border border-violet-500/20 text-[10px]">
     <b class="text-violet-400 block mb-1">C Loop (res 63–68)</b>
-    <span class="opacity-70">Second primary contact loop. C 15 is the one MMP9-selectivity result confirmed on the full pooled dataset; C 12 trends the same direction but isn't independently confirmed (see Results). Up to 13 aa insertions tolerated.</span>
+    <span class="opacity-70">Second primary contact loop. C 15 trends MMP9-selective and is borderline on vendor-matched data; C 12 trends the same direction but isn't significant even matched (see Results). Up to 13 aa insertions tolerated.</span>
   </div>
   <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px]">
     <b class="text-emerald-400 block mb-1">EF Loop (res 93–96)</b>
@@ -325,7 +325,7 @@ Three parallel design axes in the same synthesis order — not just an ADAM17 si
   <div class="p-4 bg-emerald-500/10 rounded border border-emerald-500/20 space-y-2">
     <h4 class="text-emerald-300 font-bold text-[11px] uppercase tracking-widest">MMP9-Selective (5)</h4>
     <p class="text-[10px] leading-relaxed opacity-70">
-      AB 1, AB 2, AB 6 (AB loop) and C 12, C 15 (C loop) — designed for M9&gt;M2 preference. C 15 is confirmed on the full pooled dataset (ANOVA p=0.035, MMP9 its own top target); AB 6 and C 12 are directional (trend M9&gt;M2) but not independently confirmed pooled — AB 6's strong single-vendor-batch result (p=0.001) hasn't reproduced at that magnitude across later trials; AB 1/AB 2 directionally correct but underpowered. The primary result of this campaign.
+      AB 1, AB 2, AB 6 (AB loop) and C 12, C 15 (C loop) — designed for M9&gt;M2 preference. AB 2 and AB 6 are confirmed on vendor-matched data (Enzo only, p=0.0004/0.0011) — pooling across manufacturers had masked this by averaging in non-equivalent constructs from other vendors. AB 1 and C 15 are borderline on the same matched data (p=0.07–0.09); C 12 trends the same direction but isn't significant even matched. The primary result of this campaign.
     </p>
   </div>
   <div class="p-4 bg-blue-500/10 rounded border border-blue-500/20 space-y-2">
@@ -511,51 +511,65 @@ Cross-target comparable fraction metric — primary selectivity proof.
         </thead>
         <tbody>
           <tr class="border-b border-white/5">
-            <td class="py-1 text-emerald-400 font-bold">AB 6</td>
-            <td class="text-right py-1">19.8%</td>
-            <td class="text-right py-1 text-emerald-400 font-bold">36.5%</td>
-            <td class="text-right py-1 text-emerald-400">1.8×</td>
-            <td class="text-right py-1 text-emerald-400">✓ pooled n.s.; Enzo p=0.001</td>
+            <td class="py-1 text-emerald-400 font-bold">AB 2</td>
+            <td class="text-right py-1">22.2%</td>
+            <td class="text-right py-1 text-emerald-400 font-bold">92.3%</td>
+            <td class="text-right py-1 text-emerald-400">4.2×</td>
+            <td class="text-right py-1 text-emerald-400">✓ Enzo p=0.0004</td>
           </tr>
           <tr class="border-b border-white/5">
-            <td class="py-1 text-emerald-400 font-bold">C 15</td>
-            <td class="text-right py-1">30.3%</td>
-            <td class="text-right py-1 text-emerald-400 font-bold">80.2%</td>
-            <td class="text-right py-1 text-emerald-400">2.6×</td>
-            <td class="text-right py-1 text-emerald-400">✓ p=0.038</td>
+            <td class="py-1 text-emerald-400 font-bold">AB 6</td>
+            <td class="text-right py-1">26.9%</td>
+            <td class="text-right py-1 text-emerald-400 font-bold">94.1%</td>
+            <td class="text-right py-1 text-emerald-400">3.5×</td>
+            <td class="text-right py-1 text-emerald-400">✓ Enzo p=0.0011</td>
+          </tr>
+          <tr class="border-b border-white/5 opacity-75">
+            <td class="py-1">AB 1</td>
+            <td class="text-right py-1">33.7%</td>
+            <td class="text-right py-1">95.7%</td>
+            <td class="text-right py-1">2.8×</td>
+            <td class="text-right py-1">Enzo p=0.074, borderline</td>
+          </tr>
+          <tr class="border-b border-white/5 opacity-75">
+            <td class="py-1">C 15</td>
+            <td class="text-right py-1">39.2%</td>
+            <td class="text-right py-1">92.7%</td>
+            <td class="text-right py-1">2.4×</td>
+            <td class="text-right py-1">Enzo p=0.068, borderline</td>
           </tr>
           <tr class="border-b border-white/5 opacity-60">
             <td class="py-1">C 12</td>
-            <td class="text-right py-1">30.2%</td>
-            <td class="text-right py-1">39.3%</td>
-            <td class="text-right py-1">1.3×</td>
-            <td class="text-right py-1">directional, n.s.</td>
+            <td class="text-right py-1">36.5%</td>
+            <td class="text-right py-1">94.1%</td>
+            <td class="text-right py-1">2.6×</td>
+            <td class="text-right py-1">directional, n.s. even matched</td>
           </tr>
           <tr class="border-b border-white/10 opacity-50">
             <td class="py-1">C 13</td>
             <td class="text-right py-1">17.2%</td>
             <td class="text-right py-1">28.1%</td>
             <td class="text-right py-1">—</td>
-            <td class="text-right py-1">n.s. ✓</td>
+            <td class="text-right py-1">n.s. ✓ (pooled, no Enzo n)</td>
           </tr>
           <tr class="border-b border-white/10 opacity-50">
             <td class="py-1">AB 5</td>
             <td class="text-right py-1">13.6%</td>
             <td class="text-right py-1">25.6%</td>
             <td class="text-right py-1">—</td>
-            <td class="text-right py-1">n.s. ✓</td>
+            <td class="text-right py-1">n.s. ✓ (pooled, no Enzo n)</td>
           </tr>
           <tr>
             <td class="py-1 text-blue-400">TIMP 3</td>
-            <td class="text-right py-1">20.6%</td>
-            <td class="text-right py-1">48.8%</td>
-            <td class="text-right py-1">2.4×</td>
-            <td class="text-right py-1 text-blue-400">ref, p=0.033</td>
+            <td class="text-right py-1">32.8%</td>
+            <td class="text-right py-1">91.9%</td>
+            <td class="text-right py-1">2.8×</td>
+            <td class="text-right py-1 text-blue-400">ref, Enzo p=0.022</td>
           </tr>
         </tbody>
       </table>
       <div class="text-[8px] opacity-40 italic border-t border-white/10 pt-2">
-        Welch t-test, MMP9 vs MMP2, pooled across all vendors/dates (293 QC-passing trials through 2026-07-01). AB 6's clean single-vendor result (2026-04-24 Enzo batch, n=2v2) hasn't yet been reproduced at the same magnitude by later trials — see next slide.
+        Welch t-test, MMP9 vs MMP2, vendor-matched (Enzo only, n=2–3 per target) except C 13/AB 5 (pooled — no Enzo MMP2 replication exists for these two). Enzo is the one vendor supplying same-species, catalytic-domain-matched constructs for both targets; other vendors' constructs are documented mismatches (see next slide).
       </div>
     </div>
   </div>
@@ -601,8 +615,8 @@ layout: default
 transition: fade-out
 ---
 
-# Key Findings: One Confirmed Hit, Two Directional
-C 15 holds up on the full pooled dataset (ANOVA p=0.035); AB 6/C 12 are consistent in direction but not independently confirmed pooled.
+# Key Findings: Two Confirmed Hits, Once Vendor-Matched
+Pooling across manufacturers mixed non-equivalent target constructs and masked real signal. Restricted to the one internally-matched vendor (Enzo — same species, same catalytic domain for both targets), AB 2 and AB 6 are confirmed.
 
 <div class="mt-3">
   <SelectivityBars />
@@ -610,13 +624,13 @@ C 15 holds up on the full pooled dataset (ANOVA p=0.035); AB 6/C 12 are consiste
 
 <div class="grid grid-cols-3 gap-4 mt-3 text-[9px]">
   <div class="p-2 bg-emerald-500/10 rounded border border-emerald-500/20">
-    <b class="text-emerald-300">C 15 — confirmed:</b> MMP9&gt;MMP2 signal significant pooled across all vendors/dates (ANOVA p=0.035, MMP9 its own top target).
+    <b class="text-emerald-300">AB 2 / AB 6 — confirmed, vendor-matched:</b> human catalytic-domain MMP9 vs MMP2 (Enzo only, n=2v2): AB 2 p=0.0004, AB 6 p=0.0011. Both looked non-significant pooled (p=0.09, p=0.34) only because pooling averages in Sino's non-equivalent constructs.
   </div>
   <div class="p-2 bg-blue-500/10 rounded border border-blue-500/20">
-    <b class="text-blue-300">AB 6 / C 12 — directional, not confirmed pooled:</b> both trend MMP9&gt;MMP2; AB 6's single-vendor-batch result (p=0.001, n=2v2) hasn't reproduced at that magnitude pooled — neither is a false positive, both need more trials, not a different design.
+    <b class="text-blue-300">AB 1 / C 15 — borderline; C 12 — not yet significant:</b> AB 1 (p=0.074) and C 15 (p=0.068) trend the same direction on the matched data but don't clear 0.05 at n=2v2; C 12 doesn't reach significance in the matched comparison either (p=0.155). None are false positives — all need more matched-vendor trials.
   </div>
-  <div class="p-2 bg-violet-500/10 rounded border border-violet-500/20">
-    <b class="text-violet-300">Controls behaved:</b> non-selective designs stayed non-significant; WT TIMP3 shows a mild, real MMP9 preference (p=0.033) the variants amplify, not invent.
+  <div class="p-2 bg-amber-500/10 rounded border border-amber-500/20">
+    <b class="text-amber-400">Why pooling underpowered this — it's not just noise:</b> Sino's "MMP2" is mouse (missing the N-catalytic half TIMP3 actually binds) and its "MMP9" is full-length, not the catalytic domain Enzo/the design targets — documented construct mismatches, not measurement error. Controls still behaved: C 13/AB 5 stayed non-significant; WT TIMP3 shows a real native MMP9 preference (p=0.022, matched) the variants amplify.
   </div>
 </div>
 
@@ -635,14 +649,14 @@ transition: fade-out
         A systematic tally comparing the design intent of all 13 engineered TIMP3 loop variants against aggregated flow-cytometry results — the full-library complement to the MMP9-vs-MMP2 primary result on the previous slide. <b>Rebuilt 2026-09-04</b> on raw Binding Efficiency under an explicit, documented rule (the original figure's generator script did not survive) — pairwise intents (e.g. M9&gt;M2) score by direction alone; absolute intents (e.g. M9+) require both a significant omnibus ANOVA <i>and</i> that target being the construct's own top target; High/Low intents are scored against the TIMP3-WT reference mean.
       </p>
       <ul class="text-[10px] list-disc pl-4 space-y-1.5 opacity-70 mt-3">
-        <li><b>Hits (9/13):</b> AB 1, AB 4, AB 5, AB 6, AB 7, C 12, C 13, C 14, C 15 — binding direction matched design intent (absolute "+" claims additionally require a significant omnibus ANOVA where that's the only sub-claim).</li>
+        <li><b>Hits (10/13):</b> AB 1, AB 2, AB 4, AB 5, AB 6, AB 7, C 12, C 13, C 14, C 15 — binding direction matched design intent (absolute "+" claims additionally require a significant omnibus ANOVA where that's the only sub-claim). <b>AB 2</b> moved from Untestable once scored on vendor-matched (Enzo-only) data: its pooled ANOVA (p=0.58) mixed in non-equivalent Sino/Masoud constructs; Enzo-only, p=0.0001 with MMP9 as its clear top target.</li>
         <li><b>Partials (1/13):</b> <b>AB 3</b> ("High") reaches 0.89&times; the TIMP3-WT mean — elevated, but short of the 1.2&times; threshold for a clean Hit.</li>
         <li><b>Misses (0/13):</b> none under this rule.</li>
-        <li><b>Untestable (3/13):</b> <b>AB 2</b>, <b>ABC 22</b>, and <b>C 11</b> — each an absolute-intent ("+") construct whose omnibus ANOVA across targets is not significant (p=0.58, 0.36, 0.07 respectively), so the claim can't be scored either way.</li>
+        <li><b>Untestable (2/13):</b> <b>ABC 22</b> and <b>C 11</b> — each an absolute-intent ("+") construct whose pooled omnibus ANOVA is not significant (p=0.36, 0.07); both involve the ADAM17 axis, which hasn't yet had the same vendor-matched reanalysis AB 2 got on the MMP9 axis — may also be under-scored by the same pooling issue.</li>
       </ul>
     </div>
     <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
-      <b class="text-amber-400">Reading this against the headline result:</b> The MMP9-vs-MMP2 result on the previous slide is the <i>narrow</i> confirmatory test on the 4 constructs explicitly designed for that axis. This scorecard is the <i>broad</i> exploratory result across all 13 constructs on every design axis (MMP9, ADAM17, "Low"/"High"), most of which were underpowered (n=1&ndash;3 trials) — a pairwise "Hit" here needs only the right direction, not significance, so it's a much looser bar than the previous slide's pooled ANOVA. The two now agree cleanly on <b>C 15</b> (Hit on both, and the only one with a significant pooled ANOVA); AB 6/C 12 are Hits here on direction alone, consistent with — not stronger than — their "directional, not confirmed" status on the previous slide.
+      <b class="text-amber-400">Reading this against the headline result:</b> The MMP9-vs-MMP2 result on the previous slide is the <i>narrow</i> confirmatory test on the 5 constructs explicitly designed for that axis, using vendor-matched data. This scorecard is the <i>broad</i> exploratory result across all 13 constructs on every design axis (MMP9, ADAM17, "Low"/"High"), most of which were underpowered (n=1&ndash;3 trials) and still pooled across vendors except where noted — a pairwise "Hit" here needs only the right direction, not significance, so it's a much looser bar. The two agree on <b>AB 2</b> and <b>AB 6</b> (Hit on both, and the two with significant vendor-matched tests); <b>C 15</b>/<b>C 12</b> are Hits here on direction alone, consistent with — not stronger than — their "borderline"/"not yet significant" status on the previous slide.
     </div>
   </div>
   <div class="space-y-3 flex flex-col items-center">
@@ -760,7 +774,7 @@ Raw AlphaFold3 confidence looks useless for ranking binding; a stickiness confou
       <b class="text-blue-400">Some constructs are just "sticky":</b> binding correlates strongly <em>across targets</em> for a given construct — a construct that binds one protease tends to bind them all, regardless of target. This general stickiness accounts for roughly two-thirds of the variance in binding scores; well under a third reflects genuine target-specific interaction, with a small remainder from baseline differences between targets themselves.
     </div>
     <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px] leading-relaxed opacity-80">
-      <b class="text-amber-400">Correcting for stickiness narrows the gap, but doesn't clear significance:</b> after removing each construct's stickiness, loop-pLDDT's correlation with the target-specific residual moves in the right direction (ρ=0.20, p=0.23, n=36) but isn't significant; ipTM stays flat (ρ=0.09, p=0.58). C 15's pooled-confirmed hit (and AB 6/C 12's directional signal) rests on its own wet-lab statistics, not on this AF-metric correlation — that finding doesn't depend on this correlation holding up.
+      <b class="text-amber-400">Correcting for stickiness narrows the gap, but doesn't clear significance:</b> after removing each construct's stickiness, loop-pLDDT's correlation with the target-specific residual moves in the right direction (ρ=0.20, p=0.23, n=36) but isn't significant; ipTM stays flat (ρ=0.09, p=0.58). AB 2/AB 6's confirmed, vendor-matched selectivity result rests on its own wet-lab statistics, not on this AF-metric correlation — that finding doesn't depend on this correlation holding up.
     </div>
     <div class="p-3 bg-red-500/10 rounded border border-red-500/20 text-[10px] leading-relaxed opacity-80">
       <b class="text-red-400">ipTM tracks expression, not binding:</b> ipTM correlates with how well a construct <em>expresses</em> (ρ=0.37, p=0.027) but not with target-specific binding (ρ=0.09, p=0.58), and is nearly saturated across these designs (0.77–0.90) — too compressed to rank fine differences.
@@ -980,7 +994,7 @@ Population-level signal from the most recent complete-enough window — hedged, 
 
 <div class="mt-4 grid grid-cols-2 gap-4">
   <div class="p-2.5 bg-white/5 rounded border border-white/10 text-[9px] opacity-70 leading-snug">
-    <b class="text-blue-400">Consistent with Round 1:</b> this deck's own first-generation result already carried a similar asymmetry — C 15 (MMP9&gt;MMP2) is the pooled-confirmed hit; the equivalent ADAM17&gt;ADAM10 claim (AB 4) rested on weak ADAM10 data. Two independent generations now agree the ADAM17/ADAM10 axis is the harder one.
+    <b class="text-blue-400">Consistent with Round 1:</b> this deck's own first-generation result already carried a similar asymmetry — AB 2/AB 6 (MMP9&gt;MMP2, vendor-matched) are the confirmed hits; the equivalent ADAM17&gt;ADAM10 claim (AB 4) rested on weak ADAM10 data. Two independent generations now agree the ADAM17/ADAM10 axis is the harder one.
   </div>
   <div class="p-2.5 bg-amber-500/10 rounded border border-amber-500/20 text-[9px] opacity-80">
     <b class="text-amber-400">Not yet actionable:</b> no ordering/synthesis output exists from this pipeline yet — it's still early, and these percentages will be re-measured before any candidate is proposed.
@@ -1074,7 +1088,7 @@ transition: fade-out
     <ul class="text-[10px] space-y-2 opacity-80 list-none p-0 leading-snug">
       <li class="flex items-start gap-2">
         <div class="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-1 shrink-0"></div>
-        <span><b>SPR Kinetics (queued, top priority):</b> K<sub>D</sub>/k<sub>on</sub>/k<sub>off</sub> for C 12, C 15, AB 6 vs. purified MMP9/MMP2 — direct comparison to marimastat/prinomastat.</span>
+        <span><b>SPR Kinetics (queued, top priority):</b> K<sub>D</sub>/k<sub>on</sub>/k<sub>off</sub> for AB 2, AB 6 (confirmed, vendor-matched) plus AB 1, C 15, C 12 vs. purified, construct-matched MMP9/MMP2 — direct comparison to marimastat/prinomastat, and a chance to settle the borderline cases with a proper single-source reagent pair.</span>
       </li>
       <li class="flex items-start gap-2">
         <div class="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1 shrink-0"></div>
@@ -1171,12 +1185,12 @@ class: text-center
 
 <div class="mt-8 grid grid-cols-3 gap-6 max-w-2xl mx-auto text-center">
   <div>
-    <div class="text-emerald-400 font-black text-2xl">p=0.035</div>
-    <div class="text-[9px] opacity-40 uppercase tracking-widest mt-1">C 15 — MMP9 &gt; MMP2, Confirmed Pooled</div>
+    <div class="text-emerald-400 font-black text-2xl">p=0.0004</div>
+    <div class="text-[9px] opacity-40 uppercase tracking-widest mt-1">AB 2 — MMP9 &gt; MMP2, Vendor-Matched</div>
   </div>
   <div>
-    <div class="text-blue-400 font-black text-2xl">2.6×</div>
-    <div class="text-[9px] opacity-40 uppercase tracking-widest mt-1">Peak Selectivity (C 15, pooled)</div>
+    <div class="text-blue-400 font-black text-2xl">4.2×</div>
+    <div class="text-[9px] opacity-40 uppercase tracking-widest mt-1">Peak Selectivity (AB 2, vendor-matched)</div>
   </div>
   <div>
     <div class="text-violet-400 font-black text-2xl">3</div>
