@@ -20,16 +20,16 @@ mdc: true
 
 <div class="mt-10 flex justify-center gap-4">
   <div class="px-4 py-2 bg-white/5 rounded border border-white/10">
-    <div class="text-[10px] uppercase opacity-40 tracking-widest">Confirmed Selective (vendor-matched)</div>
-    <div class="text-blue-400 font-bold uppercase text-xs">AB 2, AB 6 — MMP9 &gt; MMP2 (p&lt;0.002)</div>
+    <div class="text-[10px] uppercase opacity-40 tracking-widest">Supported Selective (vendor-matched, one day)</div>
+    <div class="text-blue-400 font-bold uppercase text-xs">AB 1, AB 2, AB 6, C 12, C 15 — MMP9 &gt; MMP2 (nominal p=0.008–0.044)</div>
   </div>
   <div class="px-4 py-2 bg-white/5 rounded border border-white/10">
     <div class="text-[10px] uppercase opacity-40 tracking-widest">Primary Targets</div>
     <div class="text-blue-400 font-bold uppercase text-xs">MMP9 vs MMP2</div>
   </div>
   <div class="px-4 py-2 bg-white/5 rounded border border-white/10">
-    <div class="text-[10px] uppercase opacity-40 tracking-widest">Borderline, Vendor-Matched</div>
-    <div class="text-emerald-400 font-bold uppercase text-xs">AB 1, C 15</div>
+    <div class="text-[10px] uppercase opacity-40 tracking-widest">Caveat</div>
+    <div class="text-emerald-400 font-bold uppercase text-xs">n=2v2, one day; replication pending</div>
   </div>
 </div>
 
@@ -109,11 +109,11 @@ Hover over each loop to see its position, native length, and expansion range.
 <div class="grid grid-cols-3 gap-4 mt-6">
   <div class="p-3 bg-blue-500/10 rounded border border-blue-500/20 text-[10px]">
     <b class="text-blue-400 block mb-1">AB Loop (res 31–36)</b>
-    <span class="opacity-70">Primary MMP active-site contact. AB 6 and AB 2 (both 11–13 aa insertions) are confirmed selective once compared on vendor-matched constructs; AB 1 is borderline (see Results).</span>
+    <span class="opacity-70">Primary MMP active-site contact. AB 1, AB 2, and AB 6 are supported as MMP9-selective once compared on vendor-matched constructs (one day, replication pending; see Results).</span>
   </div>
   <div class="p-3 bg-violet-500/10 rounded border border-violet-500/20 text-[10px]">
     <b class="text-violet-400 block mb-1">C Loop (res 63–68)</b>
-    <span class="opacity-70">Second primary contact loop. C 15 trends MMP9-selective and is borderline on vendor-matched data; C 12 trends the same direction but isn't significant even matched (see Results). Up to 13 aa insertions tolerated.</span>
+    <span class="opacity-70">Second primary contact loop. C 12 and C 15 are supported as MMP9-selective on vendor-matched data (one day, replication pending; see Results). Up to 13 aa insertions tolerated.</span>
   </div>
   <div class="p-3 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px]">
     <b class="text-emerald-400 block mb-1">EF Loop (res 93–96)</b>
@@ -325,7 +325,7 @@ Three parallel design axes in the same synthesis order — not just an ADAM17 si
   <div class="p-4 bg-emerald-500/10 rounded border border-emerald-500/20 space-y-2">
     <h4 class="text-emerald-300 font-bold text-[11px] uppercase tracking-widest">MMP9-Selective (5)</h4>
     <p class="text-[10px] leading-relaxed opacity-70">
-      AB 1, AB 2, AB 6 (AB loop) and C 12, C 15 (C loop) — designed for M9&gt;M2 preference. AB 2 and AB 6 are confirmed on vendor-matched data (Enzo only, p=0.0004/0.0011) — pooling across manufacturers had masked this by averaging in non-equivalent constructs from other vendors. AB 1 and C 15 are borderline on the same matched data (p=0.07–0.09); C 12 trends the same direction but isn't significant even matched. The primary result of this campaign.
+      AB 1, AB 2, AB 6 (AB loop) and C 12, C 15 (C loop) — designed for M9&gt;M2 preference. On the raw per-cell Pos Med Ratio with vendor-matched data (Enzo only, n=2v2, independent cultures measured on one day), all five have MMP9 above MMP2 in every replicate (nominal Welch p=0.044, 0.008, 0.035, 0.016, 0.019; uncorrected). Pooling across manufacturers had masked this by averaging in non-equivalent constructs from other vendors. Replication across independent runs is pending. The primary result of this campaign.
     </p>
   </div>
   <div class="p-4 bg-blue-500/10 rounded border border-blue-500/20 space-y-2">
@@ -462,7 +462,7 @@ How do variants compare to TIMP3-WT on the <em>same</em> target?
       <b class="text-blue-400">Why normalize within-target:</b> Raw MMP9 and MMP2 baselines differ due to protein concentration, staining efficiency, and TIMP3 affinity per target. Dividing by TIMP3-WT for each target independently isolates construct-level effects from between-target scale differences.
     </div>
     <div class="p-2 bg-amber-500/10 rounded border border-amber-500/20 text-[9.5px] opacity-80">
-      <b class="text-amber-400">Interpretation:</b> Values near 1.0 = binding similar to TIMP3-WT for that target. Selectivity signal comes from the raw cross-target comparison — this normalized view confirms variants are not simply super-binders on every target.
+      <b class="text-amber-400">Interpretation:</b> Values near 1.0 = binding similar to TIMP3-WT for that target. Selectivity signal comes from the raw cross-target comparison — this normalized view indicates variants are not simply super-binders on every target.
     </div>
   </div>
 </div>
@@ -594,7 +594,7 @@ APC/FITC ratio for FITC+ cells, normalized to TIMP3-WT. Click group buttons to s
   </div>
   <div class="p-2 bg-white/5 rounded border border-white/10 opacity-80">
     <b class="text-emerald-400">Binding Efficiency</b><br/>
-    Fraction of expressors that bind. Cross-target. Primary selectivity proof.
+    Fraction of expressors that bind. Cross-target. Secondary selectivity readout; the primary metric is raw Pos Med Ratio (Key Findings).
   </div>
   <div class="p-2 bg-white/5 rounded border border-white/10 opacity-80">
     <b class="text-violet-400">Norm Median Ratio</b><br/>
@@ -607,7 +607,7 @@ APC/FITC ratio for FITC+ cells, normalized to TIMP3-WT. Click group buttons to s
 </div>
 
 <div class="mt-3 p-2.5 bg-amber-500/10 rounded border border-amber-500/20 text-[9px] opacity-80">
-  <b class="text-amber-400">Reads differently than Binding Efficiency (next slide):</b> on this continuous-intensity metric, AB 6/C 12/C 15 don't separate as cleanly from MMP2 as they do on the threshold-crossing Binding Efficiency metric — a real difference in what the two readouts are sensitive to, not a data error. Current full dataset (293 QC-passing trials through 2026-07-01).
+  <b class="text-amber-400">Metric choice:</b> the WT-normalized median ratio shown here differs from the raw per-cell Pos Med Ratio used for the headline test on the Key Findings slide, and from the threshold-crossing Binding Efficiency on the previous slide; the three metrics are sensitive to different features of the binding distribution, so each design is read on all of them. Current full dataset (293 QC-passing trials through 2026-07-01).
 </div>
 
 ---
@@ -615,8 +615,8 @@ layout: default
 transition: fade-out
 ---
 
-# Key Findings: Two Confirmed Hits, Once Vendor-Matched
-Pooling across manufacturers mixed non-equivalent target constructs and masked real signal. Restricted to the one internally-matched vendor (Enzo — same species, same catalytic domain for both targets), AB 2 and AB 6 are confirmed.
+# Key Findings: Five MMP9-Selective Designs Supported, One Day
+Pooling across manufacturers mixed non-equivalent target constructs and masked the signal. Restricted to the one internally-matched vendor (Enzo: same species, same catalytic domain for both targets) and scored on the raw per-cell Pos Med Ratio, MMP9 exceeds MMP2 in every replicate for all five designed constructs. All four replicates per design are independent cultures with separate label preps, but all were measured on one day (2026-04-24), so replication on a separate day is pending.
 
 <div class="mt-3">
   <SelectivityBars />
@@ -624,13 +624,13 @@ Pooling across manufacturers mixed non-equivalent target constructs and masked r
 
 <div class="grid grid-cols-3 gap-4 mt-3 text-[9px]">
   <div class="p-2 bg-emerald-500/10 rounded border border-emerald-500/20">
-    <b class="text-emerald-300">AB 2 / AB 6 — confirmed, vendor-matched:</b> human catalytic-domain MMP9 vs MMP2 (Enzo only, n=2v2): AB 2 p=0.0004, AB 6 p=0.0011. Both looked non-significant pooled (p=0.09, p=0.34) only because pooling averages in Sino's non-equivalent constructs.
+    <b class="text-emerald-300">Nominal Welch p (Enzo only, n=2v2, uncorrected):</b> AB 1 p=0.044 (3.1×), AB 2 p=0.008 (2.7×), AB 6 p=0.035 (2.4×), C 12 p=0.016 (2.8×), C 15 p=0.019 (2.2×). With five comparisons only AB 2 clears a Bonferroni threshold of 0.01, and a rank-based test cannot return p&lt;0.33 at n=2v2, so these are supportive rather than conclusive.
   </div>
   <div class="p-2 bg-blue-500/10 rounded border border-blue-500/20">
-    <b class="text-blue-300">AB 1 / C 15 — borderline; C 12 — not yet significant:</b> AB 1 (p=0.074) and C 15 (p=0.068) trend the same direction on the matched data but don't clear 0.05 at n=2v2; C 12 doesn't reach significance in the matched comparison either (p=0.155). None are false positives — all need more matched-vendor trials.
+    <b class="text-blue-300">Binding Efficiency reads more conservatively:</b> on the threshold-crossing fraction only AB 2 (p=0.0004) and AB 6 (p=0.0011) are significant matched; AB 1 (p=0.074) and C 15 (p=0.068) are borderline and C 12 (p=0.155) is not. The difference reflects what each metric retains, not an error in either analysis.
   </div>
   <div class="p-2 bg-amber-500/10 rounded border border-amber-500/20">
-    <b class="text-amber-400">Why pooling underpowered this — it's not just noise:</b> Sino's "MMP2" is mouse (missing the N-catalytic half TIMP3 actually binds) and its "MMP9" is full-length, not the catalytic domain Enzo/the design targets — documented construct mismatches, not measurement error. Controls still behaved: C 13/AB 5 stayed non-significant; WT TIMP3 shows a real native MMP9 preference (p=0.022, matched) the variants amplify.
+    <b class="text-amber-400">Why pooling hides this:</b> Sino's "MMP2" is mouse (missing the N-catalytic half TIMP3 binds) and its "MMP9" is full-length, not the catalytic domain Enzo and the designs target. Pooled Pos Med Ratio also reads significant for the non-selective controls C 13 (p=0.034) and AB 5 (p=0.060), a vendor-pooling artifact. TIMP3-WT is not significant matched (0.267 vs 0.084, p=0.141, n=3): its MMP9 preps gave 0.161 and 0.223 on 04-24 but 0.418 on 05-09, so between-day variation can exceed the within-day spread.
   </div>
 </div>
 
@@ -656,7 +656,7 @@ transition: fade-out
       </ul>
     </div>
     <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
-      <b class="text-amber-400">Reading this against the headline result:</b> The MMP9-vs-MMP2 result on the previous slide is the <i>narrow</i> confirmatory test on the 5 constructs explicitly designed for that axis, using vendor-matched data. This scorecard is the <i>broad</i> exploratory result across all 13 constructs on every design axis (MMP9, ADAM17, "Low"/"High"), most of which were underpowered (n=1&ndash;3 trials) and still pooled across vendors except where noted — a pairwise "Hit" here needs only the right direction, not significance, so it's a much looser bar. The two agree on <b>AB 2</b> and <b>AB 6</b> (Hit on both, and the two with significant vendor-matched tests); <b>C 15</b>/<b>C 12</b> are Hits here on direction alone, consistent with — not stronger than — their "borderline"/"not yet significant" status on the previous slide.
+      <b class="text-amber-400">Reading this against the headline result:</b> The MMP9-vs-MMP2 result on the previous slide is the <i>narrow</i> vendor-matched test on the 5 constructs explicitly designed for that axis, using vendor-matched data. This scorecard is the <i>broad</i> exploratory result across all 13 constructs on every design axis (MMP9, ADAM17, "Low"/"High"), most of which were underpowered (n=1&ndash;3 trials) and still pooled across vendors except where noted — a pairwise "Hit" here needs only the right direction, not significance, so it's a much looser bar. The two agree on all five designed MMP9 constructs: <b>AB 1</b>, <b>AB 2</b>, <b>AB 6</b>, <b>C 12</b>, and <b>C 15</b> are Hits here on direction alone, and are supported (nominal p&lt;0.05) on the vendor-matched Pos Med Ratio test, consistent with the supported, single-run status on the previous slide.
     </div>
   </div>
   <div class="space-y-3 flex flex-col items-center">
@@ -774,7 +774,7 @@ Raw AlphaFold3 confidence looks useless for ranking binding; a stickiness confou
       <b class="text-blue-400">Some constructs are just "sticky":</b> binding correlates strongly <em>across targets</em> for a given construct — a construct that binds one protease tends to bind them all, regardless of target. This general stickiness accounts for roughly two-thirds of the variance in binding scores; well under a third reflects genuine target-specific interaction, with a small remainder from baseline differences between targets themselves.
     </div>
     <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px] leading-relaxed opacity-80">
-      <b class="text-amber-400">Correcting for stickiness narrows the gap, but doesn't clear significance:</b> after removing each construct's stickiness, loop-pLDDT's correlation with the target-specific residual moves in the right direction (ρ=0.20, p=0.23, n=36) but isn't significant; ipTM stays flat (ρ=0.09, p=0.58). AB 2/AB 6's confirmed, vendor-matched selectivity result rests on its own wet-lab statistics, not on this AF-metric correlation — that finding doesn't depend on this correlation holding up.
+      <b class="text-amber-400">Correcting for stickiness narrows the gap, but doesn't clear significance:</b> after removing each construct's stickiness, loop-pLDDT's correlation with the target-specific residual moves in the right direction (ρ=0.20, p=0.23, n=36) but isn't significant; ipTM stays flat (ρ=0.09, p=0.58). AB 2/AB 6's supported, vendor-matched selectivity result rests on its own wet-lab statistics, not on this AF-metric correlation — that finding doesn't depend on this correlation holding up.
     </div>
     <div class="p-3 bg-red-500/10 rounded border border-red-500/20 text-[10px] leading-relaxed opacity-80">
       <b class="text-red-400">ipTM tracks expression, not binding:</b> ipTM correlates with how well a construct <em>expresses</em> (ρ=0.37, p=0.027) but not with target-specific binding (ρ=0.09, p=0.58), and is nearly saturated across these designs (0.77–0.90) — too compressed to rank fine differences.
@@ -994,7 +994,7 @@ Population-level signal from the most recent complete-enough window — hedged, 
 
 <div class="mt-4 grid grid-cols-2 gap-4">
   <div class="p-2.5 bg-white/5 rounded border border-white/10 text-[9px] opacity-70 leading-snug">
-    <b class="text-blue-400">Consistent with Round 1:</b> this deck's own first-generation result already carried a similar asymmetry — AB 2/AB 6 (MMP9&gt;MMP2, vendor-matched) are the confirmed hits; the equivalent ADAM17&gt;ADAM10 claim (AB 4) rested on weak ADAM10 data. Two independent generations now agree the ADAM17/ADAM10 axis is the harder one.
+    <b class="text-blue-400">Consistent with Round 1:</b> this deck's own first-generation result already carried a similar asymmetry — AB 2/AB 6 (MMP9&gt;MMP2, vendor-matched) are the supported hits; the equivalent ADAM17&gt;ADAM10 claim (AB 4) rested on weak ADAM10 data. Two independent generations now agree the ADAM17/ADAM10 axis is the harder one.
   </div>
   <div class="p-2.5 bg-amber-500/10 rounded border border-amber-500/20 text-[9px] opacity-80">
     <b class="text-amber-400">Not yet actionable:</b> no ordering/synthesis output exists from this pipeline yet — it's still early, and these percentages will be re-measured before any candidate is proposed.
@@ -1088,7 +1088,7 @@ transition: fade-out
     <ul class="text-[10px] space-y-2 opacity-80 list-none p-0 leading-snug">
       <li class="flex items-start gap-2">
         <div class="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-1 shrink-0"></div>
-        <span><b>SPR Kinetics (queued, top priority):</b> K<sub>D</sub>/k<sub>on</sub>/k<sub>off</sub> for AB 2, AB 6 (confirmed, vendor-matched) plus AB 1, C 15, C 12 vs. purified, construct-matched MMP9/MMP2 — direct comparison to marimastat/prinomastat, and a chance to settle the borderline cases with a proper single-source reagent pair.</span>
+        <span><b>SPR Kinetics (queued, top priority):</b> K<sub>D</sub>/k<sub>on</sub>/k<sub>off</sub> for AB 1, AB 2, AB 6, C 12, C 15 (supported, one day) vs. purified, construct-matched MMP9/MMP2 — direct comparison to marimastat/prinomastat, and an independent check with a proper single-source reagent pair.</span>
       </li>
       <li class="flex items-start gap-2">
         <div class="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1 shrink-0"></div>
@@ -1185,12 +1185,12 @@ class: text-center
 
 <div class="mt-8 grid grid-cols-3 gap-6 max-w-2xl mx-auto text-center">
   <div>
-    <div class="text-emerald-400 font-black text-2xl">p=0.0004</div>
-    <div class="text-[9px] opacity-40 uppercase tracking-widest mt-1">AB 2 — MMP9 &gt; MMP2, Vendor-Matched</div>
+    <div class="text-emerald-400 font-black text-2xl">p=0.008</div>
+    <div class="text-[9px] opacity-40 uppercase tracking-widest mt-1">AB 2 — MMP9 &gt; MMP2, Vendor-Matched (nominal, n=2v2)</div>
   </div>
   <div>
-    <div class="text-blue-400 font-black text-2xl">4.2×</div>
-    <div class="text-[9px] opacity-40 uppercase tracking-widest mt-1">Peak Selectivity (AB 2, vendor-matched)</div>
+    <div class="text-blue-400 font-black text-2xl">3.1×</div>
+    <div class="text-[9px] opacity-40 uppercase tracking-widest mt-1">Largest Fold (AB 1, vendor-matched Pos Med Ratio)</div>
   </div>
   <div>
     <div class="text-violet-400 font-black text-2xl">3</div>

@@ -19,6 +19,13 @@ __pycache__/
 Demonstrations/Papers/
 Demonstrations/SharedAssets/
 
+# Junctions inside each Slidev project's public/ that mirror the ignored
+# SharedAssets/Papers folders above (created so <img> tags can resolve them
+# via Vite's public-dir convention) -- must be ignored separately since git
+# doesn't know they're the same content at a different path.
+Demonstrations/Presentations/*/public/SharedAssets/
+Demonstrations/Presentations/*/public/PapersResources/
+
 # Slidev / Vue generated artifacts
 Demonstrations/Presentations/*/node_modules/
 Demonstrations/Presentations/*/dist/

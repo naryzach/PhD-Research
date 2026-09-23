@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<!--
+  Graduate Poster Symposium poster (draft). Size assumed 48 in x 36 in landscape
+  (4608 x 3456 px at 96 dpi); the symposium page lists no size. Confirm with gsa@unr.edu
+  and change WIDTH/HEIGHT in style.css and build_poster.py together if needed.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{ data.title }}</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="poster">
+
+  <header class="header">
+    <div class="header-text">
+      <h1>{{ data.title }}</h1>
+      <div class="authors">Ryan Gustafson<sup>1,2</sup>, Gavin Gallagher<sup>1</sup>, Maryam Raeeszadeh-Sarmazdeh<sup>1</sup></div>
+      <div class="affil"><sup>1</sup>Chemical and Materials Engineering, University of Nevada, Reno &nbsp;&nbsp; <sup>2</sup>Integrated Neuroscience Program, University of Nevada, Reno</div>
+    </div>
+    <div class="logo"><img src="figures/UNR_Logo.png" alt="UNR"><span>University of Nevada, Reno</span></div>
+  </header>
+
+  <main class="grid">
+
+    <!-- Column 1 -->
+    <div class="col c1">
+      <section class="card">
+        <h2>{{ data.background.title }}</h2>
+        {% for p in data.background.content.strip().split('
+
+') %}<p>{{ p }}</p>{% endfor %}
+      </section>
+
+      <section class="card">
+        <h2>{{ data.pipeline.title }}</h2>
+        {% for p in data.pipeline.content.strip().split('
+
+') %}<p>{{ p }}</p>{% endfor %}
+      </section>
+
+      <section class="card">
+        <h2>{{ data.assay.title }}</h2>
+        {% for p in data.assay.content.strip().split('
+
+') %}<p>{{ p }}</p>{% endfor %}
+        <table class="tbl small">
+          <thead><tr>{% for h in data.assay.headers %}<th>{{ h }}</th>{% endfor %}</tr></thead>
+          <tbody>{% for r in data.assay.rows %}<tr>{% for c in r %}<td>{{ c }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+        </table>
+      </section>
+
+      <section class="card grow">
+        <h2>{{ data.conclusions.title }}</h2>
+        {% for p in data.conclusions.content.strip().split('
+
+') %}<p>{{ p }}</p>{% endfor %}
+        <h2 class="h2small">{{ data.future.title }}</h2>
+        {% for p in data.future.content.strip().split('
+
+') %}<p>{{ p }}</p>{% endfor %}
+      </section>
+    </div>
+
+    <!-- Column 2 -->
+    <div class="col c2">
+      <section class="card">
+        <h2>Design and Screening Workflow</h2>
+        <img class="fig" src="{{ data.pipeline.figure }}" alt="Pipeline">
+        <p class="cap">{{ data.pipeline.caption }}</p>
+      </section>
+
+      <section class="card grow">
+        <h2>{{ data.results.title }}</h2>
+        <img class="fig" src="{{ data.results.figure }}" alt="MMP9 vs MMP2">
+        <p class="cap">{{ data.results.caption }}</p>
+        <div class="two">
+          <div class="text">
+            {% for p in data.results.content.strip().split('
+
+') %}<p>{{ p }}</p>{% endfor %}
+          </div>
+          <div class="tblwrap">
+            <table class="tbl">
+              <thead><tr>{% for h in data.results.table_headers %}<th>{{ h }}</th>{% endfor %}</tr></thead>
+              <tbody>{% for r in data.results.table_rows %}<tr>{% for c in r %}<td>{{ c }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+            </table>
+            <p class="cap">{{ data.results.table_note }}</p>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Column 3 -->
+    <div class="col c3">
+      <section class="card">
+        <h2>{{ data.structure.title }}</h2>
+        <img class="fig w1000" src="{{ data.structure.figure }}" alt="Interface">
+        <p class="cap">{{ data.structure.caption }}</p>
+        {% for p in data.structure.content.strip().split('
+
+') %}<p>{{ p }}</p>{% endfor %}
+      </section>
+
+      <section class="card grow">
+        <h2>{{ data.calibration.title }}</h2>
+        <img class="fig" src="{{ data.calibration.figure }}" alt="Calibration">
+        <p class="cap">{{ data.calibration.caption }}</p>
+        {% for p in data.calibration.content.strip().split('
+
+') %}<p>{{ p }}</p>{% endfor %}
+      </section>
+    </div>
+
+  </main>
+
+  <footer class="footer">
+    <div class="ack"><b>{{ data.acknowledgements.title }}.</b> {{ data.acknowledgements.content.strip() }}</div>
+    <ol class="reflist">{% for r in data.references %}<li>{{ r }}</li>{% endfor %}</ol>
+  </footer>
+</div>
+</body>
+</html>
