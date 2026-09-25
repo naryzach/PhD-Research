@@ -89,7 +89,7 @@ Experimental Pipeline
 | **ADAM17** | `cloop_only` | 348 | 30.7% | **0.750** | **0.329** | **0.263** |
 | **MMP3** | `everything_combined` | 5,610 | 92.4% | 0.804 | **0.252** | 0.055 |
 
-- **Key Takeaways:** MMP9 is the one consistently strong target (MCC ≈0.72). ADAM17 is modest but real everywhere (MCC ≈0.27–0.33). **MMP3's headline raw PR-AUC (≈0.98, not shown above) is a base-rate mirage** driven by its ~93% positive rate — true PR-lift is only 0.05–0.06 and MCC 0.19–0.25 regardless of variant; MMP3 predictions from this classifier should not be trusted for ranking until that class is rebalanced.
+- **Key Takeaways:** MMP9 is the best-performing target in the two pooled training slices (MCC ≈0.72) and varies widely across slices (MCC −0.01 to 0.72); the pooled slices also have the most held-out sequences within one mutation of a training sequence (84% and 98%, versus 26–64%). ADAM17 is modest but real everywhere (MCC ≈0.27–0.33). **MMP3's headline raw PR-AUC (≈0.98, not shown above) is a base-rate mirage** driven by its ~93% positive rate — true PR-lift is only 0.05–0.06 and MCC 0.19–0.25 regardless of variant; MMP3 predictions from this classifier should not be trusted for ranking until that class is rebalanced.
 
 ---
 
@@ -245,9 +245,9 @@ transition: fade-out
         Evaluation of ESM-C predicted probabilities against actual flow-cytometry binding measurements for 11 matched constructs.
       </p>
       <ul class="text-[10px] list-disc pl-4 space-y-1.5 opacity-70 mt-3">
-        <li><b>Not re-verified (2026-09-05):</b> ESM-C predicted probability was reported to correlate positively with raw binding (ADAM17 Pos Med Ratio: $\rho = 0.86^*$ on AB-loops; MMP9 Double+ %: $\rho = 0.62^*$ overall) — <b>but this run used the small ESM-C model (`ESMplusplus_small`)</b>, and the companion De_Novo_Binder_Generation paper's data-provenance audit separately flagged this exact claim as unconfirmed given the small $n$ (4–11) and how much the classifier landscape has changed since.</li>
-        <li><b>Generalization claim:</b> reported at the time for AB-loop insertions ($\rho=0.86^*$ ADAM17, $\rho=0.75$ MMP9); not re-derived from current data this pass.</li>
-        <li><b>Current basis for the deployment decision:</b> the confirmed-large-model held-out performance table (previous slides), not this unconfirmed wet-lab correlation.</li>
+        <li><b>Withdrawn (re-checked 2026-09-23):</b> ESM-C predicted probability was reported to correlate with raw binding (ADAM17 Pos Med Ratio: $\rho = 0.86$ on AB-loops; MMP9 Double+ %: $\rho = 0.62$ overall). It was the largest of 30 tests (Bonferroni p &lt; 0.0017), the ADAM17 probabilities spanned only 0.506 to 0.520, <b>the run used the small ESM-C model (`ESMplusplus_small`)</b>, and on the current data the same test gives $\rho = 0.68$ (p = 0.094). The MMP9 values were for Double+ %, a count fraction.</li>
+        <li><b>Generalization claim:</b> reported at the time for AB-loop insertions ($\rho=0.86$ ADAM17, $\rho=0.75$ MMP9 on Double+ %); not supported on re-check. Agreement with flow-cytometry outcomes has not been tested with the current large models.</li>
+        <li><b>Current basis for the deployment decision:</b> the confirmed-large-model held-out performance table (previous slides), not this wet-lab correlation.</li>
       </ul>
     </div>
     <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px]">
@@ -272,6 +272,6 @@ transition: fade-out
 - ESM-based classification provides a data-driven complement to generative design
 - Predictive models leverage evolutionary information for binding prediction
 - Comparative framework validates ML categorizations against *de novo* outputs
-- <span class="text-amber-400 text-[10px]">**Current status (2026-09-05):** 5-variant, confirmed-`ESMplusplus_large` comparison shows MMP9 strong (MCC≈0.72), ADAM17 modest (MCC≈0.33), and MMP3's high raw PR-AUC as a base-rate mirage (true PR-lift 0.05–0.06). Two open questions remain unresolved: an early small-vs-large model discrepancy, and a motif disagreement between two large-model MMP9 classifiers. The $\rho=0.86$ wet-lab correlation is unconfirmed and traces to the small model — see `ESM_Classification.tex` and `DATA_PROVENANCE.md`.</span>
+- <span class="text-amber-400 text-[10px]">**Current status (2026-09-05):** 5-variant, confirmed-`ESMplusplus_large` comparison shows MMP9 strongest in the pooled slices (MCC≈0.72, range −0.01 to 0.72 across slices), ADAM17 modest (MCC≈0.33), and MMP3's high raw PR-AUC as a base-rate mirage (true PR-lift 0.05–0.06). Two open questions remain unresolved: an early small-vs-large model discrepancy, and a motif disagreement between two large-model MMP9 classifiers. The $\rho=0.86$ wet-lab correlation was withdrawn on re-check (best of 30 tests, small model) — see `ESM_Classification.tex` and `DATA_PROVENANCE.md`.</span>
 
 

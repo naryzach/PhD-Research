@@ -67,13 +67,13 @@
     <div class="col c2">
       <section class="card">
         <h2>Design and Screening Workflow</h2>
-        <img class="fig" src="{{ data.pipeline.figure }}" alt="Pipeline">
+        <img class="fig w78" src="{{ data.pipeline.figure }}" alt="Pipeline">
         <p class="cap">{{ data.pipeline.caption }}</p>
       </section>
 
       <section class="card grow">
         <h2>{{ data.results.title }}</h2>
-        <img class="fig" src="{{ data.results.figure }}" alt="MMP9 vs MMP2">
+        <img class="fig w90" src="{{ data.results.figure }}" alt="MMP9 vs MMP2">
         <p class="cap">{{ data.results.caption }}</p>
         <div class="two">
           <div class="text">
@@ -89,6 +89,11 @@
             <p class="cap">{{ data.results.table_note }}</p>
           </div>
         </div>
+        {% if data.results.figure2 %}<img class="fig w90" src="{{ data.results.figure2 }}" alt="Fold by supplier">
+        <p class="cap">{{ data.results.caption2 }}</p>
+        {% for p in (data.results.content2 or "").strip().split('
+
+') %}<p>{{ p }}</p>{% endfor %}{% endif %}
       </section>
     </div>
 

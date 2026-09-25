@@ -33,12 +33,12 @@
 
       <section class="card">
         <h2>Design Pipeline</h2>
-        <p>Loop backbones were generated on the TIMP3 scaffold with RFdiffusion [6] (insertions of 6 to 15 residues in the AB and C loops, 4 to 10 in the EF loop; 25 backbones per target). ProteinMPNN [7] sampled sequences for each backbone, and candidates were co-folded with AlphaFold3 [8] against MMP2, MMP3, MMP9, and ADAM17.</p><p>Each variant was scored against its own cross-target mean (a self-normalized T-score), so that target-preferential variants rank above variants that score well on every target. From 549 co-fold results and 128 unique loop variants, 39 consensus candidates were identified and 15 were chosen by manual curation for synthesis.</p>
+        <p>Loop backbones were generated on the TIMP3 scaffold with RFdiffusion [6] (insertions of 6 to 15 residues in the AB and C loops, 4 to 10 in the EF loop; 25 backbones per target). ProteinMPNN [7] sampled sequences for each backbone, and candidates were co-folded with AlphaFold3 [8] against MMP2, MMP3, MMP9, and ADAM17.</p><p>Each variant was scored against its own cross-target mean (a self-normalized T-score), so that target-preferential variants rank above variants that score well on every target. From 549 co-fold results and 128 unique loop variants, 39 candidates were shortlisted by rank and 15 were chosen by manual curation for synthesis.</p>
       </section>
 
       <section class="card">
         <h2>Screening and Antigen Matching</h2>
-        <p>Constructs were displayed on EBY100 yeast and analyzed by flow cytometry. Display level was read from an epitope-tag stain (FITC) and target binding from APC fluorescence. The primary readout was the median APC/FITC ratio among expressing cells (Pos Med Ratio), which normalizes binding to display level. MMP9 and MMP2 signals were compared with a two-sample Welch t-test.</p><p>The three antigen suppliers do not provide equivalent molecules. Pooling trials across suppliers would compare different proteins under one target label, so selectivity was tested only on Enzo material, which supplies human catalytic-domain constructs for both targets.</p>
+        <p>Constructs were displayed on EBY100 yeast and analyzed by flow cytometry. Display level was read from an epitope-tag stain (FITC) and target binding from APC fluorescence. The primary readout was the median APC/FITC ratio among expressing cells (Pos Med Ratio), which normalizes binding to display level. MMP9 and MMP2 signals were compared with a two-sample Welch t-test.</p><p>The three antigen suppliers do not provide equivalent molecules. Pooling trials across suppliers would compare different proteins under one target label, so selectivity was tested only on Enzo material, which supplies human catalytic-domain constructs for both targets. The two Enzo constructs span the same number of residues but are produced in different hosts (MMP2 in yeast, MMP9 in E. coli).</p>
         <table class="tbl small">
           <thead><tr><th>Supplier</th><th>MMP2</th><th>MMP9</th></tr></thead>
           <tbody><tr><td>Enzo</td><td>human, catalytic domain</td><td>human, catalytic domain</td></tr><tr><td>Sino</td><td>mouse, lacks N-catalytic half</td><td>human, full length</td></tr><tr><td>Masoud (in-house)</td><td>not supplied</td><td>boundaries undocumented</td></tr></tbody>
@@ -47,9 +47,9 @@
 
       <section class="card grow">
         <h2>Conclusions</h2>
-        <p>Redesign of the TIMP3 loops produced five variants with higher MMP9 than MMP2 signal on matched antigen, consistent in every replicate. The evidence is limited to two independent preparations per group measured on one day, so the fold differences and p-values are provisional. Predicted interface confidence did not explain the target-specific component of binding, which was small relative to the construct-level component. A structural feature separating MMP9 from MMP2 binding was identified only for C 12.</p>
+        <p>All five variants designed for MMP9 preference bound MMP9 more strongly than MMP2 on matched antigen, in every replicate, and TIMP3-WT showed the same direction. The size of the difference did not separate the variants from WT, so the measurements are compatible with the campaign producing MMP9-selective binders but do not show that the redesign, rather than the TIMP3 scaffold, is the source of the preference. The self-normalized score used to rank candidates was not tested against these measurements. The evidence is limited to two separate cultures per group measured on one day, so the fold differences and p-values are provisional. Predicted interface confidence did not explain the target-specific component of binding, which was small relative to the construct-level component, and a structural feature separating MMP9 from MMP2 binding was identified only for C 12 in the top-ranked co-fold.</p>
         <h2 class="h2small">Next Steps</h2>
-        <p>Replication on separate days with independent preparations will test whether the five differences persist and estimate day-to-day variance. Surface plasmon resonance against purified, construct-matched MMP9 and MMP2 will measure dissociation constants and separate affinity from display-dependent avidity. A second design generation will score off-target binding during selection, and a sequence-based classifier (fine-tuned ESM-C) will be tested against the new measurements.</p>
+        <p>Replication on separate days will test whether the five differences persist, estimate day-to-day variance, and include WT on every day so that variants can be compared with WT directly. Soluble expression of the TIMP3 variants is not yet available, so a whole-cell inhibition assay, compared against WT-displaying cells at matched expression, is the nearer-term proxy for activity; once soluble protein is available, surface plasmon resonance against purified, construct-matched MMP9 and MMP2 would measure dissociation constants and separate affinity from display-dependent avidity. A second design generation will score off-target binding during selection, and a sequence-based classifier (fine-tuned ESM-C) will be tested against the new measurements.</p>
       </section>
     </div>
 
@@ -57,26 +57,29 @@
     <div class="col c2">
       <section class="card">
         <h2>Design and Screening Workflow</h2>
-        <img class="fig" src="figures/fig_pipeline.png" alt="Pipeline">
+        <img class="fig w78" src="figures/fig_pipeline.png" alt="Pipeline">
         <p class="cap">Figure 1. Design and screening workflow. Panel 1 shows the TIMP3-WT C loop masked as the RFdiffusion input (left) and the C 12 redesigned loop as output (right); panel 3 shows the C 12 co-fold with MMP9 colored by pLDDT.</p>
       </section>
 
       <section class="card grow">
         <h2>Selectivity for MMP9 Over MMP2</h2>
-        <img class="fig" src="figures/poster_fig2_selectivity.png" alt="MMP9 vs MMP2">
-        <p class="cap">Figure 2. Pos Med Ratio, one point per independent preparation; bars are means and n (MMP2/MMP9) is under each label. Dashed lines are TIMP3-WT means. Brackets give nominal, uncorrected Welch p-values for Enzo-only constructs; other constructs are pooled across suppliers and untested.</p>
+        <img class="fig w90" src="figures/poster_fig2_selectivity.png" alt="MMP9 vs MMP2">
+        <p class="cap">Figure 2. Pos Med Ratio for the five variants designed for MMP9 preference and TIMP3-WT on Enzo material (matched human catalytic-domain constructs). One point per separate culture; bars are means and n (MMP2/MMP9) is under each label. Brackets give nominal, uncorrected Welch p-values. Squares mark the second-day WT measurement (MMP9 0.418, against 0.161 and 0.223 on the first day), so between-day variation in one construct is comparable in size to the differences reported.</p>
         <div class="two">
           <div class="text">
-            <p>All five variants designed for MMP9 preference (AB 1, AB 2, AB 6, C 12, C 15) had higher MMP9 than MMP2 signal in every replicate, with 2.2 to 3.1-fold differences. Each group contains two independent cultures with separate label preparations, all measured on one day. With five comparisons, only AB 2 falls below a Bonferroni threshold of 0.01, and on the threshold-based Binding Efficiency metric only AB 2 and AB 6 reached significance.</p><p>TIMP3-WT was not significant (p = 0.141, n = 3). Its MMP9 values were 0.161 and 0.223 on the first day and 0.418 on a second day, so between-day variation in a single construct can be as large as the MMP9 to MMP2 differences reported here.</p>
+            <p>All five variants designed for MMP9 preference (AB 1, AB 2, AB 6, C 12, C 15) had higher MMP9 than MMP2 signal in every replicate, with 2.2 to 3.1-fold differences. Each group contains two separate cultures, grown in different wells and labeled with separately mixed fluorescent label preparations, all measured on one day. With five comparisons, only AB 2 falls below a Bonferroni threshold of 0.01.</p><p>TIMP3-WT showed the same direction: 2.4-fold on the same day as the variants (p = 0.16, n = 2) and 3.2-fold across all three Enzo replicates (p = 0.141, n = 3). The variants' folds were 0.93 to 1.28 times WT's fold on that day (target-by-construct interaction against WT, p = 0.32 to 1.00), and no variant had more than 7% higher MMP9 signal than WT. These measurements show that the scaffolds bind MMP9 more strongly than MMP2 in this assay; they do not separate the redesigned variants from WT.</p>
           </div>
           <div class="tblwrap">
             <table class="tbl">
-              <thead><tr><th>Construct</th><th>MMP2</th><th>MMP9</th><th>Fold</th><th>Welch p</th></tr></thead>
-              <tbody><tr><td>AB 1</td><td>0.065</td><td>0.199</td><td>3.1</td><td>0.044</td></tr><tr><td>AB 2</td><td>0.062</td><td>0.168</td><td>2.7</td><td>0.008</td></tr><tr><td>AB 6</td><td>0.063</td><td>0.150</td><td>2.4</td><td>0.035</td></tr><tr><td>C 12</td><td>0.072</td><td>0.206</td><td>2.8</td><td>0.016</td></tr><tr><td>C 15</td><td>0.079</td><td>0.179</td><td>2.2</td><td>0.019</td></tr><tr><td>TIMP3-WT</td><td>0.084</td><td>0.267</td><td>3.2</td><td>0.141</td></tr></tbody>
+              <thead><tr><th>Construct</th><th>MMP2</th><th>MMP9</th><th>Fold</th><th>Welch p</th><th>Bind Med fold (p)</th></tr></thead>
+              <tbody><tr><td>AB 1</td><td>0.065</td><td>0.199</td><td>3.1</td><td>0.044</td><td>6.7 (0.040)</td></tr><tr><td>AB 2</td><td>0.062</td><td>0.168</td><td>2.7</td><td>0.008</td><td>6.4 (0.027)</td></tr><tr><td>AB 6</td><td>0.063</td><td>0.150</td><td>2.4</td><td>0.035</td><td>6.7 (<0.001)</td></tr><tr><td>C 12</td><td>0.072</td><td>0.206</td><td>2.8</td><td>0.016</td><td>6.8 (0.020)</td></tr><tr><td>C 15</td><td>0.079</td><td>0.179</td><td>2.2</td><td>0.019</td><td>4.7 (0.056)</td></tr><tr><td>TIMP3-WT</td><td>0.084</td><td>0.267</td><td>3.2</td><td>0.141</td><td>7.3 (0.052)</td></tr></tbody>
             </table>
-            <p class="cap">Enzo material only. Mean Pos Med Ratio; n = 2 per group (3 for TIMP3-WT).</p>
+            <p class="cap">Enzo material only. Mean Pos Med Ratio; n = 2 per group (3 for TIMP3-WT). Last column: MMP9:MMP2 fold in the median APC signal of FITC-positive cells (Bind Med (Expr+)), shown for comparison.</p>
           </div>
         </div>
+        <img class="fig w90" src="figures/poster_fig3_fold_by_supplier.png" alt="Fold by supplier">
+        <p class="cap">Figure 3. MMP9:MMP2 fold in Pos Med Ratio (ratio of group means) for every construct measured against both targets, by supplier. Enzo constructs are matched human catalytic domains (triangles: one trial per target, run on a different day); Sino MMP2 and MMP9 are not matched (table, left). MMP9 exceeded MMP2 for every construct at both suppliers, and the size of the difference depended on the supplier (1.1 to 2.0-fold at Sino, 1.9 to 3.9-fold at Enzo). On Enzo material the five variants (2.2 to 3.1-fold) fell within the range of the other constructs, none of which were designed for MMP9 preference.</p>
+        <p></p>
       </section>
     </div>
 
@@ -85,15 +88,15 @@
       <section class="card">
         <h2>Interface Geometry</h2>
         <img class="fig w1000" src="figures/poster_fig3_interface.png" alt="Interface">
-        <p class="cap">Figure 3. TIMP3-chain residues within 5 Å of the target (red) in AlphaFold3 co-folds. Each MMP2 co-fold is superimposed on its MMP9 co-fold by TIMP3-chain C-alpha atoms (RMSD 5.27 Å for C 12, 0.57 Å for AB 2).</p>
-        <p>Shape and charge complementarity, catalytic-loop occlusion, and buried surface area were compared between each variant's MMP9 and MMP2 co-folds. Shape complementarity differed by 0.03 or less for all five variants, and no single feature tracked selectivity across them.</p><p>C 12 was the exception. Its interface contained 26 TIMP3-chain residues at MMP9 and 18 at MMP2, with a buried-surface-area difference of +180 Å², and its redesigned loop adopted a different conformation against each target. AB 2 contacted 19 and 18 residues with the same loop conformation. These are single static predictions and do not distinguish a structural effect from binding kinetics or avidity.</p>
+        <p class="cap">Figure 4. TIMP3-chain residues within 5 Å of the target (red) in the top-ranked AlphaFold3 co-fold of each complex. Each MMP2 co-fold is superimposed on its MMP9 co-fold by TIMP3-chain C-alpha atoms (RMSD 5.27 Å for C 12, 0.57 Å for AB 2).</p>
+        <p>Shape and charge complementarity, catalytic-loop occlusion, and buried surface area were compared between each variant's MMP9 and MMP2 co-folds. Shape complementarity differed by 0.03 or less for all five variants, and no single feature tracked selectivity across them.</p><p>C 12 was the exception in the top-ranked co-fold. Its interface contained 26 TIMP3-chain residues at MMP9 and 18 at MMP2, with a buried-surface-area difference of +180 Å², and its redesigned loop adopted a different conformation against each target. Across all five AlphaFold3 models of each complex, the C 12 interface was larger at MMP9 in four (mean difference +4 residues, range -1 to +8) and the loop conformation differed between targets in three, so the asymmetry is smaller and less consistent than the top-ranked model suggests. AB 2 contacted 19 and 18 residues in the top-ranked model (mean difference -0.4 across models) with the same loop conformation. These are static predictions and do not distinguish a structural effect from binding kinetics or avidity.</p>
       </section>
 
       <section class="card grow">
         <h2>Calibration of Predicted Metrics</h2>
         <img class="fig" src="figures/poster_fig4_calibration.png" alt="Calibration">
-        <p class="cap">Figure 4. Left: variance decomposition of binding (12 constructs, 3 targets). Right: Spearman correlation of AlphaFold3 metrics with display level and with the target-specific residual (n = 36 construct-target pairs).</p>
-        <p>A construct-level component, which reflects general binding strength across targets, accounted for 64% of the variance in binding, the target baseline for 7%, and the target-specific interaction for 29%. After the construct component was removed, AlphaFold3 metrics did not correlate significantly with target-specific binding (ipTM rho = 0.09, p = 0.58; loop pLDDT rho = 0.20, p = 0.23). ipTM did correlate with display level (rho = 0.37, p = 0.027).</p>
+        <p class="cap">Figure 5. Left: variance decomposition of binding (12 constructs; targets MMP2, MMP9, and ADAM17). Binding is Pos Med Ratio normalized to the same-plate TIMP3-WT, pooled across suppliers. Right: Spearman correlation of AlphaFold3 metrics with display level and with the target-specific residual (n = 36 construct-target pairs; the pairs share constructs, so the p-values are approximate).</p>
+        <p>A construct-level component, which reflects general binding strength across targets, accounted for 64% of the variance in binding, the target baseline for 7%, and the target-specific interaction for 29%. After the construct component was removed, AlphaFold3 metrics did not correlate significantly with target-specific binding (ipTM rho = 0.09, p = 0.58; loop pLDDT rho = 0.20, p = 0.23). ipTM did correlate with display level (rho = 0.37, p = 0.027). This analysis pools suppliers, because only six constructs have matched MMP2 and MMP9 material, so the target components include supplier differences.</p>
       </section>
     </div>
 

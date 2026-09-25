@@ -5,7 +5,7 @@ html, body { margin: 0; padding: 0; }
 body {
   width: 4608px; height: 3456px; overflow: hidden;
   font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-  font-size: 29px; line-height: 1.36; color: #1e293b;
+  font-size: 26px; line-height: 1.34; color: #1e293b;
   background: #eef3f9;
 }
 .poster { width: 4608px; height: 3456px; padding: 44px; display: flex; flex-direction: column; gap: 36px; }
@@ -26,29 +26,32 @@ body {
 .card.grow { flex: 1 1 auto; }
 h2 { margin: 0 0 10px 0; font-size: 56px; line-height: 1.1; color: #0b2545; font-weight: 700; }
 h2.h2small { font-size: 50px; margin-top: 26px; }
-p { margin: 0 0 18px 0; text-align: left; }
+p { margin: 0 0 14px 0; text-align: left; }
 .fig { display: block; width: 100%; height: auto; border-radius: 10px; }
-.cap { font-size: 25px; line-height: 1.35; color: #475569; margin: 10px 0 16px 0; }
+.cap { font-size: 23px; line-height: 1.35; color: #475569; margin: 10px 0 16px 0; }
 .tiny { font-size: 27px; line-height: 1.38; }
 
 .two { display: grid; grid-template-columns: 1fr 720px; gap: 40px; align-items: start; }
 .two.narrow { grid-template-columns: 1fr; }
 .figcol .fig { border: 1px solid #e2e8f0; }
 
-.tbl { width: 100%; border-collapse: collapse; font-size: 32px; margin-top: 8px; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 29px; margin-top: 8px; }
 .tbl th { text-align: left; background: #e6eef8; color: #0b2545; padding: 10px 12px; border-bottom: 3px solid #1d6fb8; font-weight: 700; }
 .tbl td { padding: 9px 12px; border-bottom: 1px solid #e2e8f0; }
-.tbl.small { font-size: 29px; }
+.tbl.small { font-size: 26px; }
 .tblwrap .tbl td:nth-child(n+2), .tblwrap .tbl th:nth-child(n+2) { text-align: right; }
 
 .reflist { margin: 0; padding-left: 0; list-style: none; font-size: 24px; line-height: 1.32; color: #334155; }
 .reflist li { margin-bottom: 6px; }
 
-.fig.w1000 { width: 1000px; margin: 0 auto; }
+.fig.w1000 { width: 820px; margin: 0 auto; }
 .footer { flex: 0 0 auto; display: grid; grid-template-columns: 1.1fr 2fr; gap: 40px; background: #fff; border-radius: 20px; padding: 22px 36px; border-top: 8px solid #1d6fb8; }
 .footer .ack { font-size: 23px; line-height: 1.34; }
 .footer .reflist { columns: 2; column-gap: 40px; font-size: 21px; line-height: 1.28; margin: 0; padding: 0; list-style: none; }
 .footer .reflist li { break-inside: avoid; margin-bottom: 4px; }
-.tblwrap .tbl { font-size: 28px; }
+.tblwrap .tbl { font-size: 25px; }
 .tblwrap .tbl td { padding: 5px 10px; }
 .tblwrap .tbl th { padding: 7px 10px; }
+.fig.w78 { width: 74%; margin: 0 auto; }
+.fig.w90 { width: 82%; margin: 0 auto; }
+.tblwrap .tbl th, .tblwrap .tbl td { white-space: nowrap; }

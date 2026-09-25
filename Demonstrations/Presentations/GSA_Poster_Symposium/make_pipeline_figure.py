@@ -95,7 +95,7 @@ panel_frame(ax4, COLORS["select"], "4", "Best-Binder Selection")
 p4 = ax4.get_position()
 ax4s = fig.add_axes(inset(p4, 0.08, 0.16, 0.84, 0.64))
 ax4s.set_xlim(0, 10); ax4s.set_ylim(0, 5.5); ax4s.axis("off")
-stages = [("Raw AF3 co-folds", 549, 9.6), ("Unique loop variants", 128, 8.4), ("Consensus shortlist", 39, 7.2), ("Ordered library", 15, 6.0)]
+stages = [("Raw AF3 co-folds", 549, 9.6), ("Unique loop variants", 128, 8.4), ("Shortlist", 39, 7.2), ("Ordered library", 15, 6.0)]
 for i, (label, count, width) in enumerate(stages):
     y = 4.55 - i * 1.15
     left = (10 - width) / 2
@@ -105,7 +105,7 @@ for i, (label, count, width) in enumerate(stages):
     ax4s.text(5, y + 0.36, f"{label}  (n={count})", ha="center", va="center", fontsize=12.5, fontweight="bold", color="#123")
     if i < len(stages) - 1:
         ax4s.annotate("", xy=(5, y - 0.12), xytext=(5, y - 0.02), arrowprops=dict(arrowstyle="-|>", color="#1f9e5a", lw=1.8))
-ax4.text(0.5, 0.075, "Consensus rank on 3 or more metrics\nthen manual curation to 15", ha="center", va="center", fontsize=12.5, color="#333")
+ax4.text(0.5, 0.075, "Top-ranked per metric and target\nthen manual curation to 15", ha="center", va="center", fontsize=12.5, color="#333")
 
 # ---------- Panel 5: Twist Bioscience (plasmid map) ----------
 ax5 = fig.add_subplot(gs[1, 1])

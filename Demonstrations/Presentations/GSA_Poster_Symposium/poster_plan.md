@@ -10,7 +10,7 @@ The abstract submission deadline (Sunday, October 11, 11:59 p.m.) is the referen
 
 ## Abstract
 
-Draft in `abstract.md` (about 285 words, with a 150-word version). It reports the vendor-matched MMP9 versus MMP2 result with its limits (n = 2 independent preparations per group, one measurement day, uncorrected p-values), the interface-geometry comparison, and the calibration of AlphaFold3 metrics against measured binding. Framing is basic science (how loop sequence and structure set selectivity between homologous active sites); clinical relevance appears only as background.
+Draft in `abstract.md` (about 296 words, with a 150-word version). It reports the vendor-matched MMP9 versus MMP2 result with its limits (n = 2 separate cultures per group, one measurement day, uncorrected p-values), the interface-geometry comparison, and the calibration of AlphaFold3 metrics against measured binding. Framing is basic science (how loop sequence and structure set selectivity between homologous active sites); clinical relevance appears only as background.
 
 ## Poster
 
