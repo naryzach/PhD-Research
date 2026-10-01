@@ -246,7 +246,7 @@ transition: fade-out
       </p>
       <ul class="text-[10px] list-disc pl-4 space-y-1.5 opacity-70 mt-3">
         <li><b>Withdrawn (re-checked 2026-09-23):</b> ESM-C predicted probability was reported to correlate with raw binding (ADAM17 Pos Med Ratio: $\rho = 0.86$ on AB-loops; MMP9 Double+ %: $\rho = 0.62$ overall). It was the largest of 30 tests (Bonferroni p &lt; 0.0017), the ADAM17 probabilities spanned only 0.506 to 0.520, <b>the run used the small ESM-C model (`ESMplusplus_small`)</b>, and on the current data the same test gives $\rho = 0.68$ (p = 0.094). The MMP9 values were for Double+ %, a count fraction.</li>
-        <li><b>Generalization claim:</b> reported at the time for AB-loop insertions ($\rho=0.86$ ADAM17, $\rho=0.75$ MMP9 on Double+ %); not supported on re-check. Agreement with flow-cytometry outcomes has not been tested with the current large models.</li>
+        <li><b>Generalization claim:</b> reported at the time for AB-loop insertions ($\rho=0.86$ ADAM17, $\rho=0.75$ MMP9 on Double+ %); not supported on re-check. Scored with the current large models (2026-09-24), the pooled MMP9 head agreed with flow cytometry ($\rho = 0.71$, p = 0.010, n = 12; the one comparison fixed in advance), but the other MMP9 heads ($\rho = 0.02$ to $0.40$) and the ADAM17 head ($\rho = -0.30$) did not, and the correlation depended on the antigen supplier ($\rho = +0.05$ against the matched Enzo MMP9).</li>
         <li><b>Current basis for the deployment decision:</b> the confirmed-large-model held-out performance table (previous slides), not this wet-lab correlation.</li>
       </ul>
     </div>
@@ -255,12 +255,12 @@ transition: fade-out
     </div>
   </div>
   <div class="space-y-3 flex flex-col items-center">
-    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/fig6_esmc_vs_fcs.png"
+    <img src="../../SharedAssets/figures/De_Novo_Binder_Generation/fig_esmc_vs_fcs_current.png"
          alt="ESM-C vs FCS Binding Validation"
          class="w-full rounded-lg border border-white/10 shadow-sm"
          style="max-height: 280px; object-fit: contain;">
     <p class="text-[9px] opacity-40 italic text-center">
-      ESM-C predicted probability vs. measured binding ratios (July 8).
+      Current everything_combined MMP9 head vs. measured MMP9 Pos Med Ratio (2026-09-24), pooled and by antigen supplier. The correlation is +0.81 against the in-house preparation, +0.39 against Sino, and +0.05 against the matched Enzo antigen. (The July 8 figure used the small model and is withdrawn.)
     </p>
   </div>
 </div>

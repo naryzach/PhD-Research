@@ -150,8 +150,8 @@ Six stages from backbone hallucination to experimentally validated selectivity. 
   <div class="flex-none w-4 flex items-center justify-center text-blue-400 text-xl">→</div>
   <div class="flex-1 min-w-0 flex flex-col items-center p-2 bg-emerald-500/10 rounded border border-emerald-500/30 text-center">
     <div class="text-emerald-400 font-black text-xl mb-1">④</div>
-    <div class="text-[11px] font-bold text-white mb-2">T-Score Filter</div>
-    <div class="text-[9px] opacity-50 leading-relaxed">T > 2.0, ≥2 metrics<br/>ipTM ≥ 0.82<br/>13 candidates selected<br/>for synthesis</div>
+    <div class="text-[11px] font-bold text-white mb-2">Rank-Based Shortlist</div>
+    <div class="text-[9px] opacity-50 leading-relaxed">Top 10 per metric; ApTM ≥ 0.80<br/>549 → 128 → 39 shortlisted<br/>manual curation to 15<br/>for synthesis</div>
   </div>
   <div class="flex-none w-4 flex items-center justify-center text-blue-400 text-xl">→</div>
   <div class="flex-1 min-w-0 flex flex-col items-center p-2 bg-amber-500/10 rounded border border-amber-500/30 text-center">
@@ -184,9 +184,9 @@ Computational filtering (stages ①–④) vs experimental validation (stages �
     <h3 class="text-blue-400 font-bold uppercase text-xs tracking-widest border-b border-blue-500/20 pb-1">Computational Phase</h3>
     <div class="p-3 bg-blue-500/5 rounded border border-blue-500/15 space-y-2 text-[10px] leading-relaxed opacity-80">
       <p><b class="text-blue-300">HADDOCK templates:</b> Each target provides a docked starting structure. Scaffold residues are frozen in all subsequent stages — only loop backbone (①) and sequence (②) vary.</p>
-      <p><b class="text-blue-300">T-score normalization:</b> Each variant is scored relative to its own mean across all targets — not the population. A mediocre global binder with one uniquely-high target score earns a high T. This explicitly selects preferential binders, not globally strong ones.</p>
-      <p><b class="text-blue-300">Multi-metric consensus:</b> T > 2.0 required on ≥2 independent AF3 metrics (ipTM, loop pLDDT, interface PAE). Prevents noise-driven false positives from a single metric.</p>
-      <p><b class="text-blue-300">Generation scale:</b> >1,000 designed sequences narrowed to 13 synthesis candidates. This is a shotgun-generation strategy — the large starting pool buys shots on goal, not a precision funnel; the filter's job is picking a synthesizable batch, not proving itself efficient.</p>
+      <p><b class="text-blue-300">T-score normalization:</b> Each variant is scored relative to its own mean across all targets — not the population. A mediocre global binder with one uniquely-high target score earns a high T. This is intended to favor preferential binders over globally strong ones; it has not been tested against the wet-lab results.</p>
+      <p><b class="text-blue-300">Rank-based consensus:</b> for each of three metrics (loop pLDDT, interface PAE, ipTM) the top 10 variants are flagged, and a variant flagged on 3 or more is a consensus winner. No hard T &gt; 2.0 cutoff is applied in the code.</p>
+      <p><b class="text-blue-300">Selection funnel:</b> 549 raw AF3 co-fold results, 128 unique variants (126 with all four targets), a 39-variant shortlist (top 3 per category and target, ApTM ≥ 0.80), then a manual choice of 15 for synthesis (13 gave QC-passing flow data). The last step is not scripted.</p>
     </div>
   </div>
   <div class="space-y-3">
@@ -219,11 +219,11 @@ Five independent structural confidence signals per co-folded complex.
 <div class="grid grid-cols-5 gap-3 mt-8">
   <div class="p-4 bg-blue-500/10 rounded border border-blue-500/20 space-y-2 text-center">
     <div class="text-blue-400 font-black text-base">pTM</div>
-    <div class="text-[10px] opacity-60 leading-relaxed">Global complex TM-score. Hard threshold ≥ 0.80. Confirms overall fold integrity of the TIMP3–target complex.</div>
+    <div class="text-[10px] opacity-60 leading-relaxed">Predicted TM-score of the whole prediction; the binder chain's own pTM (ApTM) is the one gated: mean across targets ≥ 0.80 on the shortlist.</div>
   </div>
   <div class="p-4 bg-cyan-500/10 rounded border border-cyan-500/20 space-y-2 text-center">
     <div class="text-cyan-400 font-black text-base">ipTM</div>
-    <div class="text-[10px] opacity-60 leading-relaxed">Interface TM-score. Hard threshold ≥ 0.82. Most sensitive to loop-mediated binding geometry. Primary selection gatekeeper.</div>
+    <div class="text-[10px] opacity-60 leading-relaxed">Interface TM-score. One of the three metrics ranked for consensus (with loop pLDDT and interface PAE); the code applies no hard ipTM threshold.</div>
   </div>
   <div class="p-4 bg-violet-500/10 rounded border border-violet-500/20 space-y-2 text-center">
     <div class="text-violet-400 font-black text-base">Mean pLDDT</div>
@@ -244,7 +244,7 @@ Five independent structural confidence signals per co-folded complex.
     <b class="text-blue-400">Why five metrics?</b> Each captures a different aspect of the predicted interface: global fold (pTM), interface quality (ipTM), whole-structure confidence (mean pLDDT), loop-specific confidence (loop pLDDT), geometric precision (PAE). A binder that scores high on all five is more likely to be a true positive than one that excels on only one.
   </div>
   <div class="p-3 bg-white/5 rounded border border-white/10 text-[10px] opacity-70 leading-relaxed">
-    <b class="text-cyan-400">Selection logic:</b> Hard thresholds (ipTM ≥ 0.82, pTM ≥ 0.80) are applied first as gates. Remaining candidates are ranked by T-score — a self-normalized metric that compares each variant against its own cross-target distribution, not the population. See next slide for T-score details.
+    <b class="text-cyan-400">Selection logic:</b> Variants are ranked per metric (self-normalized T-score across targets, then rank-based consensus on loop pLDDT, interface PAE, and ipTM), and the shortlist requires the mean binder-chain pTM (ApTM) to be at least 0.80. See next slide for details.
   </div>
 </div>
 
@@ -298,7 +298,7 @@ transition: fade-out
 ---
 
 # T-Score Results — Statistical Significance Matrix
-Filter by loop type; scroll for all variants. Green = T > 2.0 (significant win on that target).
+Filter by loop type; scroll for all variants. Green = T > 2.0, a display threshold only (not a selection cutoff in the pipeline).
 
 <div class="mt-4" style="height: calc(100vh - 140px);">
   <TScoreTable />
@@ -395,7 +395,7 @@ transition: fade-out
 ---
 
 # Flow Cytometry Metrics
-Six quantitative metrics extracted per sample.
+Seven metrics extracted per sample (one is QC only).
 
 <div class="mt-4">
   <MetricExplorer />
@@ -619,8 +619,8 @@ transition: fade-out
 # Key Findings: Five Designs Bind MMP9 More Strongly Than MMP2, as Does Wild Type
 Enzo only (same species, same catalytic domain for both targets), raw per-cell Pos Med Ratio. MMP9 exceeds MMP2 in every replicate for all five designs, and TIMP3-WT shows the same direction, so the data do not separate the designs from the scaffold. Two separate cultures per group (different wells, separately mixed label preps), measured on one day (2026-04-24); replication on a separate day is pending.
 
-<div class="mt-3 flex justify-center">
-  <img src="/SharedAssets/figures/De_Novo_Binder_Generation/fig_mmp9_vs_mmp2_matched.png" class="h-[250px] rounded bg-white" />
+<div class="mt-3">
+  <SelectivityBars />
 </div>
 
 <div class="grid grid-cols-3 gap-4 mt-3 text-[9px]">
@@ -1157,7 +1157,7 @@ Held-out classifier performance across 5 training-data variants: MMP9 is stronge
       <b class="text-emerald-400">Best MMP9 variant (`everything_combined`):</b> ROC-AUC 0.955, PR-AUC 0.845, MCC 0.721, F1 0.753 (n=8,059). `mmp9_other`, trained on a much larger, more realistic MMP9-only dataset, is close behind (MCC 0.716). Both far outperform the small-data variants (MCC 0.43-0.45) and `cloop_only` (MCC ≈0, chance).
     </div>
     <div class="p-3 bg-amber-500/10 rounded border border-amber-500/20 text-[10px] leading-relaxed opacity-80">
-    <b class="text-amber-400">Prior wet-lab correlation claim (ρ=0.86, n=7): withdrawn 2026-09-23.</b> It was the largest of 30 tests, the ADAM17 probabilities spanned only 0.506 to 0.520, the predictions came from the small model, and on the current data it is ρ=0.68 (p=0.094). Agreement with flow-cytometry outcomes has not been tested with the current models.
+    <b class="text-amber-400">Prior wet-lab correlation claim (ρ=0.86, n=7): withdrawn 2026-09-23.</b> It was the largest of 30 tests, the ADAM17 probabilities spanned only 0.506 to 0.520, the predictions came from the small model, and on the current data it is ρ=0.68 (p=0.094). Scored with the current large models (2026-09-24), the pooled MMP9 head agreed with flow cytometry (ρ=0.71, p=0.010, n=12; the one comparison fixed in advance), but the other MMP9 heads (ρ=0.02 to 0.40) and the ADAM17 head (ρ=-0.30) did not. It also depended on the antigen supplier (ρ=+0.81 in-house, +0.39 Sino, +0.05 matched Enzo MMP9).
     </div>
     <div class="p-3 bg-blue-500/10 rounded border border-blue-500/20 text-[10px] opacity-80">
       <b class="text-blue-400">Open question, not yet resolved:</b> `mmp9_other`'s completed C-loop enumeration (2026-09-05) lands on a different top motif (<code>PYGSLC</code>) than `all3_original`'s (<code>LSPTTL</code>) for the same target — both confirmed current large-model runs. Not picked one way or the other pending investigation.

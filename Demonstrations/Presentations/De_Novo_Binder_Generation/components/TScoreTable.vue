@@ -60,7 +60,7 @@
 
     <div class="footer mt-4 flex justify-between items-center px-2">
       <div class="legend flex gap-4 text-[7px] uppercase font-bold tracking-widest">
-        <div class="flex items-center gap-1"><div class="w-2 h-2 bg-emerald-500/20 border-l-2 border-emerald-500"></div> Significant Win</div>
+        <div class="flex items-center gap-1"><div class="w-2 h-2 bg-emerald-500/20 border-l-2 border-emerald-500"></div> T &gt; 2.0 (display threshold)</div>
         <div class="flex items-center gap-1"><div class="w-2 h-2 bg-yellow-500/10 border-l-2 border-yellow-500"></div> Marginal</div>
         <div class="flex items-center gap-1"><div class="w-2 h-2 bg-rose-500/20 border-l-2 border-rose-500"></div> Underperformer</div>
       </div>

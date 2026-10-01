@@ -13,7 +13,7 @@
         </button>
       </div>
       <div class="flex gap-3 text-[7px] uppercase tracking-wide font-bold opacity-60">
-        <span class="flex items-center gap-1"><span class="dot confirmed"></span>Supported (nominal p&lt;0.05)</span>
+        <span class="flex items-center gap-1"><span class="dot confirmed"></span>MMP9 &gt; MMP2 (nominal p&lt;0.05)</span>
         <span class="flex items-center gap-1"><span class="dot directional"></span>Directional (borderline or n.s.)</span>
         <span class="flex items-center gap-1"><span class="dot control"></span>Control</span>
       </div>
@@ -49,7 +49,7 @@ import { ref, computed } from 'vue'
 import libraryData from '../../../SharedAssets/data/De_Novo_Binder_Generation/final_library.json'
 
 const hovered = ref(null)
-const activeGroup = ref('MMP9-Selective')
+const activeGroup = ref('MMP9 Preference')
 
 const displayedVariants = computed(() => libraryData[activeGroup.value] || [])
 
